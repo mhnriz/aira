@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Added native Aira BUILD / PLAN / REVIEW modes with a `Shift+Tab` cycle (BUILD → PLAN → REVIEW → BUILD), unnamespaced `/mode` and `/doctor` commands, and an always-visible mode indicator in the footer. PLAN is enforced read-only at the host/tool-policy boundary: the mutating built-in tools (`bash`, `powershell`, `edit`, `write`) are blocked and hidden, and the user `!bash` escape hatch is refused, while reading/search/inspection tools stay usable. The default thinking-cycle shortcut moved from `Shift+Tab` to `Ctrl+Shift+E`; existing user keybindings are preserved. `/status` now reflects the native mode.
+
 ## [0.84.3] - 2026-08-24
 
 ### New Features

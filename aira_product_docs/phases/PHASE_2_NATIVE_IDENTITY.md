@@ -38,7 +38,7 @@ src/aira/
 ├── paths.ts              canonical Aira home path helpers + resource registry (new)
 ├── migration.ts          optional Pi→Aira import engine (new)
 ├── commands/status.ts    /status now reports product identity and home
-├── commands/import.ts    `aria import --pi` CLI command (new)
+├── commands/import.ts    `aira import --pi` CLI command (new)
 ├── lifecycle.ts          unchanged (Phase 1)
 └── state.ts              unchanged (Phase 1)
 ```
@@ -69,11 +69,11 @@ existing `config.ts` helpers (all `get*Dir`/`get*Path`) now resolve under
   the legacy `PI_CODING_AGENT_DIR` env name is still honored.
 - Pi's official first-time-setup is gated to the official distribution
   (`isOfficialDistribution`); Aira skips it (its own onboarding lands later).
-- `aria/pi update`, managed installs, and self-update remain Pi-oriented until
+- `aira/pi update`, managed installs, and self-update remain Pi-oriented until
   Aira distribution exists (Phase 14). The `pi` alias `--version` now reports
   the Aira identity, which contains the Pi base version.
 
-## Optional Pi migration — `aria import --pi`
+## Optional Pi migration — `aira import --pi`
 
 Detects `~/.pi/agent`, copies supported resources into `~/.aira/agent`
 (settings, keybindings, models, models-store, trust, themes, skills, prompts,
@@ -84,7 +84,7 @@ successful import records `~/.aira/migration.json`. Normal operation never
 reads `~/.pi`. Project-local `.pi/` content is not auto-migrated (documented
 limitation; `--session-dir` / manual copy available).
 
-Verified end-to-end with an isolated `HOME`: `aria import --pi` copied
+Verified end-to-end with an isolated `HOME`: `aira import --pi` copied
 settings/extensions/sessions, skipped `auth.json`, and wrote the marker; the
 dry run copied nothing and created no `~/.aira`.
 

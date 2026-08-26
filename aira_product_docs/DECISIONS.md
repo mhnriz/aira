@@ -400,3 +400,26 @@ Evidence from the Phase 1 runtime characterization suite (`test/suite/agent-sess
 - A stale owner's disposal must never transition state; subsystems must not assume dispose-by-id semantics.
 - Aira session release cannot be routed through pi-ai's anonymous session-resource cleanup registry (it has no ownership channel). Instead `AgentSession.dispose()` calls the Aira bridge directly with the stored handle.
 - Resuming a session file currently open elsewhere therefore yields a fresh canonical state, not a resurrected one.
+
+## ADR-020 — Native modes are host-enforced; PLAN is read-only at the tool-policy boundary
+
+**Status:** Accepted
+
+### Decision
+
+- The interactive host exposes the native mode cycle BUILD → PLAN → REVIEW → BUILD owned by the canonical `AiraSessionState` (`state.mode`). Mode semantics (`cycleAiraMode`, `setAiraMode`, tool classification, display labels) live in a dedicated `src/aira/modes.ts` module; nothing else writes the mode.
+- `app.mode.cycle` (default `Shift+Tab`) drives the mode cycle interactively, alongside the unnamespaced `/mode` command (ADR-017). It is added to the editor-global reserved set for extension-conflict diagnostics.
+- The default thinking-cycle shortcut moves from `Shift+Tab` to `Ctrl+Shift+E`. User keybindings load from `~/.aira/agent/keybindings.json` and override defaults, so a user who bound the thinking cycle (or anything else) to `Shift+Tab` keeps it; the default move only changes behavior for users who never customized it.
+- PLAN is genuinely read-only at host/tool-policy level, not a system-prompt suggestion: (1) `AgentSession.beforeToolCall` blocks every built-in mutating tool (`bash`, `powershell`, `edit`, `write`) in PLAN even if one is present in the registry; (2) entering PLAN restricts the active tool set to read-only tools (`read`, `grep`, `find`, `ls`) and remembers/restores the prior set; (3) the interactive user `!bash` escape hatch is refused in PLAN. Reading, search, inspection, and other safe operations remain usable.
+- REVIEW establishes native state, a footer indicator, and inspection-oriented policy semantics but keeps its tool set (it is not the independent verifier; that is a later phase).
+- The Phase 3 UI absorbs `pi-polished-ui` ideas (single clean always-visible mode surface, ANSI-safe truncation) as native host UI. Aira does not depend on the standalone `pi-polished-ui` extension.
+
+### Rationale
+
+ADR-006 commits Aira to native modes and a `Shift+Tab` cycle, and ADR-005 makes the canonical session state the single owner of mode. Genuine read-only must be enforced where tool execution happens (the host boundary), not only in the prompt, or the model could modify the workspace in PLAN. Keeping mode semantics in one module prevents a second mode owner and makes the enforcement boundary auditable. The thinking shortcut move is the documented expectation in ADR-006 and AIRA_ARCHITECTURE.md §5.
+
+### Consequences
+
+- A user who never customized the thinking cycle gets `Shift+Tab` for modes and `Ctrl+Shift+E` for thinking; a user who customized either keeps their binding (possible overlap is resolved by insertion order, matching Pi's existing editor behavior).
+- Plan mode is a strict subset of tool capability now; the future planning engine (roadmap Phase 5) is deliberately absent — this phase establishes the mode and its enforcement boundary only.
+- Extension tools are not classified as mutating by Aira (only the built-ins are), so an extension-registered mutation-capable tool could in principle run in PLAN. This is a documented Phase 3 limitation; a future phase can classify extension tools or gate them explicitly.
