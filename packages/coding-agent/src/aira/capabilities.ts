@@ -83,7 +83,7 @@ export function isAiraNetworkCapability(name: string): boolean {
 
 /** Human label for a capability class (doctor/reporting). */
 export function airaCapabilityClassLabel(cls: AiraClassifiedCapability): string {
-	const labels: Record<AiraClassifiedCapability, string> = {
+	const labels = {
 		"read-only": "read-only",
 		diagnostic: "diagnostic",
 		mutating: "mutating",
@@ -91,8 +91,8 @@ export function airaCapabilityClassLabel(cls: AiraClassifiedCapability): string 
 		network: "network",
 		browser: "browser",
 		unknown: "unknown",
-	};
-	return labels[cls] ?? "unknown";
+	} satisfies Record<AiraClassifiedCapability, string>;
+	return labels[cls as keyof typeof labels] ?? "unknown";
 }
 
 /** Every built-in read-only tool name (source of truth for PLAN availability). */
