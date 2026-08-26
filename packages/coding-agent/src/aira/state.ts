@@ -27,7 +27,7 @@ export interface AiraSessionState {
 	readonly startReason: AiraSessionStartReason;
 	/** When this state was acquired (ms since epoch). */
 	readonly createdAt: number;
-	/** Phase 1: always "build". */
+	/** Native interaction mode; cycle/set via the modes module (Shift+Tab). */
 	mode: AiraMode;
 	/** "active" while the session lives; "disposed" after host teardown. */
 	runtime: AiraRuntimeStatus;
