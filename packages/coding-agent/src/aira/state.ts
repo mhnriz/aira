@@ -13,9 +13,10 @@
  * competing copy of the truth.
  */
 
+import type { AiraProjectProfile } from "./project/profile.ts";
+
 export type AiraMode = "build" | "plan" | "review";
 export type AiraRuntimeStatus = "active" | "disposed";
-export type AiraProjectStatus = "unresolved";
 export type AiraCapability = "core";
 /** Mirrors the Pi host SessionStartEvent reasons. */
 export type AiraSessionStartReason = "startup" | "reload" | "new" | "resume" | "fork";
@@ -31,8 +32,8 @@ export interface AiraSessionState {
 	mode: AiraMode;
 	/** "active" while the session lives; "disposed" after host teardown. */
 	runtime: AiraRuntimeStatus;
-	/** Phase 1: always "unresolved" (project awareness is a later phase). */
-	project: AiraProjectStatus;
+	/** Detected project profile; undefined until the host resolves it. */
+	project: AiraProjectProfile | undefined;
 	/** Phase 1: always ["core"]. */
 	capabilities: readonly AiraCapability[];
 	/** Set when the owning session was disposed. */
@@ -40,7 +41,6 @@ export interface AiraSessionState {
 }
 
 export const DEFAULT_AIRA_MODE: AiraMode = "build";
-export const DEFAULT_AIRA_PROJECT: AiraProjectStatus = "unresolved";
 export const DEFAULT_AIRA_CAPABILITIES: readonly AiraCapability[] = ["core"];
 
 const sessionStates = new Map<string, AiraSessionState>();
@@ -65,7 +65,7 @@ export function acquireAiraSessionState(
 		createdAt: Date.now(),
 		mode: DEFAULT_AIRA_MODE,
 		runtime: "active",
-		project: DEFAULT_AIRA_PROJECT,
+		project: undefined,
 		capabilities: DEFAULT_AIRA_CAPABILITIES,
 	};
 	sessionStates.set(sessionId, state);
