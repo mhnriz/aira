@@ -4,6 +4,8 @@
 
 ### Added
 
+- Added native Aira project awareness: an evidence-based, lightweight `ProjectProfile` (root, Git, languages, frameworks, package managers, test/build/dev commands, browser relevance, deployment hints, confidence) is derived at session start and stored in the canonical Aira session state. Detection stays within a home safety boundary (the home directory is never a giant project) and prefers the nearest defensible project root. The profile is surfaced through `/status` and `/doctor`.
+
 - Added native Aira BUILD / PLAN / REVIEW modes with a `Shift+Tab` cycle (BUILD → PLAN → REVIEW → BUILD), unnamespaced `/mode` and `/doctor` commands, and an always-visible mode indicator in the footer. PLAN is enforced read-only at the host/tool-policy boundary: the mutating built-in tools (`bash`, `powershell`, `edit`, `write`) are blocked and hidden, and the user `!bash` escape hatch is refused, while reading/search/inspection tools stay usable. The default thinking-cycle shortcut moved from `Shift+Tab` to `Ctrl+Shift+E`; existing user keybindings are preserved. `/status` now reflects the native mode.
 
 ## [0.84.3] - 2026-08-24

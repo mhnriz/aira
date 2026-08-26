@@ -423,3 +423,25 @@ ADR-006 commits Aira to native modes and a `Shift+Tab` cycle, and ADR-005 makes 
 - A user who never customized the thinking cycle gets `Shift+Tab` for modes and `Ctrl+Shift+E` for thinking; a user who customized either keeps their binding (possible overlap is resolved by insertion order, matching Pi's existing editor behavior).
 - Plan mode is a strict subset of tool capability now; the future planning engine (roadmap Phase 5) is deliberately absent — this phase establishes the mode and its enforcement boundary only.
 - Extension tools are not classified as mutating by Aira (only the built-ins are), so an extension-registered mutation-capable tool could in principle run in PLAN. This is a documented Phase 3 limitation; a future phase can classify extension tools or gate them explicitly.
+
+## ADR-021 — Project scope is derived from the nearest defensible root within home; canonical session state owns the project profile
+
+**Status:** Accepted
+
+### Decision
+
+- Project awareness derives a bounded, evidence-based `ProjectProfile` (`src/aira/project/`) from repository signals — Git markers, manifests, build files, languages, frameworks, package managers, conventional test/build/dev commands, browser-relevance heuristics, deployment/CI hints — and stores it in the canonical `AiraSessionState.project` (ADR-005). No subsystem owns a competing project profile.
+- Project scope is a safety boundary. Detection never treats the user's home directory — or any parent of it — as one giant project; the climb for a project root stops at the home boundary and prefers the **nearest** defensible root (a directory carrying a Git marker or a recognized manifest/build file).
+- Detection is lightweight and synchronous: bounded top-level reads only, never a repository index or semantic model. Confidence (`none`/`low`/`medium`/`high`) reflects the strength and count of evidence (Git + distinct languages + deployment + browser relevance), not certainty.
+- The project profile is surfaced through the existing native `/status` and `/doctor` surfaces only; no new slash command and no UI expansion.
+
+### Rationale
+
+The roadmap (Phase 4) requires Aira to understand the workspace before invoking expensive capabilities, while explicitly excluding repo indexing/semantic intelligence (Phase 5+). The home boundary prevents classifying an arbitrary home directory as one giant project, and "nearest defensible root" yields a stable, defensible project identity (e.g. a monorepo subpackage with its own manifest, or the enclosing Git root otherwise). Holding the profile in canonical state keeps every mode and future subsystem observing the same project and avoids a competing project-state owner.
+
+### Consequences
+
+- `AiraSessionState.project` changes from a placeholder `"unresolved"` string to `AiraProjectProfile | undefined` (undefined = not yet resolved by the host).
+- Detection runs eagerly at `AgentSession` construction from the session cwd, so interactive, print, RPC, and SDK sessions all carry a profile.
+- Confidence is deliberately conservative; a bare Git repo without manifests is `low`, and anything at or above the home boundary is `none`.
+- This phase intentionally does not add browser/process/LSP/intelligence; those remain Phase 5+.

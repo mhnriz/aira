@@ -42,8 +42,8 @@ Stopping point / next phase
 | 1 — Aira Core Seam | ✅ done 2026-08-26 | [PHASE_1_CORE_SEAM.md](PHASE_1_CORE_SEAM.md) | canonical `AiraSessionState`, lifecycle bridge, native `/status` |
 | 2 — Native Identity and `~/.aira/` | ✅ done 2026-08-26 | [PHASE_2_NATIVE_IDENTITY.md](PHASE_2_NATIVE_IDENTITY.md) | `aira` executable, Aira product metadata, `~/.aira/` home + path helpers, optional `aira import --pi` |
 | 3 — Native Modes and UX | ✅ done 2026-08-26 | [PHASE_3_NATIVE_MODES_UX.md](PHASE_3_NATIVE_MODES_UX.md) | BUILD/PLAN/REVIEW cycle (`Shift+Tab`), PLAN read-only at tool-policy boundary, `/mode` + `/doctor`, footer mode badge |
-| 4 — Project Awareness | ⏳ next | — | — |
-| 5 — Intelligence | — | — | — |
+| 4 — Project Awareness | ✅ done 2026-08-27 | [PHASE_4_PROJECT_AWARENESS.md](PHASE_4_PROJECT_AWARENESS.md) | evidence-based `ProjectProfile` in canonical state; root/languages/frameworks/managers/commands/browser/deployment/confidence; home safety boundary |
+| 5 — Intelligence | ⏳ next | — | — |
 | 6 — Execution Runtime | — | — | — |
 | 7 — Browser Runtime | — | — | — |
 | 8 — Independent Verification | — | — | — |
