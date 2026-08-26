@@ -445,3 +445,48 @@ The roadmap (Phase 4) requires Aira to understand the workspace before invoking 
 - Detection runs eagerly at `AgentSession` construction from the session cwd, so interactive, print, RPC, and SDK sessions all carry a profile.
 - Confidence is deliberately conservative; a bare Git repo without manifests is `low`, and anything at or above the home boundary is `none`.
 - This phase intentionally does not add browser/process/LSP/intelligence; those remain Phase 5+.
+
+## ADR-022 — Native capability classification is the semantic contract for host policy; unknown capabilities stay PLAN-permissive
+
+**Status:** Accepted
+
+### Decision
+
+- Aira classifies capabilities with a small semantic vocabulary: `read-only`, `diagnostic`, `mutating`, `process`, `network`, `browser`, and `unknown`. The built-in tools classify as read-only (`read`, `grep`, `find`, `ls`), mutating (`edit`, `write`), or process (`bash`, `powershell`); `diagnostic`, `network`, and `browser` are reserved for future native operations (intelligence tools, web research, browser automation).
+- The PLAN read-only gate (`isAiraMutatingCapability`) derives from the classification: `mutating` + `process` are blocked. `isAiraCapabilityReadOnly` (read-only + diagnostic) is the wider "safe in a read-only context" predicate.
+- Unknown/third-party capabilities are **never** flagged mutating, so existing Pi extension tools keep working in PLAN without adopting Aira metadata (documented extension of the ADR-020 limitation, now stated as a classification rule rather than an absence of logic).
+
+### Rationale
+
+ADR-020 records that PLAN's host enforcement cannot semantically classify arbitrary extension tools. Phase 5 introduces native intelligence operations that must interact with mode policy, so a semantic contract is needed instead of an ever-growing hard-coded tool-name list. The vocabulary is derived from actual host needs today; nothing larger (permissions framework, per-tool policies) is built in this phase.
+
+### Consequences
+
+- `modes.ts` delegates `isAiraMutatingTool` to the classification; `AIRA_MUTATING_TOOLS` stays as the auditable built-in set.
+- Future native intelligence/model tools must classify read-only or diagnostic; mutating/process classification gates them in PLAN.
+- Third-party extensions remain unclassified by Aira (documented, not silently assumed safe — the classification simply does not apply to them).
+
+## ADR-023 — Aira intelligence is a native service: activation from the canonical project profile, bounded providers, ambient context, honest degradation
+
+**Status:** Accepted
+
+### Decision
+
+- Intelligence is a host service owned by the session coordinator (`src/aira/intelligence/`), not a bag of model tools: the harness decides when intelligence activates (from `AiraSessionState.project`, ADR-021), which operations run (post-edit diagnostics, prompt-time context injection, mode-weighted emphasis), what evidence reaches the model (bounded context packs), and how failures degrade.
+- Two native providers sit behind the provider surface: **repository** (bounded file-level index: languages, symbols, imports/imported-by, source/test counterparts, lexical discovery, git changed files; JSON cache under `~/.aira/agent/cache/` — never the workspace) and **live-code** (project-scoped, lazy, reused language servers for TypeScript/JavaScript, Python, Go, Rust, C/C++, C#; minimal JSON-RPC LSP client; post-edit diagnostics; warm-only navigation; idle eviction; crash cooldown).
+- Persistence is JSON-under-the-Aira-home, **not SQLite**, for this phase. Evidence: the reference implementation's `better-sqlite3` native addon fails to build on the verified Node 25.9.0 / macOS arm64 baseline (no prebuilt binary; node-gyp fails against V8 headers) and Phase 5's file-level index has no query workload requiring SQL. Node 25 ships a zero-dependency built-in `node:sqlite` (FTS5-capable) if a later phase's graph genuinely needs SQL; storage stays behind the provider boundary so the choice stays replaceable.
+- Ambient behavior: at `AgentSession` construction the coordinator arms (fire-and-forget); `prompt()` injects one bounded context message (project orientation once, live-code availability once, likely files from the lexical index, changed files, diagnostics excluding stale findings, REVIEW impact); after each successful edit/write tool execution the coordinator reindexes the path and requests LSP diagnostics (debounced); identical content is never re-injected. No intelligence operation mutates the workspace (caches live under the Aira home), so PLAN needs no special gate beyond what the host already enforces; the coordinator additionally skips post-edit diagnostic runs in PLAN.
+- Mode weighting: BUILD gets the full funnel; PLAN is read-only and gets orientation + likely files + availability (+ diagnostics if present); REVIEW emphasizes diagnostics, changed files, impact (imported-by), and counterparts.
+- Health: the coordinator publishes an `AiraIntelligenceStatus` snapshot into canonical state (`state.intelligence`); `/doctor` reports it (repository/live-code/findings/degraded). `/status` remains restrained (unchanged).
+- Degradation is the default contract: no project → inactive; unsupported languages → no server; missing language server → plain search; crashed server → cooldown + respawn; failed scan/cache → partial index. Nothing in the intelligence service can throw into session startup or tool execution.
+
+### Rationale
+
+Phase 5 studied `pi-lens` and `pi-codeontime-code-intelligence` as laboratory references. The proven ideas worth adopting natively: lifecycle-driven activation, post-edit diagnostics, findings freshness (mtime vs collection time with an explicit indeterminate verdict), bounded lazy LSP lifecycle, working-set heuristics (changed files, counterparts, lexical discovery), and honest degradation. What was deliberately NOT adopted this phase: embeddings/semantic retrieval (lexical + structural + LSP evidence already serves the funnel; no network or model dependency may gate local understanding), big graph/entity machinery, chunking, file watchers, learnings, review agents, and the 35+ runner ecosystem. Those are deferred or rejected, documented in the Phase 5 report. The reference extensions remain installed specimens; Aira does not depend on either.
+
+### Consequences
+
+- `AiraSessionState.intelligence` is a new canonical snapshot field written only by the coordinator (ADR-005 preserved).
+- `AgentSession` gains four narrow seams: arm at construction, context injection in `prompt()`, agent-event subscription (turns + tool executions), and provider disposal; `airaSessionState` getter added for tests/diagnostics.
+- A later phase can replace either provider behind `providers/index.ts` without touching the coordinator, and can switch persistence to `node:sqlite` behind the cache module.
+- Prompt-time cost is bounded: context building is synchronous over in-memory structures; LSP work happens only in the post-edit pipeline and warm navigation; the repository scan runs in the background at session start.

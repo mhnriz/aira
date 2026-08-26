@@ -107,6 +107,7 @@ AiraSessionState
 ├── plan
 ├── taskGraph
 ├── project
+├── intelligence      (health snapshot, Phase 5)
 ├── workingSet
 ├── capabilities
 ├── activeProcesses
@@ -199,54 +200,35 @@ Project scope is a safety boundary. Aira must not treat the user's entire home d
 
 ## 8. Capability router
 
-Aira should expose a native capability abstraction so implementations remain replaceable.
-
-Initial capabilities:
+Aira exposes a native capability classification contract (ADR-022) so host policy can reason semantically:
 
 ```text
-repo-intelligence
-live-code-intelligence
-web-research
-browser
-process
-tests
-git
-subagents
+read-only    read, grep, find, ls
+mutating     edit, write
+process      bash, powershell
+diagnostic   reserved for native intelligence operations
+network      reserved (web research)
+browser      reserved (Phase 7)
+unknown      third-party tools (never flagged mutating; PLAN-permissive)
 ```
 
-Conceptual provider contract:
-
-```text
-CapabilityProvider
-├── id
-├── available()
-├── health()
-├── activate()
-├── deactivate()
-└── features[]
-```
-
-The router activates only capabilities useful to the current task/project.
+Routine capabilities activate from lifecycle/intent, not manual commands (ADR-007).
 
 ## 9. Repository intelligence
 
-Repository intelligence should answer:
+Repository intelligence answers:
 
 > What code and relationships matter to the current objective?
 
-The initial implementation may adapt `pi-codeontime-code-intelligence` rather than immediately reproduce its indexing, graph, semantic retrieval, and learning machinery.
-
-Aira owns when retrieval occurs and how much context reaches the model.
+Phase 5 ships a native bounded file-level index (ADR-023): languages, symbols, imports/imported-by, source/test counterparts, lexical discovery, and git changed files, persisted as a JSON cache under the Aira home. It is a service (activation from the canonical project profile, ambient context selection) rather than a pile of tools. Embeddings/semantic retrieval and large graph machinery are deferred; no network or model call gates local understanding. Storage stays behind the provider boundary (`node:sqlite` is the zero-dependency upgrade path if a later phase needs SQL).
 
 ## 10. Live code intelligence
 
-Live code intelligence should answer:
+Live code intelligence answers:
 
 > What does the actual language/toolchain say about the code now?
 
-`pi-lens` is the initial reference/possible engine because it already provides mature LSP, diagnostics, lint/type/format pipelines, structural checks, impact cascades, and freshness handling.
-
-Aira owns orchestration and supervision. Lens does not own Aira's workflow.
+Phase 5 ships a native minimal LSP client with project-scoped, lazy, reused language servers (TypeScript/JavaScript, Python, Go, Rust, C/C++, C#), post-edit diagnostics, warm-only navigation, idle eviction, and crash degradation. Missing servers degrade to plain search. The reference implementations (pi-lens, pi-codeontime-code-intelligence) were studied as laboratory specimens; Aira does not depend on either.
 
 ## 11. Execution runtime
 
@@ -462,3 +444,4 @@ Canonical Aira paths remain under `~/.aira/` — `~/.aira/agent` for the Pi-comp
 15. Mature machinery is not rewritten without a measured reason.
 16. The existing `engineering-loop` is not part of this architecture.
 17. Development uses frequent local Git commits; publishing/pushing is a separate action.
+18. Intelligence is a native host service: activation comes from the canonical project profile, context is a bounded budget, and degraded providers fall back to plain Pi behavior (ADR-023).
