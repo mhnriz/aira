@@ -13,14 +13,16 @@
  *  - the thinking-cycle keybinding default moved off Shift+Tab to Ctrl+Shift+E
  *    (so a user who never customized Shift+Tab gets mode cycling);
  *  - the PLAN read-only boundary classifies the mutating built-in tools and
- *    keeps the read-only inspection tools available.
+ *    keeps the read-only inspection tools available;
+ *  - the canonical session state carries a resolved project profile (Phase 4).
  *
- * Later phases extend this with project/capability/runtime health.
+ * Later phases extend this with capability/runtime health.
  */
 import { CONFIG_DIR_NAME } from "../../config.ts";
 import { KEYBINDINGS } from "../../core/keybindings.ts";
 import { AIRA_MODE_CYCLE, AIRA_MUTATING_TOOLS, AIRA_READ_ONLY_TOOLS } from "../modes.ts";
 import { displayPathUnderHome, getAiraHome } from "../paths.ts";
+import { summarizeAiraProject } from "../project/profile.ts";
 import type { AiraSessionState } from "../state.ts";
 
 export interface AiraDoctorCheck {
@@ -95,6 +97,13 @@ export function buildAiraDoctorReport(state: AiraSessionState | undefined): Aira
 		name: "plan read-only",
 		pass: mutating.length === 4 && readOnly.length === 4,
 		detail: `blocked: ${mutating.join(", ")} | allowed: ${readOnly.join(", ")}`,
+	});
+
+	// 6. Project awareness: canonical state carries a resolved project profile.
+	checks.push({
+		name: "project",
+		pass: state?.project !== undefined,
+		detail: state?.project ? summarizeAiraProject(state.project) : "not resolved yet (project awareness wiring)",
 	});
 
 	return { product: "Aira doctor", home: displayPathUnderHome(home), checks };

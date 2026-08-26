@@ -3,7 +3,6 @@ import {
 	acquireAiraSessionState,
 	DEFAULT_AIRA_CAPABILITIES,
 	DEFAULT_AIRA_MODE,
-	DEFAULT_AIRA_PROJECT,
 	disposeAiraSessionState,
 	getActiveAiraSessionStates,
 	getAiraSessionState,
@@ -18,8 +17,7 @@ describe("AiraSessionState", () => {
 		expect(state.mode).toBe(DEFAULT_AIRA_MODE);
 		expect(state.mode).toBe("build");
 		expect(state.runtime).toBe("active");
-		expect(state.project).toBe(DEFAULT_AIRA_PROJECT);
-		expect(state.project).toBe("unresolved");
+		expect(state.project).toBeUndefined();
 		expect(state.capabilities).toEqual(DEFAULT_AIRA_CAPABILITIES);
 		expect(state.capabilities).toEqual(["core"]);
 		expect(state.disposedAt).toBeUndefined();

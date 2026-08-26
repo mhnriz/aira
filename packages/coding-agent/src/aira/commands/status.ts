@@ -12,6 +12,7 @@
  */
 import { formatAiraVersion } from "../meta.ts";
 import { displayPathUnderHome, getAiraHome } from "../paths.ts";
+import { summarizeAiraProject } from "../project/profile.ts";
 import type { AiraSessionState } from "../state.ts";
 
 export interface AiraStatusReport {
@@ -42,7 +43,7 @@ export function buildAiraStatusReport(state: AiraSessionState | undefined): Aira
 		sessionId: state.sessionId,
 		runtime: state.runtime,
 		mode: state.mode,
-		project: state.project,
+		project: summarizeAiraProject(state.project),
 		capabilities: state.capabilities.length === 0 ? "none" : state.capabilities.join(", "),
 	};
 }

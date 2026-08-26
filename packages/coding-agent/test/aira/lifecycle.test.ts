@@ -71,7 +71,8 @@ describe("Aira lifecycle seam with AgentSession", () => {
 			expect(state).toBeDefined();
 			expect(state!.mode).toBe("build");
 			expect(state!.runtime).toBe("active");
-			expect(state!.project).toBe("unresolved");
+			expect(state!.project).toBeDefined();
+			expect(state!.project?.root).toBeUndefined();
 			expect(state!.capabilities).toEqual(["core"]);
 			expect(state!.startReason).toBe("startup");
 

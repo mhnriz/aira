@@ -19,7 +19,7 @@ describe("Aira /status command", () => {
 			sessionId: "status-1",
 			runtime: "active",
 			mode: "build",
-			project: "unresolved",
+			project: "none",
 			capabilities: "core",
 		});
 	});
@@ -53,7 +53,7 @@ describe("Aira /status command", () => {
 				"runtime: active",
 				"session: status-3",
 				"mode: build",
-				"project: unresolved",
+				"project: none",
 				"capabilities: core",
 			].join("\n"),
 		);
