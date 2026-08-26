@@ -13,6 +13,7 @@
  * competing copy of the truth.
  */
 
+import type { AiraIntelligenceStatus } from "./intelligence/status.ts";
 import type { AiraProjectProfile } from "./project/profile.ts";
 
 export type AiraMode = "build" | "plan" | "review";
@@ -34,6 +35,8 @@ export interface AiraSessionState {
 	runtime: AiraRuntimeStatus;
 	/** Detected project profile; undefined until the host resolves it. */
 	project: AiraProjectProfile | undefined;
+	/** Intelligence health snapshot; undefined until the coordinator runs. */
+	intelligence: AiraIntelligenceStatus | undefined;
 	/** Phase 1: always ["core"]. */
 	capabilities: readonly AiraCapability[];
 	/** Set when the owning session was disposed. */
@@ -66,6 +69,7 @@ export function acquireAiraSessionState(
 		mode: DEFAULT_AIRA_MODE,
 		runtime: "active",
 		project: undefined,
+		intelligence: undefined,
 		capabilities: DEFAULT_AIRA_CAPABILITIES,
 	};
 	sessionStates.set(sessionId, state);

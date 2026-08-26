@@ -120,7 +120,41 @@ export function buildAiraDoctorReport(state: AiraSessionState | undefined): Aira
 		detail: state?.project ? summarizeAiraProject(state.project) : "not resolved yet (project awareness wiring)",
 	});
 
+	// 8. Intelligence service: activation decision + health snapshot.
+	const intelligence = state?.intelligence;
+	if (!intelligence) {
+		checks.push({
+			name: "intelligence",
+			pass: false,
+			detail: "no intelligence snapshot (coordinator wiring)",
+		});
+	} else if (!intelligence.active) {
+		checks.push({
+			name: "intelligence",
+			pass: true,
+			detail: `inactive: ${intelligence.activationReason}`,
+		});
+	} else {
+		const live = intelligence.liveCode;
+		const repo = intelligence.repository;
+		const repoLine = `${repo.status} (${repo.filesIndexed} files${repo.cacheLoaded ? ", cached" : ""}${repo.changesAvailable ? `, ${repo.changeCount ?? 0} changed` : ""})`;
+		const liveLine = liveCodeLine(live);
+		checks.push({
+			name: "intelligence",
+			pass: !intelligence.degraded,
+			detail: `repository: ${repoLine} | ${liveLine} | findings: ${intelligence.findings.errors} errors / ${intelligence.findings.warnings} warnings`,
+		});
+	}
+
 	return { product: "Aira doctor", home: displayPathUnderHome(home), checks };
+}
+
+function liveCodeLine(live: { status: string; servers: Array<{ available: boolean }>; crashCount: number }): string {
+	if (live.status === "ready") {
+		return `live-code: ready (${live.servers.filter((s) => s.available).length} server(s))`;
+	}
+	const crashes = live.crashCount > 0 ? ` (${live.crashCount} crash(es))` : "";
+	return `live-code: ${live.status}${crashes}`;
 }
 
 export function formatAiraDoctorReport(report: AiraDoctorReport): string {

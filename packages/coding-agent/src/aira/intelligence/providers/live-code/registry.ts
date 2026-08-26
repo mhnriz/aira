@@ -76,7 +76,7 @@ export function lspLanguageIds(repositoryLanguage: string): string[] {
 		cpp: ["cpp"],
 		csharp: ["csharp"],
 	} satisfies Record<string, string[]>;
-	const ids = byRepositoryLanguage[repositoryLanguage as keyof typeof byRepositoryLanguage];
+	const ids = byRepositoryLanguage[repositoryLanguage.toLowerCase() as keyof typeof byRepositoryLanguage];
 	return ids ?? [];
 }
 

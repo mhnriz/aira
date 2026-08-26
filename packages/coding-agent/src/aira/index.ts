@@ -10,6 +10,7 @@ export * from "./commands/doctor.ts";
 export * from "./commands/import.ts";
 export * from "./commands/mode.ts";
 export * from "./commands/status.ts";
+export * from "./intelligence/index.ts";
 export * from "./lifecycle.ts";
 export * from "./meta.ts";
 export * from "./migration.ts";

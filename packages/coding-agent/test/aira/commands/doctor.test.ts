@@ -3,6 +3,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { buildAiraDoctorReport, formatAiraDoctorReport } from "../../../src/aira/commands/doctor.ts";
+import { initialAiraIntelligenceStatus } from "../../../src/aira/intelligence/status.ts";
 import { resolveAiraProjectInto } from "../../../src/aira/project/index.ts";
 import { acquireAiraSessionState, disposeAiraSessionState } from "../../../src/aira/state.ts";
 
@@ -20,10 +21,16 @@ describe("Aira /doctor command (Phase 4 scope)", () => {
 	it("passes all checks with a live canonical state, project, and default keybindings", () => {
 		const state = acquireAiraSessionState("doctor-1", "startup");
 		resolveAiraProjectInto(state, makeNodeProject());
+		// A real session arms the coordinator which publishes a snapshot; a
+		// bare acquired state has none, so publish the honest inactive one.
+		const intelligence = initialAiraIntelligenceStatus();
+		intelligence.active = false;
+		intelligence.activationReason = "no defensible project (inert session state)";
+		state.intelligence = intelligence;
 		const report = buildAiraDoctorReport(state);
 
 		expect(report.home).toBe(expectedHome);
-		expect(report.checks.length).toBe(7);
+		expect(report.checks.length).toBe(8);
 		for (const check of report.checks) {
 			expect(check.pass, `${check.name} should pass`).toBe(true);
 		}
@@ -94,13 +101,64 @@ describe("Aira /doctor command (Phase 4 scope)", () => {
 		disposeAiraSessionState("doctor-6", state);
 	});
 
+	it("flags a missing intelligence snapshot as a wiring failure", () => {
+		const state = acquireAiraSessionState("doctor-intel-1", "startup");
+		const report = buildAiraDoctorReport(state);
+		const check = report.checks.find((c) => c.name === "intelligence");
+		expect(check?.pass).toBe(false);
+		expect(check?.detail).toContain("no intelligence snapshot");
+		disposeAiraSessionState("doctor-intel-1", state);
+	});
+
+	it("passes on an inactive intelligence snapshot", () => {
+		const state = acquireAiraSessionState("doctor-intel-2", "startup");
+		const inactive = initialAiraIntelligenceStatus();
+		inactive.active = false;
+		inactive.activationReason = "no defensible project";
+		state.intelligence = inactive;
+		const report = buildAiraDoctorReport(state);
+		const check = report.checks.find((c) => c.name === "intelligence");
+		expect(check?.pass).toBe(true);
+		expect(check?.detail).toContain("inactive: no defensible project");
+		disposeAiraSessionState("doctor-intel-2", state);
+	});
+
+	it("fails on a degraded active intelligence snapshot with detail", () => {
+		const state = acquireAiraSessionState("doctor-intel-3", "startup");
+		const status = initialAiraIntelligenceStatus();
+		status.active = true;
+		status.activationReason = "project detected";
+		status.repository = {
+			status: "ready",
+			filesIndexed: 42,
+			cacheLoaded: true,
+			changesAvailable: true,
+			changeCount: 2,
+		};
+		status.liveCode = { status: "degraded", servers: [], spawnCount: 1, crashCount: 1 };
+		status.findings = { total: 3, errors: 1, warnings: 2, stale: 0 };
+		status.degraded = true;
+		state.intelligence = status;
+		const report = buildAiraDoctorReport(state);
+		const check = report.checks.find((c) => c.name === "intelligence");
+		expect(check?.pass).toBe(false);
+		expect(check?.detail).toContain("repository: ready");
+		expect(check?.detail).toContain("live-code: degraded");
+		expect(check?.detail).toContain("1 errors / 2 warnings");
+		disposeAiraSessionState("doctor-intel-3", state);
+	});
+
 	it("formats a human-readable report with a summary", () => {
 		const state = acquireAiraSessionState("doctor-5", "startup");
 		resolveAiraProjectInto(state, makeNodeProject());
+		const intelligence = initialAiraIntelligenceStatus();
+		intelligence.active = false;
+		intelligence.activationReason = "no defensible project";
+		state.intelligence = intelligence;
 		const text = formatAiraDoctorReport(buildAiraDoctorReport(state));
 
 		expect(text).toContain(`home: ${expectedHome}`);
-		expect(text).toContain("summary: 7/7 checks passed");
+		expect(text).toContain("summary: 8/8 checks passed");
 		expect(text).toContain("ok  home:");
 		disposeAiraSessionState("doctor-5", state);
 	});

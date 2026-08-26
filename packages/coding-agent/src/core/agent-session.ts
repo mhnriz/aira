@@ -14,7 +14,7 @@
  */
 
 import { readFileSync } from "node:fs";
-import { basename, dirname } from "node:path";
+import { basename, dirname, join } from "node:path";
 import type {
 	Agent,
 	AgentEvent,
@@ -46,8 +46,14 @@ import {
 	resetApiProviders,
 	streamSimple,
 } from "@earendil-works/pi-ai/compat";
+import {
+	AIRA_INTELLIGENCE_CONTEXT_TYPE,
+	type AiraIntelligenceHandle,
+	createAiraIntelligence,
+} from "../aira/intelligence/coordinator.ts";
 import { onAiraSessionCreated, onAiraSessionDisposed } from "../aira/lifecycle.ts";
 import { AIRA_READ_ONLY_TOOLS, isAiraMutatingTool } from "../aira/modes.ts";
+import { getAiraCacheDir } from "../aira/paths.ts";
 import { resolveAiraProjectInto } from "../aira/project/index.ts";
 import type { AiraMode, AiraSessionState } from "../aira/state.ts";
 import { getThemeByName, theme } from "../modes/interactive/theme/theme.ts";
@@ -363,6 +369,7 @@ export class AgentSession {
 	private _baseToolsOverride?: Record<string, AgentTool>;
 	private _sessionStartEvent: SessionStartEvent;
 	private _airaSessionState: AiraSessionState;
+	private _airaIntelligence: AiraIntelligenceHandle | undefined;
 	private _extensionUIContext?: ExtensionUIContext;
 	private _extensionMode: ExtensionMode = "print";
 	private _extensionCommandContextActions?: ExtensionCommandContextActions;
@@ -407,6 +414,15 @@ export class AgentSession {
 		// Aira project-awareness seam: derive and store the project profile in
 		// canonical state so every mode observes the same project (Phase 4).
 		resolveAiraProjectInto(this._airaSessionState, this._cwd);
+
+		// Aira intelligence seam (Phase 5): arm the native intelligence
+		// service for this session. Activation is decided from the canonical
+		// project profile; providers degrade silently, so a missing language
+		// server or failed scan never affects session startup.
+		this._airaIntelligence = createAiraIntelligence(this._airaSessionState, this.agent, {
+			cacheDir: join(getAiraCacheDir(), "intelligence"),
+		});
+		void this._airaIntelligence.activate();
 
 		// Always subscribe to agent events for internal handling
 		// (session persistence, extensions, auto-compaction, retry logic)
@@ -749,6 +765,8 @@ export class AgentSession {
 			return;
 		}
 
+		// SAFETY: AgentMessage is a plain JSON-ish record at runtime; the cast
+		// lets us replace every own key (in-place mutation contract above).
 		const targetRecord = target as unknown as Record<string, unknown>;
 		for (const key of Object.keys(targetRecord)) {
 			delete targetRecord[key];
@@ -885,6 +903,8 @@ export class AgentSession {
 		);
 		this._disconnectFromAgent();
 		this._eventListeners = [];
+		// Aira intelligence seam: shut down providers (language servers, timers).
+		void this._airaIntelligence?.dispose();
 		// Aira lifecycle seam: release canonical state, ownership-checked so a
 		// stale owner (replaced by a newer session over the same file) is a no-op.
 		onAiraSessionDisposed(this.sessionId, this._airaSessionState);
@@ -928,6 +948,11 @@ export class AgentSession {
 	/** Current native Aira interaction mode (single canonical owner). */
 	get airaMode(): AiraMode {
 		return this._airaSessionState.mode;
+	}
+
+	/** Aira canonical session state (tests and host diagnostics). */
+	get airaSessionState(): AiraSessionState {
+		return this._airaSessionState;
 	}
 
 	/**
@@ -1311,6 +1336,19 @@ export class AgentSession {
 						timestamp: Date.now(),
 					});
 				}
+			}
+			// Aira intelligence seam (Phase 5): ambient context — compact,
+			// bounded, identical-content-skipped. Missing intelligence yields
+			// undefined here and the message never enters the conversation.
+			const airaContext = this._airaIntelligence?.providePromptContext(expandedText);
+			if (airaContext !== undefined) {
+				messages.push({
+					role: "custom",
+					customType: AIRA_INTELLIGENCE_CONTEXT_TYPE,
+					content: airaContext,
+					display: false,
+					timestamp: Date.now(),
+				});
 			}
 			// Apply extension-modified system prompt, or reset to base
 			if (result?.systemPrompt !== undefined) {
