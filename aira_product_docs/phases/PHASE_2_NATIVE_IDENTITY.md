@@ -120,6 +120,7 @@ dry run copied nothing and created no `~/.aira`.
 | pre-commit `npm run check` (biome, pinned deps, ts-imports, shrinkwrap, install-lock, browser smoke) | PASS on every commit |
 | `npm run build` (coding-agent package) | PASS (bundle rebuilt, 48 files / 7.1 MiB) |
 | built bundle smoke (isolated `HOME`, `aira` symlink to `dist/bundle/cli.js`) | `--version` = `Aira 0.1.0 (Pi base 0.84.3)`; `--help` shows `import --pi`/`.aira`; `import --pi` copies Pi home and writes marker; `--help` created only `~/.aira` (no `~/.pi`) |
+| `./test.sh` (isolated HOME, no API keys, all workspaces) | 2024/50 coding-agent, 947/830 ai, plus client/server/agent/telemetry/tui suites passed. Two failures, both pre-existing/environmental: `packages/ai zai-coding-plan-models` (machine-hydrated catalog data gives `glm-5.3` a price the upstream test expects to be zero; zero Phase 2 diff in `packages/ai`) and coding-agent `footer-data-provider` (documented flake in BASELINE.md) |
 
 ## Compatibility concerns
 
