@@ -1,5 +1,6 @@
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { airaModeGlyph, airaModeLabel } from "../../../aira/index.ts";
 import type { AgentSession } from "../../../core/agent-session.ts";
 import { areExperimentalFeaturesEnabled } from "../../../core/experimental.ts";
 import type { ReadonlyFooterDataProvider } from "../../../core/footer-data-provider.ts";
@@ -226,7 +227,12 @@ export class FooterComponent implements Component {
 		const remainder = statsLine.slice(statsLeft.length); // padding + rightSide
 		const dimRemainder = theme.fg("dim", remainder);
 
-		const pwdLine = truncateToWidth(theme.fg("dim", pwd), width, theme.fg("dim", "..."));
+		// Aira mode badge: immediately visible, restrained (one colored token).
+		const mode = this.session.airaMode;
+		const modeColor = mode === "plan" ? "warning" : mode === "review" ? "accent" : "text";
+		const modeBadge = theme.fg(modeColor, `${airaModeGlyph(mode)} ${airaModeLabel(mode)}`);
+
+		const pwdLine = truncateToWidth(`${modeBadge} ${theme.fg("dim", pwd)}`, width, theme.fg("dim", "..."));
 		const lines = [pwdLine, dimStatsLeft + dimRemainder];
 
 		// Add extension statuses on a single line, sorted by key alphabetically
