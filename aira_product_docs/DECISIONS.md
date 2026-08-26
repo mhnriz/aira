@@ -308,6 +308,29 @@ The roadmap intentionally delays task swarms and durable goal loops.
 
 ---
 
+## ADR-019 — Aira owns its home and product identity; Pi compatibility is preserved as an isolated migration surface
+
+**Status:** Accepted
+
+### Decision
+
+- The canonical executable is `aira`; the npm package exposes both `aira` (canonical) and `pi` (compatibility alias) bin entries pointing at the same bundle.
+- The canonical home is `~/.aira/` with the Pi-compatible internal layout preserved: `~/.aira/agent/` holds settings, sessions, cache (models store), extensions, skills, themes, prompts, agents, tools, keybindings, trust, and logs. Project-local resources use `<cwd>/.aira/`.
+- Aira versions itself independently (`Aira 0.1.0`) while the packaged `PACKAGE_NAME`/`VERSION` remain the Pi-derived identity for compatibility and upstream syncing. `--version` and `/status` surface the Aira identity.
+- Environment overrides are `AIRA_CODING_AGENT_DIR` / `AIRA_CODING_AGENT_SESSION_DIR`; the legacy `PI_CODING_AGENT_DIR` / `PI_CODING_AGENT_SESSION_DIR` remain honored as compatibility aliases.
+- Pi migration is optional and explicit via `aira import --pi` (conservative: no credentials unless `--include-secrets`, no overwrites unless `--force`, `--dry-run` supported). Normal operation never depends on `~/.pi`.
+
+### Rationale
+
+ADR-001 and ADR-003 establish Aira as a standalone Pi-derived product. Pi's `piConfig` is the intended fork seam: setting `name`/`configDir` re-points every centralized path helper under the Aira home with a minimal, upstream-syncable diff. Internal `agent/` layout and package machinery stay intact so upstream Pi merges remain easy and Pi tooling/extensions keep working.
+
+### Consequences
+
+- Pi homes are imported, not read: a clean machine with `aira` creates only `~/.aira/`.
+- Existing Pi installations that want continuity run `aira import --pi` once; project-local `.pi/` content is not automatically migrated (documented limitation; `--session-dir` or manual copy remains available).
+- Pi's official first-time setup is gated to the official Pi distribution; Aira skips it (its own onboarding arrives later).
+- Pi self-update/installer machinery (`pi update`, managed installs) remains Pi-oriented until Aira distribution exists; Aira update/packaging is a later phase.
+
 ## Adding decisions
 
 When a future architectural choice materially changes one of these assumptions:

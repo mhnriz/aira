@@ -441,7 +441,7 @@ Aira should preserve, wherever practical:
 - Pi package source syntax such as `npm:` and `git:`;
 - familiar package management behavior.
 
-Canonical Aira paths remain under `~/.aira/`. Compatibility code may import or migrate from `~/.pi/`, but Aira must not require `~/.pi/` for normal operation.
+Canonical Aira paths remain under `~/.aira/` — `~/.aira/agent` for the Pi-compatible home resources, `<cwd>/.aira` for project-local ones (the Pi `piConfig` fork seam re-points the centralized path helpers). Compatibility code may import or migrate from `~/.pi/`, but Aira must not require `~/.pi/` for normal operation. The npm package ships both `aira` (canonical) and `pi` (compatibility alias) executables.
 
 ## 20. Architectural invariants
 

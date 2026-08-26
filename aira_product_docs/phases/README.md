@@ -40,8 +40,8 @@ Stopping point / next phase
 |---|---|---|---|
 | 0 — Fork and Baseline | ✅ done 2026-08-26 | [BASELINE.md](../BASELINE.md) (fork record lives at repo root) | Pi v0.84.3 base, commit `cbea4fb02` establishes it |
 | 1 — Aira Core Seam | ✅ done 2026-08-26 | [PHASE_1_CORE_SEAM.md](PHASE_1_CORE_SEAM.md) | canonical `AiraSessionState`, lifecycle bridge, native `/status` |
-| 2 — Native Identity and `~/.aira/` | ⏳ next | — | — |
-| 3 — Native Modes and UX | — | — | — |
+| 2 — Native Identity and `~/.aira/` | ✅ done 2026-08-26 | [PHASE_2_NATIVE_IDENTITY.md](PHASE_2_NATIVE_IDENTITY.md) | `aira` executable, Aira product metadata, `~/.aira/` home + path helpers, optional `aira import --pi` |
+| 3 — Native Modes and UX | ⏳ next | — | — |
 | 4 — Project Awareness | — | — | — |
 | 5 — Intelligence | — | — | — |
 | 6 — Execution Runtime | — | — | — |

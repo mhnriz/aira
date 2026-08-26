@@ -71,19 +71,30 @@ Where Aira changes host lifecycle behavior, compatibility events should continue
 
 Aira does not use `~/.pi/` as its canonical home.
 
-Potential migration flow:
+Aira layout (Pi-compatible internal shape preserved under the Aira root):
 
 ```text
-existing ~/.pi/
-      ↓
-Aira detects it
-      ↓
-optional import/migration
-      ↓
-~/.aira/
+~/.aira/                    canonical home
+└── agent/                  settings, sessions, cache, extensions, skills,
+                            themes, prompts, agents, tools, keybindings,
+                            trust, logs
 ```
 
-Migration should copy/translate supported resources. It should not make Aira permanently depend on Pi's directory.
+Project-local resources use `<cwd>/.aira/` (not `<cwd>/.pi/`).
+
+Migration flow (optional and explicit):
+
+```bash
+existing ~/.pi/agent          aira import --pi            ~/.aira/agent
+```
+
+`aira import --pi` copies supported resources (settings, keybindings, models,
+model store, trust, themes, skills, prompts, extensions, agents, tools, `bin`,
+sessions). Credentials (`auth.json`) are excluded unless
+`--include-secrets`; existing Aira resources are preserved unless `--force`;
+`--dry-run` previews the plan; a successful import writes `~/.aira/migration.json`.
+Migration copies rather than moves, never making Aira permanently depend on Pi's
+directory.
 
 ## CLI compatibility
 
@@ -92,6 +103,9 @@ Aira's canonical CLI is:
 ```text
 aira
 ```
+
+The npm package also ships `pi` as a compatibility alias to the same binary, so
+existing Pi-oriented scripts keep working.
 
 Pi command names may be preserved where they are useful, but Aira is free to simplify or improve the primary UX.
 
