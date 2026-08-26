@@ -17,6 +17,7 @@ export interface AppKeybindings {
 	"app.exit": true;
 	"app.suspend": true;
 	"app.thinking.cycle": true;
+	"app.mode.cycle": true;
 	"app.model.cycleForward": true;
 	"app.model.cycleBackward": true;
 	"app.model.select": true;
@@ -97,8 +98,15 @@ export const KEYBINDINGS = {
 		description: "Suspend to background",
 	},
 	"app.thinking.cycle": {
-		defaultKeys: "shift+tab",
+		// Shift+Tab moved to the Aira mode cycle; thinking now lives on Ctrl+Shift+E.
+		// A user who customized thinking.cycle to shift+tab keeps that binding (user
+		// bindings override defaults in KeybindingsManager, never overwritten).
+		defaultKeys: "ctrl+shift+e",
 		description: "Cycle thinking level",
+	},
+	"app.mode.cycle": {
+		defaultKeys: "shift+tab",
+		description: "Cycle Aira mode (BUILD/PLAN/REVIEW)",
 	},
 	"app.model.cycleForward": {
 		defaultKeys: "ctrl+p",
