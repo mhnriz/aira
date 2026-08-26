@@ -45,6 +45,7 @@ import {
 } from "@earendil-works/pi-tui";
 import chalk from "chalk";
 import { spawn } from "child_process";
+import { buildAiraStatusReport, formatAiraStatusReport, getAiraSessionState } from "../../aira/index.ts";
 import {
 	APP_NAME,
 	APP_TITLE,
@@ -3013,6 +3014,11 @@ export class InteractiveMode {
 			}
 			if (text === "/session") {
 				this.handleSessionCommand();
+				this.editor.setText("");
+				return;
+			}
+			if (text === "/status") {
+				this.handleStatusCommand();
 				this.editor.setText("");
 				return;
 			}
@@ -6202,6 +6208,13 @@ export class InteractiveMode {
 
 		this.chatContainer.addChild(new Spacer(1));
 		this.chatContainer.addChild(new Text(info, 1, 0));
+		this.ui.requestRender();
+	}
+
+	private handleStatusCommand(): void {
+		const report = buildAiraStatusReport(getAiraSessionState(this.session.sessionId));
+		this.chatContainer.addChild(new Spacer(1));
+		this.chatContainer.addChild(new Text(theme.fg("dim", formatAiraStatusReport(report)), 1, 0));
 		this.ui.requestRender();
 	}
 

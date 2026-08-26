@@ -6,5 +6,6 @@
  * the package is Pi-derived.
  */
 
+export * from "./commands/status.ts";
 export * from "./lifecycle.ts";
 export * from "./state.ts";
