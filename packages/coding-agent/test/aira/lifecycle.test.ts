@@ -1,4 +1,3 @@
-import { cleanupSessionResources } from "@earendil-works/pi-ai/compat";
 import { describe, expect, it } from "vitest";
 import { onAiraSessionCreated, onAiraSessionDisposed } from "../../src/aira/lifecycle.ts";
 import { getAiraSessionState } from "../../src/aira/state.ts";
@@ -8,9 +7,9 @@ import { createTestSession, type TestSessionContext } from "../utilities.ts";
  * Lifecycle bridge tests.
  *
  * The bridge contract: `onAiraSessionCreated` is invoked by the AgentSession
- * constructor (every session creation path), and release is wired through
- * pi-ai's session resource cleanup, which AgentSession.dispose() invokes for
- * every session teardown or replacement.
+ * constructor (every session creation path) and returns the ownership handle;
+ * `onAiraSessionDisposed` is invoked by `AgentSession.dispose()` with that
+ * handle for every session teardown or replacement.
  */
 describe("Aira lifecycle bridge", () => {
 	it("creates canonical state for a session", () => {
@@ -20,41 +19,42 @@ describe("Aira lifecycle bridge", () => {
 		expect(state.startReason).toBe("new");
 	});
 
-	it("releases state on host cleanup", () => {
-		onAiraSessionCreated("bridge-2", "fork");
+	it("releases state on host disposal by its owner", () => {
+		const state = onAiraSessionCreated("bridge-2", "fork");
 		expect(getAiraSessionState("bridge-2")?.runtime).toBe("active");
 
-		// Same registry path AgentSession.dispose() uses.
-		cleanupSessionResources("bridge-2");
+		onAiraSessionDisposed("bridge-2", state);
 
 		expect(getAiraSessionState("bridge-2")?.runtime).toBe("disposed");
 	});
 
-	it("host cleanup without a session id is a no-op", () => {
-		onAiraSessionCreated("bridge-3", "startup");
-		expect(() => cleanupSessionResources()).not.toThrow();
+	it("ignores disposal by a stale owner", () => {
+		const first = onAiraSessionCreated("bridge-3", "startup");
+		const second = onAiraSessionCreated("bridge-3", "resume");
+
+		// First owner disposes after being replaced: must not kill the new state.
+		onAiraSessionDisposed("bridge-3", first);
+		expect(getAiraSessionState("bridge-3")).toBe(second);
 		expect(getAiraSessionState("bridge-3")?.runtime).toBe("active");
+
+		onAiraSessionDisposed("bridge-3", second);
+		expect(getAiraSessionState("bridge-3")?.runtime).toBe("disposed");
 	});
 
-	it("host cleanup for unknown sessions is a no-op", () => {
-		expect(() => cleanupSessionResources("bridge-unknown")).not.toThrow();
+	it("ignores disposal of unknown sessions", () => {
+		const state = onAiraSessionCreated("bridge-4", "startup");
+		expect(() => onAiraSessionDisposed("bridge-unknown", state)).not.toThrow();
 		expect(getAiraSessionState("bridge-unknown")).toBeUndefined();
 	});
 
 	it("keeps sessions isolated through the bridge", () => {
-		onAiraSessionCreated("bridge-4a", "startup");
-		onAiraSessionCreated("bridge-4b", "new");
+		const a = onAiraSessionCreated("bridge-5a", "startup");
+		onAiraSessionCreated("bridge-5b", "new");
 
-		cleanupSessionResources("bridge-4a");
+		onAiraSessionDisposed("bridge-5a", a);
 
-		expect(getAiraSessionState("bridge-4a")?.runtime).toBe("disposed");
-		expect(getAiraSessionState("bridge-4b")?.runtime).toBe("active");
-	});
-
-	it("explicit disposal transitions state", () => {
-		onAiraSessionCreated("bridge-5", "resume");
-		onAiraSessionDisposed("bridge-5");
-		expect(getAiraSessionState("bridge-5")?.runtime).toBe("disposed");
+		expect(getAiraSessionState("bridge-5a")?.runtime).toBe("disposed");
+		expect(getAiraSessionState("bridge-5b")?.runtime).toBe("active");
 	});
 });
 

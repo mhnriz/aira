@@ -19,7 +19,7 @@ describe("Aira /status command", () => {
 
 	it("reports disposed state", () => {
 		const state = acquireAiraSessionState("status-2", "new");
-		disposeAiraSessionState("status-2");
+		disposeAiraSessionState("status-2", state);
 		const report = buildAiraStatusReport(state);
 
 		expect(report.available).toBe(true);

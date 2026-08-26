@@ -42,9 +42,19 @@ describe("AiraSessionState", () => {
 		expect(getAiraSessionState("does-not-exist")).toBeUndefined();
 	});
 
-	it("refuses a second active owner for the same session", () => {
-		acquireAiraSessionState("session-4", "startup");
-		expect(() => acquireAiraSessionState("session-4", "fork")).toThrow(/already exists/);
+	it("replaces the previous owner when re-acquired while active", () => {
+		const first = acquireAiraSessionState("session-4", "startup");
+		const second = acquireAiraSessionState("session-4", "fork");
+
+		// Ownership transferred: the latest acquire owns the canonical entry.
+		expect(second).not.toBe(first);
+		expect(getAiraSessionState("session-4")).toBe(second);
+
+		// The stale owner can no longer release the entry.
+		expect(disposeAiraSessionState("session-4", first)).toBe(false);
+		expect(getAiraSessionState("session-4")?.runtime).toBe("active");
+		expect(disposeAiraSessionState("session-4", second)).toBe(true);
+		expect(getAiraSessionState("session-4")?.runtime).toBe("disposed");
 	});
 
 	it("keeps sessions isolated from each other", () => {
@@ -52,7 +62,7 @@ describe("AiraSessionState", () => {
 		const b = acquireAiraSessionState("session-5b", "new");
 
 		expect(a).not.toBe(b);
-		disposeAiraSessionState("session-5a");
+		disposeAiraSessionState("session-5a", a);
 
 		// Disposing A must not affect B.
 		expect(getAiraSessionState("session-5b")?.runtime).toBe("active");
@@ -63,35 +73,35 @@ describe("AiraSessionState", () => {
 
 	it("marks state disposed and records the timestamp", () => {
 		const before = Date.now();
-		acquireAiraSessionState("session-6", "resume");
-		const released = disposeAiraSessionState("session-6");
+		const state = acquireAiraSessionState("session-6", "resume");
+		const released = disposeAiraSessionState("session-6", state);
 
 		expect(released).toBe(true);
-		const state = getAiraSessionState("session-6");
-		expect(state?.runtime).toBe("disposed");
-		expect(state?.disposedAt).toBeGreaterThanOrEqual(before);
+		const disposed = getAiraSessionState("session-6");
+		expect(disposed?.runtime).toBe("disposed");
+		expect(disposed?.disposedAt).toBeGreaterThanOrEqual(before);
 	});
 
-	it("dispose is idempotent and safe for unknown sessions", () => {
-		acquireAiraSessionState("session-7", "startup");
-		expect(disposeAiraSessionState("session-7")).toBe(true);
-		expect(disposeAiraSessionState("session-7")).toBe(false);
-		expect(disposeAiraSessionState("never-acquired")).toBe(false);
+	it("dispose is idempotent and safe for unknown or stale owners", () => {
+		const state = acquireAiraSessionState("session-7", "startup");
+		expect(disposeAiraSessionState("session-7", state)).toBe(true);
+		expect(disposeAiraSessionState("session-7", state)).toBe(false);
+		expect(disposeAiraSessionState("never-acquired", acquireAiraSessionState("other-7", "startup"))).toBe(false);
 	});
 
 	it("allows re-acquisition after disposal", () => {
-		acquireAiraSessionState("session-8", "startup");
-		disposeAiraSessionState("session-8");
+		const first = acquireAiraSessionState("session-8", "startup");
+		disposeAiraSessionState("session-8", first);
 		const revived = acquireAiraSessionState("session-8", "resume");
 		expect(revived.runtime).toBe("active");
 		expect(revived.startReason).toBe("resume");
-		expect(revived.createdAt).toBeGreaterThanOrEqual(getAiraSessionState("session-8")!.createdAt);
+		expect(revived).not.toBe(first);
 	});
 
 	it("tracks only active states", () => {
-		acquireAiraSessionState("session-9a", "startup");
+		const a = acquireAiraSessionState("session-9a", "startup");
 		acquireAiraSessionState("session-9b", "startup");
-		disposeAiraSessionState("session-9a");
+		disposeAiraSessionState("session-9a", a);
 
 		// The registry is a file-level singleton: assert relative behavior
 		// rather than the absolute contents of the registry.

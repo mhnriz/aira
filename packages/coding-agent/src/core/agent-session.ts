@@ -46,7 +46,8 @@ import {
 	resetApiProviders,
 	streamSimple,
 } from "@earendil-works/pi-ai/compat";
-import { onAiraSessionCreated } from "../aira/lifecycle.ts";
+import { onAiraSessionCreated, onAiraSessionDisposed } from "../aira/lifecycle.ts";
+import type { AiraSessionState } from "../aira/state.ts";
 import { getThemeByName, theme } from "../modes/interactive/theme/theme.ts";
 import { stripFrontmatter } from "../utils/frontmatter.ts";
 import { sleep } from "../utils/sleep.ts";
@@ -359,6 +360,7 @@ export class AgentSession {
 	private _excludedToolNames?: Set<string>;
 	private _baseToolsOverride?: Record<string, AgentTool>;
 	private _sessionStartEvent: SessionStartEvent;
+	private _airaSessionState: AiraSessionState;
 	private _extensionUIContext?: ExtensionUIContext;
 	private _extensionMode: ExtensionMode = "print";
 	private _extensionCommandContextActions?: ExtensionCommandContextActions;
@@ -397,8 +399,8 @@ export class AgentSession {
 		this._sessionStartEvent = config.sessionStartEvent ?? { type: "session_start", reason: "startup" };
 
 		// Aira lifecycle seam: this session becomes the canonical Aira state owner.
-		// Release happens via cleanupSessionResources(this.sessionId) in dispose().
-		onAiraSessionCreated(this.sessionId, this._sessionStartEvent.reason);
+		// The returned state is the ownership handle for release in dispose().
+		this._airaSessionState = onAiraSessionCreated(this.sessionId, this._sessionStartEvent.reason);
 
 		// Always subscribe to agent events for internal handling
 		// (session persistence, extensions, auto-compaction, retry logic)
@@ -868,6 +870,9 @@ export class AgentSession {
 		);
 		this._disconnectFromAgent();
 		this._eventListeners = [];
+		// Aira lifecycle seam: release canonical state, ownership-checked so a
+		// stale owner (replaced by a newer session over the same file) is a no-op.
+		onAiraSessionDisposed(this.sessionId, this._airaSessionState);
 		cleanupSessionResources(this.sessionId);
 	}
 

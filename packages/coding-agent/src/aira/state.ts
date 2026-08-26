@@ -5,10 +5,12 @@
  * small. Future phases extend this shape (mode switching, project profiles,
  * capability providers) without replacing the ownership model.
  *
- * Ownership rule: a session id has at most one ACTIVE state at any time.
- * Acquisition is explicit (session created), release is explicit (session
- * disposed). Getting and transitioning state goes through this module so no
- * subsystem can hold a competing copy of the truth.
+ * Ownership rule: one canonical state exists per session id. Acquisition is
+ * explicit (session created) and returns an owner handle; release is explicit
+ * (session disposed) and ownership-checked, so stale owners cannot dispose
+ * state that a newer session over the same file has acquired. Getting and
+ * transitioning state goes through this module so no subsystem can hold a
+ * competing copy of the truth.
  */
 
 export type AiraMode = "build" | "plan" | "review";
@@ -46,20 +48,17 @@ const sessionStates = new Map<string, AiraSessionState>();
 /**
  * Create the canonical state for a session.
  *
- * @throws when an ACTIVE state already exists for the same session id — a
- * second owner for a live session is a lifecycle bug and must surface loudly.
- * A disposed state for the same id (e.g. the same session file resumed again)
- * may be re-acquired: the previous owner was explicitly released.
+ * The host allows two live AgentSessions over the same session file (e.g. a
+ * session resumed by one runtime while another runtime still holds it). When
+ * an ACTIVE entry already exists, ownership transfers to the newest acquirer:
+ * the previous owner's state object becomes stale, and its later dispose is a
+ * no-op because it no longer matches the registry entry. This keeps one
+ * canonical state per session id without breaking valid host lifecycles.
  */
 export function acquireAiraSessionState(
 	sessionId: string,
 	startReason: AiraSessionStartReason = "startup",
 ): AiraSessionState {
-	const existing = sessionStates.get(sessionId);
-	if (existing?.runtime === "active") {
-		throw new Error(`Aira session state already exists for active session "${sessionId}"`);
-	}
-
 	const state: AiraSessionState = {
 		sessionId,
 		startReason,
@@ -81,15 +80,17 @@ export function getAiraSessionState(sessionId: string): AiraSessionState | undef
 /**
  * Release the canonical state for a session.
  *
- * Marks the state disposed rather than deleting it, so tests and diagnostics
- * can observe the transition. Idempotent: releasing an unknown or already
- * disposed session is a no-op.
+ * Ownership-checked: only the caller that acquired the CURRENT registry entry
+ * may dispose it. A stale owner (whose state was replaced by a newer acquire)
+ * disposing later is a no-op, so overlapping live sessions cannot kill each
+ * other's state. Idempotent: releasing an unknown, already disposed, or
+ * non-owned entry is a no-op.
  *
- * @returns true when an active state was transitioned by this call.
+ * @returns true when an active, owned entry was transitioned by this call.
  */
-export function disposeAiraSessionState(sessionId: string): boolean {
+export function disposeAiraSessionState(sessionId: string, owner: AiraSessionState): boolean {
 	const state = sessionStates.get(sessionId);
-	if (!state || state.runtime === "disposed") {
+	if (!state || state !== owner || state.runtime === "disposed") {
 		return false;
 	}
 	state.runtime = "disposed";
