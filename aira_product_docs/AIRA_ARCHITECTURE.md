@@ -417,15 +417,16 @@ Do not expose every internal engine all the time.
 Minimal explicit controls:
 
 ```text
-/aira
-/aira status
-/aira doctor
-/aira capabilities
-/aira processes
-/aira checkpoint
-/aira rewind
-/aira mode
+/status
+/doctor
+/capabilities
+/processes
+/checkpoint
+/rewind
+/mode
 ```
+
+Core Aira commands are unnamespaced (ADR-017).
 
 Routine engineering capabilities should activate automatically.
 

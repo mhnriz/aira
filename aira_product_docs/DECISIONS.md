@@ -316,3 +316,41 @@ When a future architectural choice materially changes one of these assumptions:
 2. mark the superseded ADR appropriately rather than silently rewriting history;
 3. explain why evidence changed the decision;
 4. commit the decision with the implementation or immediately before it.
+
+---
+
+## ADR-017 — Core Aira commands are unnamespaced
+
+**Status:** Accepted
+
+### Decision
+
+Aira's own fundamental host commands belong directly to the host command surface:
+
+```text
+/status
+/doctor
+/mode
+/capabilities
+/processes
+/checkpoint
+/rewind
+```
+
+not:
+
+```text
+/aira status
+/aira doctor
+/aira mode
+```
+
+Third-party and compatibility extensions keep their own namespaced commands (for example `/lens-health`), and Aira does not modify third-party command behavior.
+
+### Rationale
+
+Aira is the coding harness itself, derived from Pi — not a Pi extension. Namespacing Aira's own features under an `aira` prefix would present the host as an extension of itself. Phase 1 already implements `/status` under this convention.
+
+### Consequences
+
+Supersedes the `/aira ...` examples in AIRA_ARCHITECTURE.md §18 and README.md. Extension commands that collide with built-in host commands are detected and diagnosed by the host (existing `BUILTIN_SLASH_COMMANDS` conflict diagnostics cover `/status` automatically). The convention applies only to core Aira commands; extension namespaces remain unchanged.
