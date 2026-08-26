@@ -155,6 +155,37 @@ describe("ambient context selection", () => {
 		expect(result.content).toContain("src/tray.ts");
 	});
 
+	it("emphasizes diagnostics, changed files, and impact in REVIEW", async () => {
+		const { state, repository } = setup();
+		await repository.activate();
+		await repository.settled();
+		const root = state.project!.root!;
+		const file = join(root, "src", "tray.ts");
+		repository.noteEdit(file);
+		writeFileSync(join(root, "src", "usesTray.ts"), "import { stabilizeTray } from './tray';");
+		writeFileSync(join(root, "src", "tray.ts"), "export function stabilizeTray() { ERROR_MARKER }");
+		await repository.reindexFile(join(root, "src", "usesTray.ts"));
+		await repository.reindexFile(file);
+		const findings = new AiraFindingsStore();
+		findings.replaceForPath(file, [
+			{ path: file, source: "lsp", providerId: "typescript", severity: "error", message: "type mismatch" },
+		]);
+		const activation = decideIntelligenceActivation(state.project);
+		const result = buildIntelligenceContext({
+			prompt: "review the tray change",
+			mode: "review",
+			activation,
+			projectRootName: "ctx",
+			repository,
+			findings,
+			oriented: true,
+		});
+		expect(result.content).toContain("Changed files");
+		expect(result.content).toContain("Diagnostics: 1 error(s)");
+		expect(result.content).toContain("Impact (imported-by)");
+		expect(result.content).toContain("imported by 1: src/usesTray.ts");
+	});
+
 	it("returns no content when nothing useful exists", () => {
 		const activation = decideIntelligenceActivation(undefined);
 		const result = buildIntelligenceContext({

@@ -135,7 +135,12 @@ export class LspClient {
 					documentSymbol: { dynamicRegistration: false, hierarchicalDocumentSymbolSupport: true },
 					synchronization: { didSave: false },
 				},
-				workspace: { workspaceFolders: true },
+				// NOTE: do NOT advertise `workspace.workspaceFolders: true` here.
+				// Empirically, pyright (vscode-languageserver) suppresses
+				// textDocument/publishDiagnostics when the client declares the
+				// workspaceFolders capability (Phase 5 verification finding);
+				// the `workspaceFolders` array in the initialize params is
+				// sufficient and harmless.
 			},
 		})) as
 			| {
