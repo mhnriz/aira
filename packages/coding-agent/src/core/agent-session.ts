@@ -47,7 +47,8 @@ import {
 	streamSimple,
 } from "@earendil-works/pi-ai/compat";
 import { onAiraSessionCreated, onAiraSessionDisposed } from "../aira/lifecycle.ts";
-import type { AiraSessionState } from "../aira/state.ts";
+import { AIRA_READ_ONLY_TOOLS, isAiraMutatingTool } from "../aira/modes.ts";
+import type { AiraMode, AiraSessionState } from "../aira/state.ts";
 import { getThemeByName, theme } from "../modes/interactive/theme/theme.ts";
 import { stripFrontmatter } from "../utils/frontmatter.ts";
 import { sleep } from "../utils/sleep.ts";
@@ -373,6 +374,7 @@ export class AgentSession {
 
 	// Tool registry for extension getTools/setTools
 	private _toolRegistry: Map<string, AgentTool> = new Map();
+	private _airaModeToolBackup: string[] | undefined;
 	private _toolDefinitions: Map<string, ToolDefinitionEntry> = new Map();
 	private _toolPromptSnippets: Map<string, string> = new Map();
 	private _toolPromptGuidelines: Map<string, string[]> = new Map();
@@ -490,6 +492,15 @@ export class AgentSession {
 	 */
 	private _installAgentToolHooks(): void {
 		this.agent.beforeToolCall = async ({ toolCall, args }) => {
+			// Aira mode policy: PLAN is genuinely read-only at the host/tool-policy
+			// boundary. Block every built-in mutation tool here even if one is still
+			// present in the registry (defense in depth on top of availability).
+			if (this._airaSessionState.mode === "plan" && isAiraMutatingTool(toolCall.name)) {
+				return {
+					block: true,
+					reason: `PLAN mode is read-only: ${toolCall.name} is blocked. Switch to BUILD (Shift+Tab) to modify the workspace.`,
+				};
+			}
 			const runner = this._extensionRunner;
 			if (!runner.hasHandlers("tool_call")) {
 				return undefined;
@@ -908,6 +919,32 @@ export class AgentSession {
 	/** Current effective system prompt (includes any per-turn extension modifications) */
 	get systemPrompt(): string {
 		return this.agent.state.systemPrompt;
+	}
+
+	/** Current native Aira interaction mode (single canonical owner). */
+	get airaMode(): AiraMode {
+		return this._airaSessionState.mode;
+	}
+
+	/**
+	 * Set the native Aira mode on the canonical state and apply host mode-aware
+	 * tool availability. Entering PLAN hides the mutating tools from the model
+	 * and remembers the previous set so it can be restored; leaving PLAN
+	 * restores it. The execution boundary (beforeToolCall) independently blocks
+	 * mutating tools in PLAN regardless of availability.
+	 */
+	setAiraMode(mode: AiraMode): void {
+		const previous = this._airaSessionState.mode;
+		if (mode === previous) return;
+		this._airaSessionState.mode = mode;
+		if (mode === "plan") {
+			this._airaModeToolBackup ??= this.getActiveToolNames();
+			this.setActiveToolsByName([...AIRA_READ_ONLY_TOOLS]);
+		} else if (previous === "plan") {
+			const restore = this._airaModeToolBackup ?? ["read", "bash", "edit", "write"];
+			this._airaModeToolBackup = undefined;
+			this.setActiveToolsByName(restore);
+		}
 	}
 
 	/** Current retry attempt (0 if not retrying) */
