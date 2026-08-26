@@ -8,6 +8,7 @@
 import { createInterface } from "node:readline";
 import { type ImageContent, modelsAreEqual } from "@earendil-works/pi-ai";
 import chalk from "chalk";
+import { formatAiraVersion } from "./aira/meta.ts";
 import { type Args, type Mode, normalizeSessionName, parseArgs, printHelp } from "./cli/args.ts";
 import {
 	type AuthCheckResult,
@@ -39,7 +40,6 @@ import {
 	getAgentDir,
 	getPackageDir,
 	LEGACY_ENV_SESSION_DIR,
-	VERSION,
 } from "./config.ts";
 import { type CreateAgentSessionRuntimeFactory, createAgentSessionRuntime } from "./core/agent-session-runtime.ts";
 import {
@@ -619,7 +619,7 @@ export async function main(args: string[], options?: MainOptions) {
 	time("parseArgs");
 
 	if (parsed.version) {
-		console.log(VERSION);
+		console.log(formatAiraVersion());
 		process.exit(0);
 	}
 
