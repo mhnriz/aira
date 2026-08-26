@@ -23,7 +23,7 @@ describe("Aira /doctor command (Phase 4 scope)", () => {
 		const report = buildAiraDoctorReport(state);
 
 		expect(report.home).toBe(expectedHome);
-		expect(report.checks.length).toBe(6);
+		expect(report.checks.length).toBe(7);
 		for (const check of report.checks) {
 			expect(check.pass, `${check.name} should pass`).toBe(true);
 		}
@@ -72,6 +72,18 @@ describe("Aira /doctor command (Phase 4 scope)", () => {
 		disposeAiraSessionState("doctor-4", state);
 	});
 
+	it("verifies the semantic capability classification contract", () => {
+		const state = acquireAiraSessionState("doctor-cap", "startup");
+		const report = buildAiraDoctorReport(state);
+		const capCheck = report.checks.find((c) => c.name === "capabilities");
+
+		expect(capCheck?.pass).toBe(true);
+		expect(capCheck?.detail).toContain("read");
+		expect(capCheck?.detail).toContain("bash");
+		expect(capCheck?.detail).toContain("unknown: not flagged mutating");
+		disposeAiraSessionState("doctor-cap", state);
+	});
+
 	it("flags an unresolved project as a project-awareness failure", () => {
 		const state = acquireAiraSessionState("doctor-6", "startup");
 		const report = buildAiraDoctorReport(state);
@@ -88,7 +100,7 @@ describe("Aira /doctor command (Phase 4 scope)", () => {
 		const text = formatAiraDoctorReport(buildAiraDoctorReport(state));
 
 		expect(text).toContain(`home: ${expectedHome}`);
-		expect(text).toContain("summary: 6/6 checks passed");
+		expect(text).toContain("summary: 7/7 checks passed");
 		expect(text).toContain("ok  home:");
 		disposeAiraSessionState("doctor-5", state);
 	});

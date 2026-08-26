@@ -14,12 +14,15 @@
  *    (so a user who never customized Shift+Tab gets mode cycling);
  *  - the PLAN read-only boundary classifies the mutating built-in tools and
  *    keeps the read-only inspection tools available;
+ *  - the semantic capability classification contract classifies every built-in
+ *    capability without flagging unknown (extension) tools as mutating;
  *  - the canonical session state carries a resolved project profile (Phase 4).
  *
  * Later phases extend this with capability/runtime health.
  */
 import { CONFIG_DIR_NAME } from "../../config.ts";
 import { KEYBINDINGS } from "../../core/keybindings.ts";
+import { classifyAiraCapability, isAiraCapabilityReadOnly } from "../capabilities.ts";
 import { AIRA_MODE_CYCLE, AIRA_MUTATING_TOOLS, AIRA_READ_ONLY_TOOLS } from "../modes.ts";
 import { displayPathUnderHome, getAiraHome } from "../paths.ts";
 import { summarizeAiraProject } from "../project/profile.ts";
@@ -99,7 +102,18 @@ export function buildAiraDoctorReport(state: AiraSessionState | undefined): Aira
 		detail: `blocked: ${mutating.join(", ")} | allowed: ${readOnly.join(", ")}`,
 	});
 
-	// 6. Project awareness: canonical state carries a resolved project profile.
+	// 6. Semantic capability classification contract.
+	const classifiedReadOnly = ["read", "grep", "find", "ls"].every((t) => classifyAiraCapability(t) === "read-only");
+	const classifiedMutating = ["edit", "write", "bash", "powershell"].every((t) => !isAiraCapabilityReadOnly(t));
+	const unknownPermissive =
+		!isAiraCapabilityReadOnly("unknown-extension-tool") && !AIRA_MUTATING_TOOLS.has("unknown-extension-tool");
+	checks.push({
+		name: "capabilities",
+		pass: classifiedReadOnly && classifiedMutating && unknownPermissive,
+		detail: `read-only: read, grep, find, ls | mutating/process: edit, write, bash, powershell | unknown: not flagged mutating`,
+	});
+
+	// 7. Project awareness: canonical state carries a resolved project profile.
 	checks.push({
 		name: "project",
 		pass: state?.project !== undefined,

@@ -21,6 +21,7 @@
  *            (inspect-first), still implement-capable; the independent
  *            verifier is a later phase (Phase 8), not part of this mode.
  */
+import { BUILTIN_READ_ONLY_CAPABILITIES, isAiraMutatingCapability } from "./capabilities.ts";
 import type { AiraMode, AiraSessionState } from "./state.ts";
 
 /** The fixed three-mode order of the native cycle. */
@@ -37,7 +38,7 @@ export const NEXT_AIRA_MODE: Record<AiraMode, AiraMode> = {
  * Built-in read-only tools available in PLAN mode. Reading, search,
  * inspection, and other safe operations stay usable in PLAN.
  */
-export const AIRA_READ_ONLY_TOOLS: readonly string[] = ["read", "grep", "find", "ls"];
+export const AIRA_READ_ONLY_TOOLS: readonly string[] = [...BUILTIN_READ_ONLY_CAPABILITIES];
 
 /**
  * Built-in tools that can mutate the workspace and are therefore blocked in
@@ -66,7 +67,7 @@ export function setAiraMode(state: AiraSessionState, mode: AiraMode): AiraMode {
 
 /** True when the given built-in tool can mutate the workspace (blocked in PLAN). */
 export function isAiraMutatingTool(name: string): boolean {
-	return AIRA_MUTATING_TOOLS.has(name);
+	return isAiraMutatingCapability(name);
 }
 
 /** Human-facing label for a mode, e.g. "BUILD". */
