@@ -162,6 +162,13 @@ test/suite/agent-session-runtime.test.ts`): **14 files, 131 passed, 0 failed.**
 
 Package `tsgo --noEmit`: PASS.
 
+Full non-e2e suite (`./test.sh`, isolated HOME): coding-agent **247 passed /
+6 skipped; 2054 passed / 50 skipped (no failures)**; all other workspaces
+passed. One pre-existing/environmental failure, unchanged from Phase 2:
+`packages/ai zai-coding-plan-models` (machine-hydrated catalog data gives
+`glm-5.3` a price the upstream test expects to be zero; zero Phase 3 diff in
+`packages/ai`).
+
 ## Compatibility concerns
 
 - The npm package still ships both `aira` and `pi` bins; no path, package, or
