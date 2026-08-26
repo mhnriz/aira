@@ -231,6 +231,7 @@ When an AI agent develops Aira, its instructions should explicitly include:
 - keep Aira implementation isolated from upstream-derived code;
 - run relevant verification;
 - make local Git commits at coherent working checkpoints;
+- save a written phase report to `aira_product_docs/phases/` when a roadmap phase completes, and update its phase table;
 - do not push;
 - do not publish packages;
 - do not rewrite Git history unless explicitly requested;

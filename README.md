@@ -36,6 +36,7 @@ All product decisions, architecture, and the roadmap live in [`aira_product_docs
 | [ROADMAP.md](aira_product_docs/ROADMAP.md) | Phase 0 → 14 build order |
 | [DEVELOPMENT.md](aira_product_docs/DEVELOPMENT.md) | Git discipline, upstream sync, agent rules |
 | [COMPATIBILITY.md](aira_product_docs/COMPATIBILITY.md) | Pi compatibility contract |
+| [phases/](aira_product_docs/phases/) | Written report for each completed roadmap phase |
 
 ## Repository layout
 

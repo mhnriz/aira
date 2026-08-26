@@ -441,6 +441,7 @@ ready
 - Keep phases small enough to review.
 - Run relevant tests before committing.
 - **Commit locally whenever a coherent checkpoint works.**
+- **Save a written phase report in `aira_product_docs/phases/` when the phase is declared complete** (see `aira_product_docs/phases/README.md`).
 - Prefer multiple understandable commits to one giant phase commit.
 - Do not automatically push after committing.
 - GitHub publication is a deliberate maintainer action.

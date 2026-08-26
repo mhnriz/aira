@@ -354,3 +354,26 @@ Aira is the coding harness itself, derived from Pi — not a Pi extension. Names
 ### Consequences
 
 Supersedes the `/aira ...` examples in AIRA_ARCHITECTURE.md §18 and README.md. Extension commands that collide with built-in host commands are detected and diagnosed by the host (existing `BUILTIN_SLASH_COMMANDS` conflict diagnostics cover `/status` automatically). The convention applies only to core Aira commands; extension namespaces remain unchanged.
+
+---
+
+## ADR-018 — Session-file overlap is a legal Pi host lifecycle; canonical state ownership transfers to the newest acquirer
+
+**Status:** Accepted
+
+### Decision
+
+The Pi-derived host permits two live `AgentSession`s over the same session id: a session file may be resumed (`switchSession`) by one runtime while another runtime in the same process still holds it. Aira treats this overlapping lifecycle as legal host behavior.
+
+Consequently, acquisition of `AiraSessionState` never fails on an existing active entry. Each `acquireAiraSessionState(sessionId, reason)` returns a fresh canonical state as an **ownership handle**, replacing the previous entry. Disposal is ownership-checked: `disposeAiraSessionState(sessionId, handle)` transitions the entry only when the caller's handle still matches the current registry entry. A stale owner disposing later is a no-op.
+
+### Rationale
+
+Evidence from the Phase 1 runtime characterization suite (`test/suite/agent-session-runtime.test.ts`) demonstrated the overlapping lifecycle in the real host: `AgentSessionRuntime.switchSession` creates a new session for a destination file while the source runtime — or another runtime in the same process — still owns the same file. The Phase 1 implementation initially threw on double-acquire, which broke this valid host behavior; an unowned dispose-by-id would meanwhile have let the stale owner kill the newer session's state. Ownership handles resolve both failure modes.
+
+### Consequences
+
+- One canonical state per session id at any time; ownership silently transfers to the newest acquirer (ADR-005 is preserved — transfer happens explicitly at the Aira bridge, not through competing state).
+- A stale owner's disposal must never transition state; subsystems must not assume dispose-by-id semantics.
+- Aira session release cannot be routed through pi-ai's anonymous session-resource cleanup registry (it has no ownership channel). Instead `AgentSession.dispose()` calls the Aira bridge directly with the stored handle.
+- Resuming a session file currently open elsewhere therefore yields a fresh canonical state, not a resurrected one.
