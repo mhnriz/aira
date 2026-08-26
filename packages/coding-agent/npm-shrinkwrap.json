@@ -34,6 +34,7 @@
 				"@mariozechner/clipboard": "0.3.9"
 			},
 			"bin": {
+				"aira": "dist/bundle/cli.js",
 				"pi": "dist/bundle/cli.js"
 			},
 			"engines": {

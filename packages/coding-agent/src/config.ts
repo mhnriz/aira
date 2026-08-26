@@ -500,9 +500,17 @@ export const APP_TITLE: string = piConfigName ? APP_NAME : "π";
 export const CONFIG_DIR_NAME: string = pkg.piConfig?.configDir || ".pi";
 export const VERSION: string = pkg.version || "0.0.0";
 
-// e.g., PI_CODING_AGENT_DIR or TAU_CODING_AGENT_DIR
+// e.g., ENV_AGENT_DIR is AIRA_CODING_AGENT_DIR or TAU_CODING_AGENT_DIR.
+// The legacy PI_CODING_AGENT_DIR / PI_CODING_AGENT_SESSION_DIR env vars are
+// honored as compatibility aliases so existing Pi tooling, launch scripts, and
+// test isolation keep working while the canonical Aira names remain primary.
 export const ENV_AGENT_DIR = `${APP_NAME.toUpperCase()}_CODING_AGENT_DIR`;
 export const ENV_SESSION_DIR = `${APP_NAME.toUpperCase()}_CODING_AGENT_SESSION_DIR`;
+
+/** Legacy Pi env alias for the agent config directory (compatibility only). */
+export const LEGACY_ENV_AGENT_DIR = "PI_CODING_AGENT_DIR";
+/** Legacy Pi env alias for the session storage directory (compatibility only). */
+export const LEGACY_ENV_SESSION_DIR = "PI_CODING_AGENT_SESSION_DIR";
 
 export function expandTildePath(path: string): string {
 	return normalizePath(path);
@@ -517,12 +525,12 @@ export function getShareViewerUrl(gistId: string): string {
 }
 
 // =============================================================================
-// User Config Paths (~/.pi/agent/*)
+// User Config Paths (~/.aira/agent/*)
 // =============================================================================
 
-/** Get the agent config directory (e.g., ~/.pi/agent/) */
+/** Get the agent config directory (e.g., ~/.aira/agent/) */
 export function getAgentDir(): string {
-	const envDir = process.env[ENV_AGENT_DIR];
+	const envDir = process.env[ENV_AGENT_DIR] ?? process.env[LEGACY_ENV_AGENT_DIR];
 	if (envDir) {
 		return expandTildePath(envDir);
 	}

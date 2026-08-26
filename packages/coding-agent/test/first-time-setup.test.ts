@@ -33,8 +33,8 @@ describe("shouldRunFirstTimeSetup", () => {
 		}
 	});
 
-	it("returns true when experimental, default agent dir, and no settings.json", () => {
-		expect(shouldRunFirstTimeSetup(settingsPath)).toBe(true);
+	it("returns false for the Aira distribution: Pi's official first-time setup is gated to official Pi", () => {
+		expect(shouldRunFirstTimeSetup(settingsPath)).toBe(false);
 	});
 
 	it("returns false when experimental features are disabled", () => {

@@ -340,7 +340,7 @@ export interface InteractiveModeOptions {
 	startupDiagnostics?: AgentSessionRuntimeDiagnostic[];
 	/** Warning message if session model couldn't be restored */
 	modelFallbackMessage?: string;
-	/** Cwd to trust after reload if it gained a .pi directory during this implicitly trusted session. */
+	/** Cwd to trust after reload if it gained a .aira directory during this implicitly trusted session. */
 	autoTrustOnReloadCwd?: string;
 	/** Initial message to send on startup (can include @file content) */
 	initialMessage?: string;
@@ -3873,7 +3873,7 @@ export class InteractiveMode {
 			new Text(
 				theme.fg(
 					"warning",
-					`This project is not trusted. Project ${CONFIG_DIR_NAME} resources and packages are ignored. Use /trust to save a trust decision, then restart pi.`,
+					`This project is not trusted. Project ${CONFIG_DIR_NAME} resources and packages are ignored. Use /trust to save a trust decision, then restart ${APP_NAME}.`,
 				),
 				1,
 				0,
