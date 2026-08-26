@@ -48,6 +48,7 @@ import {
 } from "@earendil-works/pi-ai/compat";
 import { onAiraSessionCreated, onAiraSessionDisposed } from "../aira/lifecycle.ts";
 import { AIRA_READ_ONLY_TOOLS, isAiraMutatingTool } from "../aira/modes.ts";
+import { resolveAiraProjectInto } from "../aira/project/index.ts";
 import type { AiraMode, AiraSessionState } from "../aira/state.ts";
 import { getThemeByName, theme } from "../modes/interactive/theme/theme.ts";
 import { stripFrontmatter } from "../utils/frontmatter.ts";
@@ -403,6 +404,9 @@ export class AgentSession {
 		// Aira lifecycle seam: this session becomes the canonical Aira state owner.
 		// The returned state is the ownership handle for release in dispose().
 		this._airaSessionState = onAiraSessionCreated(this.sessionId, this._sessionStartEvent.reason);
+		// Aira project-awareness seam: derive and store the project profile in
+		// canonical state so every mode observes the same project (Phase 4).
+		resolveAiraProjectInto(this._airaSessionState, this._cwd);
 
 		// Always subscribe to agent events for internal handling
 		// (session persistence, extensions, auto-compaction, retry logic)
