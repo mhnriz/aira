@@ -45,7 +45,19 @@ import {
 } from "@earendil-works/pi-tui";
 import chalk from "chalk";
 import { spawn } from "child_process";
-import { buildAiraStatusReport, formatAiraStatusReport, getAiraSessionState } from "../../aira/index.ts";
+import {
+	type AiraMode,
+	airaModeLabel,
+	buildAiraDoctorReport,
+	buildAiraModeReport,
+	buildAiraStatusReport,
+	formatAiraDoctorReport,
+	formatAiraModeReport,
+	formatAiraStatusReport,
+	getAiraSessionState,
+	nextAiraMode,
+	parseAiraModeArg,
+} from "../../aira/index.ts";
 import {
 	APP_NAME,
 	APP_TITLE,
@@ -969,6 +981,7 @@ export class InteractiveMode {
 				hint("app.suspend", "to suspend"),
 				keyHint("tui.editor.deleteToLineEnd", "to delete to end"),
 				hint("app.thinking.cycle", "to cycle thinking level"),
+				hint("app.mode.cycle", "to cycle mode"),
 				rawKeyHint(`${keyText("app.model.cycleForward")}/${keyText("app.model.cycleBackward")}`, "to cycle models"),
 				hint("app.model.select", "to select model"),
 				hint("app.tools.expand", "to expand tools"),
@@ -2883,6 +2896,7 @@ export class InteractiveMode {
 		this.defaultEditor.onCtrlD = () => this.handleCtrlD();
 		this.defaultEditor.onAction("app.suspend", () => this.handleCtrlZ());
 		this.defaultEditor.onAction("app.thinking.cycle", () => this.cycleThinkingLevel());
+		this.defaultEditor.onAction("app.mode.cycle", () => this.cycleAiraMode());
 		this.defaultEditor.onAction("app.model.cycleForward", () => this.cycleModel("forward"));
 		this.defaultEditor.onAction("app.model.cycleBackward", () => this.cycleModel("backward"));
 
@@ -3022,6 +3036,17 @@ export class InteractiveMode {
 				this.editor.setText("");
 				return;
 			}
+			if (text === "/mode" || text.startsWith("/mode ")) {
+				const arg = text.startsWith("/mode ") ? text.slice(6).trim() : undefined;
+				this.handleModeCommand(arg);
+				this.editor.setText("");
+				return;
+			}
+			if (text === "/doctor") {
+				this.handleDoctorCommand();
+				this.editor.setText("");
+				return;
+			}
 			if (text === "/changelog") {
 				this.handleChangelogCommand();
 				this.editor.setText("");
@@ -3110,6 +3135,15 @@ export class InteractiveMode {
 				const isExcluded = text.startsWith("!!");
 				const command = isExcluded ? text.slice(2).trim() : text.slice(1).trim();
 				if (command) {
+					// Aira mode policy: PLAN is read-only. Block the user bash escape hatch
+					// too, so PLAN cannot modify the workspace through any harness path.
+					if (this.session.airaMode === "plan") {
+						this.showError(
+							"PLAN mode is read-only: bash commands are blocked. Switch to BUILD (Shift+Tab) to run commands.",
+						);
+						this.editor.setText(text);
+						return;
+					}
 					if (this.session.isBashRunning) {
 						this.showWarning("A bash command is already running. Press Esc to cancel it first.");
 						this.editor.setText(text);
@@ -4158,6 +4192,57 @@ export class InteractiveMode {
 			this.updateEditorBorderColor();
 			this.showStatus(`Thinking level: ${newLevel}`);
 		}
+	}
+
+	/** Shift+Tab / app.mode.cycle: advance BUILD → PLAN → REVIEW → BUILD. */
+	private cycleAiraMode(): void {
+		const state = getAiraSessionState(this.session.sessionId);
+		if (!state) {
+			this.showError("Aira state unavailable — cannot cycle mode");
+			return;
+		}
+		this.applyAiraMode(nextAiraMode(state.mode));
+	}
+
+	/** Write the mode to canonical state and apply host mode-aware policy + UI. */
+	private applyAiraMode(mode: AiraMode): void {
+		this.session.setAiraMode(mode);
+		this.footer.invalidate();
+		this.updateEditorBorderColor();
+		const readOnly = mode === "plan";
+		this.showStatus(`Mode: ${airaModeLabel(mode)}${readOnly ? " (read-only)" : ""}`);
+	}
+
+	private handleModeCommand(arg?: string): void {
+		const state = getAiraSessionState(this.session.sessionId);
+		const parsed = parseAiraModeArg(arg);
+		if (!state) {
+			this.showError("Aira state unavailable — cannot set mode");
+			return;
+		}
+		if (parsed !== undefined) {
+			if (parsed === "cycle") {
+				this.applyAiraMode(nextAiraMode(state.mode));
+			} else {
+				this.applyAiraMode(parsed);
+			}
+		}
+		this.chatContainer.addChild(new Spacer(1));
+		this.chatContainer.addChild(
+			new Text(
+				theme.fg("dim", formatAiraModeReport(buildAiraModeReport(getAiraSessionState(this.session.sessionId)))),
+				1,
+				0,
+			),
+		);
+		this.ui.requestRender();
+	}
+
+	private handleDoctorCommand(): void {
+		const report = buildAiraDoctorReport(getAiraSessionState(this.session.sessionId));
+		this.chatContainer.addChild(new Spacer(1));
+		this.chatContainer.addChild(new Text(theme.fg("dim", formatAiraDoctorReport(report)), 1, 0));
+		this.ui.requestRender();
 	}
 
 	private async cycleModel(direction: "forward" | "backward"): Promise<void> {

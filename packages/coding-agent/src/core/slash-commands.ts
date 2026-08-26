@@ -29,6 +29,12 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{ name: "name", description: "Set session display name" },
 	{ name: "session", description: "Show session info and stats" },
 	{ name: "status", description: "Show Aira status" },
+	{
+		name: "mode",
+		description: "Show or set the Aira mode (build/plan/review)",
+		argumentHint: "<build|plan|review|cycle>",
+	},
+	{ name: "doctor", description: "Run Aira health checks" },
 	{ name: "changelog", description: "Show changelog entries" },
 	{ name: "hotkeys", description: "Show all keyboard shortcuts" },
 	{ name: "fork", description: "Create a new fork from a previous user message" },
