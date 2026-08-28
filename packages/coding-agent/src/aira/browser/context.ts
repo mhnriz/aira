@@ -30,6 +30,8 @@ export interface AiraBrowserContextInput {
 	relevanceSignal: boolean;
 	/** Count of browser-relevant edits not yet reflected in injected context. */
 	pendingEdits: number;
+	/** Hash of the previously injected content (dedupe cursor). */
+	lastHash?: string;
 }
 
 export interface AiraBrowserContextResult {
@@ -65,21 +67,36 @@ export function buildBrowserContext(input: AiraBrowserContextInput): AiraBrowser
 	}
 
 	const budget = BUDGETS[settings.budget];
+	// Dedupe: identical content that already entered the prompt stays out
+	// unless a relevance signal moved. The pack is built first; its hash is
+	// the dedupe cursor.
+	const pack = assemblePack(input, budget);
+	if (
+		input.lastHash !== undefined &&
+		pack.hash === input.lastHash &&
+		!input.relevanceSignal &&
+		input.pendingEdits === 0
+	) {
+		return { content: undefined, hash: pack.hash };
+	}
+	return pack;
+}
+
+function assemblePack(input: AiraBrowserContextInput, budget: number): { content: string; hash: string } {
+	const status = input.status;
+	const active = status.tabs[0] ?? { url: "", title: "", readyState: "unknown" as const };
 	const lines: string[] = [];
 	let used = 0;
 	const push = (line: string): boolean => {
 		const cost = line.length + 1;
-		if (used + cost > budget) {
-			return false;
-		}
+		if (used + cost > budget) return false;
 		lines.push(line);
 		used += cost;
 		return true;
 	};
-
+	push("Browser");
 	const summary = status.observation.summary ? ` · ${status.observation.summary}` : "";
 	push(`${active.url || "(blank)"}${summary}`);
-
 	if (status.verification.status !== "none") {
 		const lastCheck =
 			status.verification.lastCheckAt !== undefined
@@ -87,36 +104,26 @@ export function buildBrowserContext(input: AiraBrowserContextInput): AiraBrowser
 				: "";
 		push(`check: ${status.verification.status}${lastCheck ? ` ${lastCheck}` : ""}`);
 		const finding = status.verification.finding;
-		if (finding) {
-			push(`finding: ${oneLineFinding(finding)}`);
-		}
+		if (finding) push(`finding: ${oneLineFinding(finding)}`);
 	}
-
 	const consoleCounts = `${status.console.errors} error${status.console.errors === 1 ? "" : "s"}, ${status.console.warnings} warning${status.console.warnings === 1 ? "" : "s"}`;
 	if (status.console.errors + status.console.warnings > 0) {
 		if (push(`console: ${consoleCounts}`)) {
 			const top = status.console.topFinding;
-			if (top) {
-				push(`  ${oneLineFinding(top)}`);
-			}
+			if (top) push(`  ${oneLineFinding(top)}`);
 		}
 	} else if (status.console.total > 0) {
 		push(`console: ${consoleCounts}`);
 	}
-
 	if (status.network.failures > 0) {
 		if (push(`network: ${status.network.failures} failed`)) {
 			const top = status.network.topFinding;
-			if (top) {
-				push(`  ${oneLineFinding(top)}`);
-			}
+			if (top) push(`  ${oneLineFinding(top)}`);
 		}
 	} else {
 		push("network: clean");
 	}
-
-	const content = lines.join("\n");
-	return { content, hash: hashContent(content) };
+	return { content: lines.join("\n"), hash: hashContent(lines.join("\n")) };
 }
 
 function oneLineFinding(finding: { message: string; source?: string; line?: number }): string {

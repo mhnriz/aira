@@ -165,7 +165,8 @@ export class AiraBrowserManager implements AiraBrowserHandle {
 	private readonly listeners = new Set<(status: AiraBrowserStatus) => void>();
 	private lastContextHash: string | undefined;
 	private lastInjectedAt = 0;
-	private lastTabSignalAt = 0;
+	/** Active-tab URL at the last injection (tab-change signal cursor). */
+	private lastInjectedTabUrl: string | undefined;
 	private lastVerificationSignalAt = 0;
 	private pendingBrowserEdits = 0;
 	private lastEditPath: string | undefined;
@@ -260,7 +261,6 @@ export class AiraBrowserManager implements AiraBrowserHandle {
 			this.session.status = "running";
 			this.session.createdAt = this.now();
 			this.degradedReason = undefined;
-			this.bumpTabSignal();
 		} else {
 			this.session.status = "degraded";
 			this.degradedReason = resolved.reason;
@@ -282,7 +282,6 @@ export class AiraBrowserManager implements AiraBrowserHandle {
 		const tab = this.requireActiveTab("navigate");
 		const provider = this.requireProvider();
 		const result = await provider.navigate(tab, options);
-		this.bumpTabSignal();
 		await this.settle();
 		return result;
 	}
@@ -501,7 +500,10 @@ export class AiraBrowserManager implements AiraBrowserHandle {
 		if (this.disposed || this.state.runtime !== "active") return undefined;
 		const settings = this.settingsOf();
 
-		const tabChanged = this.lastTabSignalAt > this.lastInjectedAt;
+		// Tab-change signal: the active page URL differs from the last injected
+		// one (open/navigate move it; steady state never re-triggers).
+		const activeUrl = this.statusSnapshot.activeTab?.url;
+		const tabChanged = activeUrl !== undefined && activeUrl !== this.lastInjectedTabUrl;
 		const verificationChanged = this.lastVerificationSignalAt > this.lastInjectedAt;
 		const relevanceSignal = tabChanged || verificationChanged || this.pendingBrowserEdits > 0;
 
@@ -510,14 +512,12 @@ export class AiraBrowserManager implements AiraBrowserHandle {
 			status: this.statusSnapshot,
 			relevanceSignal,
 			pendingEdits: this.pendingBrowserEdits,
+			lastHash: this.lastContextHash,
 		});
 		if (!built.content || built.hash === undefined) return undefined;
-		if (built.hash === this.lastContextHash && !relevanceSignal) {
-			// Identical unchanged evidence: never re-inject.
-			return undefined;
-		}
 		this.lastContextHash = built.hash;
 		this.lastInjectedAt = this.now();
+		this.lastInjectedTabUrl = this.statusSnapshot.activeTab?.url;
 		this.pendingBrowserEdits = 0;
 		return built.content;
 	}
@@ -723,7 +723,9 @@ export class AiraBrowserManager implements AiraBrowserHandle {
 			devProcess: dev.running
 				? { id: dev.processId ?? "dev", status: dev.processStatus ?? "running", url: this.devUrl(dev) }
 				: undefined,
-			reason: this.degradedReason,
+			reason:
+				this.degradedReason ??
+				(this.availabilityProbed && !this.availability.available ? this.availability.reason : undefined),
 			updatedAt: this.now(),
 		};
 		if (this.state.runtime !== "disposed") {
@@ -822,10 +824,6 @@ export class AiraBrowserManager implements AiraBrowserHandle {
 
 	private touch(): void {
 		this.session.lastActivityAt = this.now();
-	}
-
-	private bumpTabSignal(): void {
-		this.lastTabSignalAt = this.now();
 	}
 
 	private pruneScreenshots(dir: string): void {

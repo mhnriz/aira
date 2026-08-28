@@ -216,6 +216,7 @@ export function createAiraBrowserToolDefinitions(
 			"The browser persists across tool calls within this session; close it with browser_close when done.",
 		],
 		parameters: browserOpenSchema,
+		executionMode: "sequential",
 		async execute(_toolCallId, params) {
 			return runBrowserOp(runtime, "open", () => runtime.open(paramsToOpenOptions(params)));
 		},
@@ -231,6 +232,7 @@ export function createAiraBrowserToolDefinitions(
 			"Compact read-only browser status: availability, session state, active tab, console/network counts, verification state. No page interaction happens. Read-only.",
 		promptSnippet: "Show browser status",
 		parameters: browserStatusSchema,
+		executionMode: "sequential",
 		async execute() {
 			const status = runtime.status();
 			return { content: [{ type: "text", text: formatStatus(status) }], details: undefined };
@@ -251,6 +253,7 @@ export function createAiraBrowserToolDefinitions(
 			"A 'ref is stale' error means the page changed — re-observe for fresh refs.",
 		],
 		parameters: browserObserveSchema,
+		executionMode: "sequential",
 		async execute(_toolCallId, params) {
 			return runBrowserOp(runtime, "observe", async () => {
 				const options: AiraBrowserObserveOptions = {
@@ -262,7 +265,13 @@ export function createAiraBrowserToolDefinitions(
 				return {
 					ok: true,
 					operation: "observe",
-					content: [{ type: "text", text: formatObservation(result.observation, result.console, result.network) }],
+					tab: {
+						id: "",
+						url: result.observation.url,
+						title: result.observation.title,
+						readyState: result.observation.readyState,
+					},
+					text: formatObservation(result.observation, result.console, result.network),
 				};
 			});
 		},
@@ -277,6 +286,7 @@ export function createAiraBrowserToolDefinitions(
 			"Navigate the active tab to a URL and wait for the page to become ready. Returns fresh page state plus console/network evidence counts. Navigation in a disposable isolated profile is safe read-only browsing; use it before browser_observe for a new page.",
 		promptSnippet: "Navigate the browser tab",
 		parameters: browserNavigateSchema,
+		executionMode: "sequential",
 		async execute(_toolCallId, params) {
 			return runBrowserOp(runtime, "navigate", () => {
 				const options: AiraBrowserNavigateOptions = {
@@ -304,6 +314,7 @@ export function createAiraBrowserToolDefinitions(
 			"Read the appended page-change diff to confirm the action landed.",
 		],
 		parameters: browserClickSchema,
+		executionMode: "sequential",
 		async execute(_toolCallId, params) {
 			return runBrowserOp(runtime, "click", () => {
 				const options: AiraBrowserClickOptions = {
@@ -336,6 +347,7 @@ export function createAiraBrowserToolDefinitions(
 		promptSnippet: "Fill/select/check a form field by ref",
 		promptGuidelines: ["PREFER ref from browser_observe.", "For selects pass the option value, label, or text."],
 		parameters: browserFillSchema,
+		executionMode: "sequential",
 		async execute(_toolCallId, params) {
 			return runBrowserOp(runtime, "fill", () => runtime.fill(params.ref, params.value));
 		},
@@ -351,6 +363,7 @@ export function createAiraBrowserToolDefinitions(
 			"Press a key at the focused element: Enter, Tab, Backspace, Delete, Escape, arrows, Home, End, PageUp, PageDown, or any character. Optional modifier bitfield (1=Alt, 2=Ctrl, 4=Meta/Cmd, 8=Shift). Appends a compact page-change diff.",
 		promptSnippet: "Press a key",
 		parameters: browserPressSchema,
+		executionMode: "sequential",
 		async execute(_toolCallId, params) {
 			return runBrowserOp(runtime, "press", () => runtime.pressKey(params.key, params.modifiers ?? 0));
 		},
@@ -366,6 +379,7 @@ export function createAiraBrowserToolDefinitions(
 			"Scroll the page (or at a ref). deltaY positive scrolls down, negative scrolls up (default 300). Read-only page inspection aid.",
 		promptSnippet: "Scroll the page",
 		parameters: browserScrollSchema,
+		executionMode: "sequential",
 		async execute(_toolCallId, params) {
 			return runBrowserOp(runtime, "scroll", () =>
 				runtime.scroll(params.ref, params.deltaX ?? 0, params.deltaY ?? 300),
@@ -383,6 +397,7 @@ export function createAiraBrowserToolDefinitions(
 			"Wait for a bounded condition: a CSS selector (kind=selector), visible text (kind=text), URL substring (kind=url), ready state (kind=ready), or a fixed delay (kind=time). Returns fresh page state or a truthful timeout. Read-only.",
 		promptSnippet: "Wait for a page condition",
 		parameters: browserWaitSchema,
+		executionMode: "sequential",
 		async execute(_toolCallId, params) {
 			return runBrowserOp(runtime, "wait", () => {
 				const condition = paramsToWaitCondition(params);
@@ -400,6 +415,7 @@ export function createAiraBrowserToolDefinitions(
 			"Run a small expression in the page (main world, returnByValue, promises awaited). The result is summarized; keep expressions read-only and small. Use structured observation first; evaluation is for targeted state reads.",
 		promptSnippet: "Evaluate a small expression in the page",
 		parameters: browserEvaluateSchema,
+		executionMode: "sequential",
 		async execute(_toolCallId, params) {
 			return runBrowserOp(runtime, "evaluate", () =>
 				runtime.evaluate(params.expression, (params.timeout ?? 10) * 1000),
@@ -417,6 +433,7 @@ export function createAiraBrowserToolDefinitions(
 			"Bounded console evidence: uncaught exceptions, page errors, console.error/warn, deduplicated with counts. Routine logs appear as counts only. Returns a bounded drain with the top finding. Read-only.",
 		promptSnippet: "Inspect console evidence",
 		parameters: browserConsoleSchema,
+		executionMode: "sequential",
 		async execute(_toolCallId, params) {
 			const drain = await runtime.consoleEvidence(params.levels, params.sinceSeq, params.limit);
 			return { content: [{ type: "text", text: formatConsoleDrain(drain) }], details: undefined };
@@ -432,6 +449,7 @@ export function createAiraBrowserToolDefinitions(
 			"Bounded network failure evidence: failed/aborted/blocked requests and relevant 4xx/5xx, deduplicated with counts. Successful traffic is not retained. Read-only.",
 		promptSnippet: "Inspect network failure evidence",
 		parameters: browserNetworkSchema,
+		executionMode: "sequential",
 		async execute(_toolCallId, params) {
 			const drain = await runtime.networkEvidence(params.sinceSeq, params.limit);
 			return { content: [{ type: "text", text: formatNetworkDrain(drain) }], details: undefined };
@@ -447,6 +465,7 @@ export function createAiraBrowserToolDefinitions(
 			"Capture one screenshot of the active tab to an Aira-managed path and return the reference (never image bytes in state). Use when appearance/layout matters and structured observation is insufficient — not as a default inspection step.",
 		promptSnippet: "Capture a screenshot (appearance matters)",
 		parameters: browserScreenshotSchema,
+		executionMode: "sequential",
 		async execute() {
 			const result = await runtime.screenshot();
 			if (!result.ok) {
@@ -468,6 +487,7 @@ export function createAiraBrowserToolDefinitions(
 			"Run ONE bounded verification pass over the local app: open the isolated browser if needed, navigate to the target URL (default: discovered from the running dev process), observe the page, and record console/network evidence as check passed/failed. No retry loops. REVIEW mode emphasizes this flow.",
 		promptSnippet: "Run one bounded browser verification pass",
 		parameters: browserVerifySchema,
+		executionMode: "sequential",
 		async execute(_toolCallId, params) {
 			return runBrowserOp(runtime, "verify", () => runtime.verify(params.url));
 		},
@@ -483,6 +503,7 @@ export function createAiraBrowserToolDefinitions(
 			"Close the Aira browser session (kills the Aira-owned browser process; the disposable profile is removed) or close a single tab when `tab` is given. Used at the end of browser work.",
 		promptSnippet: "Close the Aira browser (or one tab)",
 		parameters: browserCloseSchema,
+		executionMode: "sequential",
 		async execute(_toolCallId, params) {
 			return runBrowserOp(runtime, "close", () => runtime.close(params.tab));
 		},
@@ -659,6 +680,10 @@ async function runBrowserOp(
 	try {
 		const result = await fn();
 		if (isOperationResult(result)) {
+			// A formatted observation result carries its own text.
+			if ("text" in result && typeof (result as { text?: unknown }).text === "string") {
+				return { content: [{ type: "text", text: (result as { text: string }).text }], details: undefined };
+			}
 			return { content: [{ type: "text", text: formatOperationResult(result) }], details: undefined };
 		}
 		const text =

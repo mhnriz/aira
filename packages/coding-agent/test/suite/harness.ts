@@ -15,6 +15,7 @@ import type {
 	Model,
 } from "@earendil-works/pi-ai/compat";
 import { registerFauxProvider, streamSimple } from "@earendil-works/pi-ai/compat";
+import type { AiraBrowserManagerOptions } from "../../src/aira/browser/manager.ts";
 import type { AiraExecutionManagerOptions } from "../../src/aira/execution/manager.ts";
 import { AgentSession, type AgentSessionEvent } from "../../src/core/agent-session.ts";
 import { AuthStorage } from "../../src/core/auth-storage.ts";
@@ -76,6 +77,8 @@ export interface HarnessOptions {
 	cwd?: string;
 	/** Aira execution-runtime options (small timings for deterministic tests). */
 	airaExecutionOptions?: AiraExecutionManagerOptions;
+	/** Aira browser-runtime options (tests inject fake providers). */
+	airaBrowserOptions?: AiraBrowserManagerOptions;
 }
 
 export interface Harness {
@@ -196,6 +199,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 		excludedToolNames: options.excludedToolNames,
 		extensionRunnerRef,
 		airaExecutionOptions: options.airaExecutionOptions,
+		airaBrowserOptions: options.airaBrowserOptions,
 	});
 
 	const events: AgentSessionEvent[] = [];

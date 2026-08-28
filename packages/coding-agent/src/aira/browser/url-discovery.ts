@@ -65,7 +65,8 @@ function normalizeLocalUrl(raw: string): string | undefined {
 		const url = new URL(cleaned);
 		if (!isLoopbackHost(url.hostname)) return undefined;
 		url.hostname = url.hostname === "0.0.0.0" ? "localhost" : url.hostname;
-		return url.origin + url.pathname;
+		const path = url.pathname.replace(/\/+$/, "");
+		return path ? url.origin + path : url.origin;
 	} catch {
 		return undefined;
 	}
