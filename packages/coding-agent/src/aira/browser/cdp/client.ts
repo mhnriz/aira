@@ -83,7 +83,12 @@ export class CdpClient {
 		});
 	}
 
-	send<T = unknown>(method: string, params: Record<string, unknown> = {}, sessionId?: string): Promise<CdpResult<T>> {
+	send<T = unknown>(
+		method: string,
+		params: Record<string, unknown> = {},
+		sessionId?: string,
+		options?: { timeoutMs?: number },
+	): Promise<CdpResult<T>> {
 		const connection = this.ws;
 		if (!connection || connection.readyState !== WebSocket.OPEN) {
 			return Promise.resolve({ ok: false, error: "browser connection is not open" });
@@ -93,11 +98,12 @@ export class CdpClient {
 		if (sessionId) {
 			(payload as Record<string, unknown>).sessionId = sessionId;
 		}
+		const timeoutMs = options?.timeoutMs ?? this.commandTimeoutMs;
 		return new Promise<CdpResult<T>>((resolve) => {
 			const timer = setTimeout(() => {
 				this.pending.delete(id);
-				resolve({ ok: false, error: `CDP command timed out after ${this.commandTimeoutMs}ms (${method})` });
-			}, this.commandTimeoutMs);
+				resolve({ ok: false, error: `CDP command timed out after ${timeoutMs}ms (${method})` });
+			}, timeoutMs);
 			this.pending.set(id, { resolve: resolve as (r: CdpResult) => void, timer });
 			try {
 				connection.send(JSON.stringify(payload));

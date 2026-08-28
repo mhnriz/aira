@@ -256,7 +256,9 @@ export class CdpBrowserProvider implements AiraBrowserProvider {
 		const timeoutMs = options.timeoutMs ?? NAVIGATE_TIMEOUT_MS;
 		const deadline = this.now() + timeoutMs;
 
-		const navigate = await client.send("Page.navigate", { url: options.url }, tab.cdp.sessionId);
+		const navigate = await client.send("Page.navigate", { url: options.url }, tab.cdp.sessionId, {
+			timeoutMs: Math.max(timeoutMs, 30_000),
+		});
 		if (!navigate.ok) return failResult("navigate", `navigation failed: ${navigate.error}`, { target: options.url });
 
 		const waitUntil = options.waitUntil ?? "domcontentloaded";

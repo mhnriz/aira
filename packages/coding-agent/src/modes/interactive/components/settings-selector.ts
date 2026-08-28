@@ -26,6 +26,18 @@ import { SelectSubmenu, SteppedSubmenu, type SteppedSubmenuStep } from "./settin
 
 const MODEL_PICKER_LAYOUT = { minPrimaryColumnWidth: 12, maxPrimaryColumnWidth: 46 };
 
+/** The selector may be constructed by older hosts/tests without browserSettings. */
+function browserSettingsOf(config: SettingsConfig): SettingsConfig["browserSettings"] {
+	return (
+		config.browserSettings ?? {
+			enabled: true,
+			context: "auto",
+			autoVerify: true,
+			contextBudget: "compact",
+		}
+	);
+}
+
 const THINKING_DESCRIPTIONS: Record<ThinkingLevel, string> = {
 	off: "No reasoning",
 	minimal: "Very brief reasoning (~1k tokens)",
@@ -822,10 +834,10 @@ export class SettingsSelectorComponent extends Container {
 				id: "browser",
 				label: "Aira browser",
 				description: "Native browser capability: enable, ambient context policy, auto-verify, context budget",
-				currentValue: `${config.browserSettings.context} · ${config.browserSettings.enabled ? "on" : "off"}`,
+				currentValue: `${browserSettingsOf(config).context} · ${browserSettingsOf(config).enabled ? "on" : "off"}`,
 				submenu: (_currentValue, done) =>
 					new AiraBrowserSubmenu(
-						config.browserSettings,
+						browserSettingsOf(config),
 						(settings) => callbacks.onBrowserSettingsChange(settings),
 						() => done(),
 					),
