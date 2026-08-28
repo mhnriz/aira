@@ -141,7 +141,14 @@ describe("Aira ambient intelligence through the host (Phase 5)", () => {
 		const before = harness.session.getActiveToolNames().sort();
 		harness.session.setAiraMode("plan");
 		try {
-			expect(harness.session.getActiveToolNames().sort()).toEqual(["find", "grep", "ls", "read"]);
+			expect(harness.session.getActiveToolNames().sort()).toEqual([
+				"find",
+				"grep",
+				"ls",
+				"process_logs",
+				"process_status",
+				"read",
+			]);
 			harness.setResponses([fauxAssistantMessage(fauxText("planning"))]);
 			await harness.session.prompt("which file handles tray state?");
 			expect(customContext(harness).join("\n")).toContain("Project: aira-suite-intel-");

@@ -50,7 +50,19 @@ describe("regression #5109: exclude tools", () => {
 			expect(allToolNames).not.toContain("ask_question");
 			expect(allToolNames).toContain("bash");
 			expect(allToolNames).toContain("dynamic_tool");
-			expect(harness.session.getActiveToolNames().sort()).toEqual(["bash", "dynamic_tool", "edit", "write"]);
+			// Phase 6: the native process runtime tools are core Aira tools.
+			expect(allToolNames).toContain("process_start");
+			expect(allToolNames).toContain("process_stop");
+			expect(harness.session.getActiveToolNames().sort()).toEqual([
+				"bash",
+				"dynamic_tool",
+				"edit",
+				"process_logs",
+				"process_start",
+				"process_status",
+				"process_stop",
+				"write",
+			]);
 			expect(harness.session.systemPrompt).not.toContain("- read:");
 			expect(harness.session.systemPrompt).not.toContain("ask_question");
 			expect(harness.session.systemPrompt).toContain("- dynamic_tool: Run dynamic test behavior");

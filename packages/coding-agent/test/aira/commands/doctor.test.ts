@@ -3,6 +3,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { buildAiraDoctorReport, formatAiraDoctorReport } from "../../../src/aira/commands/doctor.ts";
+import { initialAiraExecutionStatus } from "../../../src/aira/execution/status.ts";
 import { initialAiraIntelligenceStatus } from "../../../src/aira/intelligence/status.ts";
 import { resolveAiraProjectInto } from "../../../src/aira/project/index.ts";
 import { acquireAiraSessionState, disposeAiraSessionState } from "../../../src/aira/state.ts";
@@ -27,10 +28,13 @@ describe("Aira /doctor command (Phase 4 scope)", () => {
 		intelligence.active = false;
 		intelligence.activationReason = "no defensible project (inert session state)";
 		state.intelligence = intelligence;
+		// A real session arms the execution runtime which publishes a snapshot;
+		// a bare acquired state has none, so publish the honest inactive one.
+		state.execution = initialAiraExecutionStatus();
 		const report = buildAiraDoctorReport(state);
 
 		expect(report.home).toBe(expectedHome);
-		expect(report.checks.length).toBe(8);
+		expect(report.checks.length).toBe(9);
 		for (const check of report.checks) {
 			expect(check.pass, `${check.name} should pass`).toBe(true);
 		}
@@ -182,11 +186,46 @@ describe("Aira /doctor command (Phase 4 scope)", () => {
 		intelligence.active = false;
 		intelligence.activationReason = "no defensible project";
 		state.intelligence = intelligence;
+		state.execution = initialAiraExecutionStatus();
 		const text = formatAiraDoctorReport(buildAiraDoctorReport(state));
 
 		expect(text).toContain(`home: ${expectedHome}`);
-		expect(text).toContain("summary: 8/8 checks passed");
+		expect(text).toContain("summary: 9/9 checks passed");
 		expect(text).toContain("ok  home:");
 		disposeAiraSessionState("doctor-5", state);
+	});
+
+	it("flags a missing execution snapshot as a wiring failure", () => {
+		const state = acquireAiraSessionState("doctor-exec-1", "startup");
+		const report = buildAiraDoctorReport(state);
+		const check = report.checks.find((c) => c.name === "execution");
+		expect(check?.pass).toBe(false);
+		expect(check?.detail).toContain("no execution snapshot");
+		disposeAiraSessionState("doctor-exec-1", state);
+	});
+
+	it("reports an armed execution runtime with processes in the snapshot", () => {
+		const state = acquireAiraSessionState("doctor-exec-2", "startup");
+		const execution = initialAiraExecutionStatus();
+		execution.active = true;
+		execution.processes = [
+			{
+				id: "dev-1",
+				purpose: "dev",
+				mode: "background",
+				status: "running",
+				command: "npm run dev",
+				cwd: "/tmp/proj",
+				pid: 4242,
+				createdAt: 1,
+				startedAt: 1,
+			},
+		];
+		state.execution = execution;
+		const report = buildAiraDoctorReport(state);
+		const check = report.checks.find((c) => c.name === "execution");
+		expect(check?.pass).toBe(true);
+		expect(check?.detail).toContain("1 process(es) (1 running)");
+		disposeAiraSessionState("doctor-exec-2", state);
 	});
 });

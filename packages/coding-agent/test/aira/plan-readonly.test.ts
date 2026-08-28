@@ -37,7 +37,16 @@ describe("Aira PLAN read-only enforcement (host/tool-policy level)", () => {
 	it("starts in BUILD with the full default tool set", () => {
 		const harness = harnesses[0]!;
 		expect(harness.session.airaMode).toBe("build");
-		expect(harness.session.getActiveToolNames().sort()).toEqual(["bash", "edit", "read", "write"]);
+		expect(harness.session.getActiveToolNames().sort()).toEqual([
+			"bash",
+			"edit",
+			"process_logs",
+			"process_start",
+			"process_status",
+			"process_stop",
+			"read",
+			"write",
+		]);
 	});
 
 	it("enters PLAN with only the read-only tools available", () => {
@@ -45,25 +54,50 @@ describe("Aira PLAN read-only enforcement (host/tool-policy level)", () => {
 		harness.session.setAiraMode("plan");
 
 		expect(harness.session.airaMode).toBe("plan");
-		expect(harness.session.getActiveToolNames().sort()).toEqual(["find", "grep", "ls", "read"]);
+		expect(harness.session.getActiveToolNames().sort()).toEqual([
+			"find",
+			"grep",
+			"ls",
+			"process_logs",
+			"process_status",
+			"read",
+		]);
 	});
 
 	it("restores the previous tool set when leaving PLAN", () => {
 		const harness = harnesses[0]!;
 		harness.session.setAiraMode("review");
 		expect(harness.session.airaMode).toBe("review");
-		expect(harness.session.getActiveToolNames().sort()).toEqual(["bash", "edit", "read", "write"]);
+		expect(harness.session.getActiveToolNames().sort()).toEqual([
+			"bash",
+			"edit",
+			"process_logs",
+			"process_start",
+			"process_status",
+			"process_stop",
+			"read",
+			"write",
+		]);
 
 		harness.session.setAiraMode("build");
 		expect(harness.session.airaMode).toBe("build");
-		expect(harness.session.getActiveToolNames().sort()).toEqual(["bash", "edit", "read", "write"]);
+		expect(harness.session.getActiveToolNames().sort()).toEqual([
+			"bash",
+			"edit",
+			"process_logs",
+			"process_start",
+			"process_status",
+			"process_stop",
+			"read",
+			"write",
+		]);
 	});
 
 	it("blocks mutating tool execution in PLAN at the boundary", async () => {
 		const harness = harnesses[0]!;
 		harness.session.setAiraMode("plan");
 
-		for (const mutating of ["bash", "powershell", "edit", "write"]) {
+		for (const mutating of ["bash", "powershell", "edit", "write", "process_start", "process_stop"]) {
 			const result = await harness.session.agent.beforeToolCall?.(toolCallContext(mutating));
 			expect(result?.block, `${mutating} should be blocked in PLAN`).toBe(true);
 			expect(result?.reason).toContain("PLAN mode is read-only");
@@ -74,7 +108,7 @@ describe("Aira PLAN read-only enforcement (host/tool-policy level)", () => {
 		const harness = harnesses[0]!;
 		harness.session.setAiraMode("plan");
 
-		for (const safe of ["read", "grep", "find", "ls"]) {
+		for (const safe of ["read", "grep", "find", "ls", "process_status", "process_logs"]) {
 			const result = await harness.session.agent.beforeToolCall?.(toolCallContext(safe));
 			expect(result?.block, `${safe} should not be blocked in PLAN`).toBeUndefined();
 		}

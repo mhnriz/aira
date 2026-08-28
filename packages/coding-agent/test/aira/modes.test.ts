@@ -50,14 +50,14 @@ describe("Aira modes", () => {
 	});
 
 	it("classifies built-in mutating tools (blocked in PLAN)", () => {
-		for (const tool of ["bash", "powershell", "edit", "write"]) {
+		for (const tool of ["bash", "powershell", "edit", "write", "process_start", "process_stop"]) {
 			expect(isAiraMutatingTool(tool)).toBe(true);
 		}
-		expect(AIRA_MUTATING_TOOLS.size).toBe(4);
+		expect(AIRA_MUTATING_TOOLS.size).toBe(6);
 	});
 
 	it("keeps read-only inspection tools available", () => {
-		expect(AIRA_READ_ONLY_TOOLS).toEqual(["read", "grep", "find", "ls"]);
+		expect(AIRA_READ_ONLY_TOOLS).toEqual(["read", "grep", "find", "ls", "process_status", "process_logs"]);
 		for (const tool of AIRA_READ_ONLY_TOOLS) {
 			expect(isAiraMutatingTool(tool)).toBe(false);
 		}
