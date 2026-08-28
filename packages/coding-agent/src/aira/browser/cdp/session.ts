@@ -40,6 +40,8 @@ export class CdpTabSession {
 	private readonly refMap = new Map<string, number>();
 	/** Ref → signature (role|name|value|state) at assignment time. */
 	private readonly refSignatures = new Map<string, string>();
+	/** Page URL at the last ref assignment (cross-navigation staleness). */
+	refPageUrl: string | undefined;
 
 	constructor(targetId: string, sessionId: string) {
 		this.targetId = targetId;
@@ -57,6 +59,18 @@ export class CdpTabSession {
 
 	handleEvent(event: CdpEvent): void {
 		switch (event.method) {
+			case "Page.frameNavigated": {
+				// A main-frame navigation invalidates every ref: CDP backend
+				// node ids are reused across documents, so refs must never
+				// silently target a node in a different page. Subframe
+				// navigations keep refs (they do not reset backend ids).
+				const frame = (event.params as { frame?: { id?: string; parentId?: string } }).frame;
+				if (frame?.id && !frame.parentId) {
+					this.refMap.clear();
+					this.refSignatures.clear();
+				}
+				break;
+			}
 			case "Page.javascriptDialogOpening": {
 				const params = event.params as { type?: string; message?: string };
 				this.dialog = {
@@ -85,11 +99,12 @@ export class CdpTabSession {
 		}
 	}
 
-	setRefs(refMap: Map<string, number>, signatures: Map<string, string>): void {
+	setRefs(refMap: Map<string, number>, signatures: Map<string, string>, pageUrl?: string): void {
 		this.refMap.clear();
 		this.refSignatures.clear();
 		for (const [ref, backendId] of refMap) this.refMap.set(ref, backendId);
 		for (const [ref, sig] of signatures) this.refSignatures.set(ref, sig);
+		if (pageUrl !== undefined) this.refPageUrl = pageUrl;
 	}
 
 	resolveRef(ref: string): number | undefined {
@@ -115,6 +130,7 @@ export class CdpTabSession {
 		this.dialog = undefined;
 		this.refMap.clear();
 		this.refSignatures.clear();
+		this.refPageUrl = undefined;
 		this.console.clear();
 		this.network.clear();
 	}

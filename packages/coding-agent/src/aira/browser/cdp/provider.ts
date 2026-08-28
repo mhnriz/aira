@@ -119,6 +119,17 @@ export class CdpBrowserProvider implements AiraBrowserProvider {
 		if (!resolved.ok) {
 			return failResult("open", `browser unavailable: ${resolved.reason}`);
 		}
+		// The profile is disposable and Aira-owned: a fresh launch starts from a
+		// clean directory. A stale DevToolsActivePort (from a killed browser,
+		// a singleton-refused relaunch, or a Chrome version change) must never
+		// misdirect the connect, and leftover profile junk must not accumulate.
+		if (!options.reuseProfile) {
+			try {
+				rmSync(options.profileDir, { recursive: true, force: true });
+			} catch {
+				// best effort; the launch itself reports real failures
+			}
+		}
 		const launch = this.options.launch ?? launchIsolatedBrowser;
 		const launched = await launch({
 			executable: resolved.executable.path,
@@ -216,7 +227,7 @@ export class CdpBrowserProvider implements AiraBrowserProvider {
 		const pageInfo = await this.pageInfo(tab);
 		tab.record = { ...tab.record, url: pageInfo.url, title: pageInfo.title, readyState: pageInfo.readyState };
 
-		const targets = await this.targetsWithBoxes(slim, tab);
+		const targets = await this.targetsWithBoxes(slim, tab, pageInfo.url);
 		const rendered = renderOutline(slim, maxChars);
 		return {
 			title: pageInfo.title,
@@ -248,7 +259,7 @@ export class CdpBrowserProvider implements AiraBrowserProvider {
 			const ready = lastState.readyState;
 			const reached =
 				waitUntil === "commit"
-					? lastState.url !== "about:blank"
+					? lastState.url.startsWith(options.url)
 					: waitUntil === "load"
 						? ready === "complete"
 						: ready === "interactive" || ready === "complete";
@@ -703,7 +714,8 @@ export class CdpBrowserProvider implements AiraBrowserProvider {
 				}
 			}
 
-			tab.cdp.setRefs(refMap, signatures);
+			const page = await this.pageInfo(tab);
+			tab.cdp.setRefs(refMap, signatures, page.url);
 			const out: Array<{ kind: "changed" | "new" | "removed"; ref: string; role: string; name: string }> = [
 				...changed,
 				...added,
@@ -716,7 +728,7 @@ export class CdpBrowserProvider implements AiraBrowserProvider {
 	}
 
 	/** Resolve interactive targets with viewport boxes (bounded). */
-	private async targetsWithBoxes(slim: SlimAxNode[], tab: ProviderTab): Promise<AiraBrowserTarget[]> {
+	private async targetsWithBoxes(slim: SlimAxNode[], tab: ProviderTab, pageUrl: string): Promise<AiraBrowserTarget[]> {
 		const client = this.requireClient();
 		const targets = collectInteractiveTargets(slim);
 		const refMap = assignRefs(targets);
@@ -750,7 +762,7 @@ export class CdpBrowserProvider implements AiraBrowserProvider {
 			}
 			out.push(entry);
 		}
-		tab.cdp.setRefs(refMap, signatures);
+		tab.cdp.setRefs(refMap, signatures, pageUrl);
 		return out;
 	}
 

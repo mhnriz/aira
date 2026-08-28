@@ -14,6 +14,8 @@ export interface CdpTabHandle {
 	targetId: string;
 	sessionId: string;
 	resolveRef(ref: string): number | undefined;
+	/** Page URL when the refs were assigned (cross-navigation staleness). */
+	refPageUrl?: string;
 }
 
 const CLICK_TIMEOUT_MS = 5_000;
@@ -73,6 +75,32 @@ export async function resolveRefToBox(
 	const backendId = tab.resolveRef(ref);
 	if (backendId === undefined) {
 		return { ok: false, reason: `ref ${ref} is unknown or stale — re-observe the page for fresh refs` };
+	}
+	// Cross-navigation staleness: CDP backend node ids are reused across
+	// documents, so a ref MUST NOT silently target a node in a different
+	// page. Compare the live document URL to the URL at ref-assignment time.
+	if (tab.refPageUrl !== undefined) {
+		const live = await client.send(
+			"Runtime.evaluate",
+			{ expression: "location.href", returnByValue: true },
+			tab.sessionId,
+		);
+		const liveUrl = live.ok ? (live.data as { result?: { value?: unknown } }).result?.value : undefined;
+		if (typeof liveUrl === "string" && liveUrl !== tab.refPageUrl) {
+			return {
+				ok: false,
+				reason: `ref ${ref} is stale (the page navigated since the observation) — re-observe for fresh refs`,
+			};
+		}
+		// An unreadable execution context means the document itself changed
+		// (mid-navigation, page error): the ref cannot be confirmed against the
+		// live document, so refusing is the truthful outcome.
+		if (liveUrl === undefined && !live.ok) {
+			return {
+				ok: false,
+				reason: `ref ${ref} is stale (the page state changed since the observation) — re-observe for fresh refs`,
+			};
+		}
 	}
 	const state = await readElementState(client, tab.sessionId, backendId);
 	if (state === undefined) {
