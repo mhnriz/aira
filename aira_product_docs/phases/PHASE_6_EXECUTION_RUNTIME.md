@@ -315,15 +315,20 @@ f08d83660 test(aira): cover the Phase 6 execution runtime through the host
 43323ef9a fix(aira): make process tools active by default in SDK-created sessions
 3c9bad704 test(coding-agent): extend default-tools regression for the native process tools
 bd93e93f0 docs(aira): Phase 6 report, ADR-024, changelog, architecture, UI backlog
+<docs commit> docs(aira): record full-suite verification results and commit list in Phase 6 report
+<chore commit> chore(aira): drop accidentally staged workbench mockup from the docs commit
 ```
 
 ## Final `git status`
 
-Clean working tree after the docs commit. `main` ahead of `upstream/main`,
+Working tree clean after the docs commit. `main` ahead of `upstream/main`,
 behind by 29 (baseline divergence, unchanged). Only remote: `upstream`
-(Pi). No `origin`, nothing pushed, nothing published. The untracked
-`aira_product_docs/AIRA_WORKBENCH_MOCKUP.html` pre-existed this phase from
-another session and was left untouched.
+(Pi). No `origin`, nothing pushed, nothing published.
+
+One correction was committed during the phase: the docs commit accidentally
+staged `aira_product_docs/AIRA_WORKBENCH_MOCKUP.html`, an untracked file
+belonging to another session; a follow-up `chore` commit removed it from
+tracking (working-tree copy untouched), restoring it to untracked state.
 
 ## Stopping point / next phase
 
