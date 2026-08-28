@@ -39,6 +39,21 @@ describe("Aira PLAN read-only enforcement (host/tool-policy level)", () => {
 		expect(harness.session.airaMode).toBe("build");
 		expect(harness.session.getActiveToolNames().sort()).toEqual([
 			"bash",
+			"browser_click",
+			"browser_close",
+			"browser_console",
+			"browser_evaluate",
+			"browser_fill",
+			"browser_navigate",
+			"browser_network",
+			"browser_observe",
+			"browser_open",
+			"browser_press",
+			"browser_screenshot",
+			"browser_scroll",
+			"browser_status",
+			"browser_verify",
+			"browser_wait",
 			"edit",
 			"process_logs",
 			"process_start",
@@ -55,6 +70,14 @@ describe("Aira PLAN read-only enforcement (host/tool-policy level)", () => {
 
 		expect(harness.session.airaMode).toBe("plan");
 		expect(harness.session.getActiveToolNames().sort()).toEqual([
+			"browser_console",
+			"browser_navigate",
+			"browser_network",
+			"browser_observe",
+			"browser_screenshot",
+			"browser_scroll",
+			"browser_status",
+			"browser_wait",
 			"find",
 			"grep",
 			"ls",
@@ -70,6 +93,21 @@ describe("Aira PLAN read-only enforcement (host/tool-policy level)", () => {
 		expect(harness.session.airaMode).toBe("review");
 		expect(harness.session.getActiveToolNames().sort()).toEqual([
 			"bash",
+			"browser_click",
+			"browser_close",
+			"browser_console",
+			"browser_evaluate",
+			"browser_fill",
+			"browser_navigate",
+			"browser_network",
+			"browser_observe",
+			"browser_open",
+			"browser_press",
+			"browser_screenshot",
+			"browser_scroll",
+			"browser_status",
+			"browser_verify",
+			"browser_wait",
 			"edit",
 			"process_logs",
 			"process_start",
@@ -83,6 +121,21 @@ describe("Aira PLAN read-only enforcement (host/tool-policy level)", () => {
 		expect(harness.session.airaMode).toBe("build");
 		expect(harness.session.getActiveToolNames().sort()).toEqual([
 			"bash",
+			"browser_click",
+			"browser_close",
+			"browser_console",
+			"browser_evaluate",
+			"browser_fill",
+			"browser_navigate",
+			"browser_network",
+			"browser_observe",
+			"browser_open",
+			"browser_press",
+			"browser_screenshot",
+			"browser_scroll",
+			"browser_status",
+			"browser_verify",
+			"browser_wait",
 			"edit",
 			"process_logs",
 			"process_start",
@@ -97,7 +150,21 @@ describe("Aira PLAN read-only enforcement (host/tool-policy level)", () => {
 		const harness = harnesses[0]!;
 		harness.session.setAiraMode("plan");
 
-		for (const mutating of ["bash", "powershell", "edit", "write", "process_start", "process_stop"]) {
+		for (const mutating of [
+			"bash",
+			"powershell",
+			"edit",
+			"write",
+			"process_start",
+			"process_stop",
+			"browser_open",
+			"browser_click",
+			"browser_fill",
+			"browser_press",
+			"browser_evaluate",
+			"browser_verify",
+			"browser_close",
+		]) {
 			const result = await harness.session.agent.beforeToolCall?.(toolCallContext(mutating));
 			expect(result?.block, `${mutating} should be blocked in PLAN`).toBe(true);
 			expect(result?.reason).toContain("PLAN mode is read-only");

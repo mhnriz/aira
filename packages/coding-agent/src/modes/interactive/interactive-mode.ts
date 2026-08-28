@@ -3053,6 +3053,11 @@ export class InteractiveMode {
 				this.editor.setText("");
 				return;
 			}
+			if (text === "/browser") {
+				this.handleBrowserCommand();
+				this.editor.setText("");
+				return;
+			}
 			if (text === "/changelog") {
 				this.handleChangelogCommand();
 				this.editor.setText("");
@@ -4287,6 +4292,60 @@ export class InteractiveMode {
 		this.ui.requestRender();
 	}
 
+	/**
+	 * `/browser` — restrained browser inspection (Phase 7). Renders the
+	 * canonical browser snapshot (token-free; provider-independent). The
+	 * future Workbench/footer consume the same state.
+	 */
+	private handleBrowserCommand(): void {
+		const browser = this.session.airaBrowser;
+		const lines: string[] = ["browser"];
+		if (!browser) {
+			lines.push("browser runtime unavailable");
+		} else {
+			const status = browser.status();
+			lines.push(
+				`state: ${status.status} (${status.availability})`,
+				`provider: ${status.provider} · ${status.profileKind} profile${status.profileDir ? ` · ${status.profileDir}` : ""}`,
+				`eligible: ${status.eligible}`,
+			);
+			const active = status.activeTab;
+			if (active) {
+				lines.push(`page: ${active.url || "(blank)"}${active.title ? ` · ${active.title}` : ""}`);
+			}
+			const consoleLine = `console: ${status.console.errors}E ${status.console.warnings}W`;
+			const networkLine = `network: ${status.network.failures} failed`;
+			if (status.console.topFinding) {
+				lines.push(`${consoleLine} · ${status.console.topFinding.message}`);
+			} else {
+				lines.push(consoleLine);
+			}
+			if (status.network.topFinding) {
+				lines.push(`${networkLine} · ${status.network.topFinding.message}`);
+			} else {
+				lines.push(networkLine);
+			}
+			const verification = `check: ${status.verification.status}`;
+			lines.push(
+				status.verification.finding ? `${verification} · ${status.verification.finding.message}` : verification,
+			);
+			if (status.devProcess) {
+				lines.push(
+					`dev: ${status.devProcess.id} (${status.devProcess.status})${status.devProcess.url ? ` · ${status.devProcess.url}` : ""}`,
+				);
+			}
+			if (status.observation.summary) {
+				lines.push(`observation: ${status.observation.summary}`);
+			}
+			if (status.reason) {
+				lines.push(`reason: ${status.reason}`);
+			}
+		}
+		this.chatContainer.addChild(new Spacer(1));
+		this.chatContainer.addChild(new Text(theme.fg("dim", lines.join("\n")), 1, 0));
+		this.ui.requestRender();
+	}
+
 	private async cycleModel(direction: "forward" | "backward"): Promise<void> {
 		try {
 			const result = await this.session.cycleModel(direction);
@@ -4660,6 +4719,7 @@ export class InteractiveMode {
 			const defaultProvider = this.settingsManager.getDefaultProvider();
 			const defaultModelId = this.settingsManager.getDefaultModel();
 			const defaultModel = defaultProvider && defaultModelId ? `${defaultProvider}/${defaultModelId}` : "not set";
+			const browserSettings = this.settingsManager.getBrowserSettings();
 			selector = new SettingsSelectorComponent(
 				{
 					autoCompact: this.session.autoCompactionEnabled,
@@ -4700,6 +4760,7 @@ export class InteractiveMode {
 					fullscreenExitOutput: this.settingsManager.getFullscreenExitOutput(),
 					fullscreenScrollbar: this.settingsManager.getFullscreenScrollbar(),
 					warnings: this.settingsManager.getWarnings(),
+					browserSettings,
 				},
 				{
 					onAutoCompactChange: (enabled) => {
@@ -4879,6 +4940,9 @@ export class InteractiveMode {
 					},
 					onWarningsChange: (warnings) => {
 						this.settingsManager.setWarnings(warnings);
+					},
+					onBrowserSettingsChange: (settings) => {
+						this.settingsManager.setBrowserSettings(settings);
 					},
 					onCancel: () => {
 						done();

@@ -22,8 +22,8 @@
  */
 import { CONFIG_DIR_NAME } from "../../config.ts";
 import { KEYBINDINGS } from "../../core/keybindings.ts";
-import { classifyAiraCapability, isAiraCapabilityReadOnly } from "../capabilities.ts";
-import { AIRA_MODE_CYCLE, AIRA_MUTATING_TOOLS, AIRA_READ_ONLY_TOOLS } from "../modes.ts";
+import { classifyAiraBrowserOperation, classifyAiraCapability, isAiraCapabilityReadOnly } from "../capabilities.ts";
+import { AIRA_MODE_CYCLE, AIRA_MUTATING_TOOLS, AIRA_READ_ONLY_TOOLS, isAiraMutatingTool } from "../modes.ts";
 import { displayPathUnderHome, getAiraHome } from "../paths.ts";
 import { summarizeAiraProject } from "../project/profile.ts";
 import type { AiraSessionState } from "../state.ts";
@@ -93,15 +93,29 @@ export function buildAiraDoctorReport(state: AiraSessionState | undefined): Aira
 		detail: `${THINKING_CYCLE_KEY}: ${thinkingKeys.join(", ") || "unbound"}`,
 	});
 
-	// 5. PLAN read-only boundary.
-	const mutating = ["bash", "powershell", "edit", "write", "process_start", "process_stop"].filter((t) =>
-		AIRA_MUTATING_TOOLS.has(t),
+	// 5. PLAN read-only boundary: mutating/process/browser-interaction tools
+	// blocked, read-only surface allowed. Derived from the semantic tables, so
+	// the check stays truthful as the sets grow (Phases 6-7).
+	const mutating = [
+		"bash",
+		"powershell",
+		"edit",
+		"write",
+		"process_start",
+		"process_stop",
+		"browser_open",
+		"browser_click",
+		"browser_verify",
+	].filter((t) => AIRA_MUTATING_TOOLS.has(t));
+	const readOnly = AIRA_READ_ONLY_TOOLS.filter((t) => isAiraBrowserObservation(t));
+	const semanticBlocked = ["browser_click", "browser_verify", "browser_open"].every((t) => isAiraMutatingTool(t));
+	const semanticAllowed = ["browser_observe", "browser_navigate", "browser_console"].every(
+		(t) => !isAiraMutatingTool(t),
 	);
-	const readOnly = AIRA_READ_ONLY_TOOLS.filter((t) => AIRA_READ_ONLY_TOOLS.includes(t));
 	checks.push({
 		name: "plan read-only",
-		pass: mutating.length === 6 && readOnly.length === 6,
-		detail: `blocked: ${mutating.join(", ")} | allowed: ${readOnly.join(", ")}`,
+		pass: mutating.length === 9 && readOnly.length >= 6 && semanticBlocked && semanticAllowed,
+		detail: `blocked: ${mutating.join(", ")} | allowed: ${readOnly.join(", ")} | browser semantics: observe/navigate allowed, interact/lifecycle blocked`,
 	});
 
 	// 6. Semantic capability classification contract.
@@ -176,7 +190,46 @@ export function buildAiraDoctorReport(state: AiraSessionState | undefined): Aira
 		});
 	}
 
+	// 10. Browser runtime: canonical snapshot + truthful states. A browser is
+	// an OPTIONAL capability: "availability unknown" is only a pass when the
+	// runtime has not probed yet; absence of a browser is NOT a failure —
+	// `unavailable` is the truthful, healthy answer for machines without one.
+	const browser = state?.browser;
+	if (!browser) {
+		checks.push({
+			name: "browser",
+			pass: false,
+			detail: "no browser snapshot (runtime wiring)",
+		});
+	} else if (browser.availability === "unknown") {
+		checks.push({
+			name: "browser",
+			pass: true,
+			detail: "availability probe pending (lazy arm; no browser launched)",
+		});
+	} else {
+		const tabs = browser.tabs.length > 0 ? ` · ${browser.tabs.length} tab(s)` : "";
+		const consoleLine = `${browser.console.errors}E ${browser.console.warnings}W`;
+		const networkLine = `${browser.network.failures} failed`;
+		const check = browser.verification.status !== "none" ? ` · check ${browser.verification.status}` : "";
+		const degraded = browser.status === "degraded" ? ` · degraded${browser.reason ? `: ${browser.reason}` : ""}` : "";
+		checks.push({
+			name: "browser",
+			pass: browser.status !== "degraded",
+			detail: `${browser.availability} · ${browser.status}${tabs} · console ${consoleLine} · network ${networkLine}${check}${degraded}${
+				browser.status === "unavailable"
+					? ` · ${browser.reason ?? "no browser executable (optional capability)"}`
+					: ""
+			}`,
+		});
+	}
+
 	return { product: "Aira doctor", home: displayPathUnderHome(home), checks };
+}
+
+/** Browser observation tools in the PLAN read-only set (Phase 7). */
+function isAiraBrowserObservation(name: string): boolean {
+	return classifyAiraBrowserOperation(name) === "observe" || classifyAiraBrowserOperation(name) === "navigate";
 }
 
 function liveCodeLine(live: { status: string; servers: Array<{ available: boolean }>; crashCount: number }): string {

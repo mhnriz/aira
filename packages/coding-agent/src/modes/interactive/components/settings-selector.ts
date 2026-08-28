@@ -85,6 +85,12 @@ export interface SettingsConfig {
 	fullscreenExitOutput: FullscreenExitOutput;
 	fullscreenScrollbar: ScrollViewScrollbar;
 	warnings: WarningSettings;
+	browserSettings: {
+		enabled: boolean;
+		context: "off" | "auto" | "on";
+		autoVerify: boolean;
+		contextBudget: "compact" | "balanced" | "expanded";
+	};
 }
 
 export interface SettingsCallbacks {
@@ -121,6 +127,12 @@ export interface SettingsCallbacks {
 	onFullscreenExitOutputChange: (output: FullscreenExitOutput) => void;
 	onFullscreenScrollbarChange: (mode: ScrollViewScrollbar) => void;
 	onWarningsChange: (warnings: WarningSettings) => void;
+	onBrowserSettingsChange: (settings: {
+		enabled: boolean;
+		context: "off" | "auto" | "on";
+		autoVerify: boolean;
+		contextBudget: "compact" | "balanced" | "expanded";
+	}) => void;
 	onCancel: () => void;
 }
 
@@ -433,6 +445,115 @@ class ThemeSubmenu extends Container {
 }
 
 /**
+ * Aira browser settings submenu (Phase 7). These controls live in the
+ * canonical settings store (settings.json) and gate the native browser
+ * runtime: whether the capability may be used, whether browser evidence may
+ * enter model context, automatic verification, and the ambient context
+ * budget. The future Workbench renders browser STATE from the canonical
+ * snapshot regardless of these toggles (state vs context separation).
+ */
+class AiraBrowserSubmenu extends Container {
+	private settingsList: SettingsList;
+	private state: {
+		enabled: boolean;
+		context: "off" | "auto" | "on";
+		autoVerify: boolean;
+		contextBudget: "compact" | "balanced" | "expanded";
+	};
+
+	constructor(
+		initial: {
+			enabled: boolean;
+			context: "off" | "auto" | "on";
+			autoVerify: boolean;
+			contextBudget: "compact" | "balanced" | "expanded";
+		},
+		onChange: (settings: {
+			enabled: boolean;
+			context: "off" | "auto" | "on";
+			autoVerify: boolean;
+			contextBudget: "compact" | "balanced" | "expanded";
+		}) => void,
+		onCancel: () => void,
+	) {
+		super();
+
+		this.state = { ...initial };
+
+		const items: SettingItem[] = [
+			{
+				id: "browser-enabled",
+				label: "Enable browser",
+				description: "Browser capability may be used (isolated Aira-owned profile; never your personal browser)",
+				currentValue: this.state.enabled ? "true" : "false",
+				values: ["true", "false"],
+			},
+			{
+				id: "browser-context",
+				label: "Ambient context",
+				description:
+					"off: browser evidence is never injected into prompts (state stays visible). auto: injected only when strongly relevant (default). on: injected whenever useful, still budgeted",
+				currentValue: this.state.context,
+				values: ["off", "auto", "on"],
+			},
+			{
+				id: "browser-autoverify",
+				label: "Auto-verify",
+				description:
+					"Run ONE bounded browser check after a browser-relevant edit when a local dev server is running (never a loop)",
+				currentValue: this.state.autoVerify ? "true" : "false",
+				values: ["true", "false"],
+			},
+			{
+				id: "browser-budget",
+				label: "Context budget",
+				description:
+					"Size class of the ambient browser context pack (compact ~600 chars, balanced ~1200, expanded ~2400)",
+				currentValue: this.state.contextBudget,
+				values: ["compact", "balanced", "expanded"],
+			},
+		];
+
+		this.settingsList = new SettingsList(
+			items,
+			Math.min(items.length, 10),
+			getSettingsListTheme(),
+			(id, newValue) => {
+				switch (id) {
+					case "browser-enabled":
+						this.state = { ...this.state, enabled: newValue === "true" };
+						onChange(this.state);
+						break;
+					case "browser-context":
+						if (newValue === "off" || newValue === "auto" || newValue === "on") {
+							this.state = { ...this.state, context: newValue };
+							onChange(this.state);
+						}
+						break;
+					case "browser-autoverify":
+						this.state = { ...this.state, autoVerify: newValue === "true" };
+						onChange(this.state);
+						break;
+					case "browser-budget":
+						if (newValue === "compact" || newValue === "balanced" || newValue === "expanded") {
+							this.state = { ...this.state, contextBudget: newValue };
+							onChange(this.state);
+						}
+						break;
+				}
+			},
+			onCancel,
+		);
+
+		this.addChild(this.settingsList);
+	}
+
+	handleInput(data: string): void {
+		this.settingsList.handleInput(data);
+	}
+}
+
+/**
  * Main settings selector component.
  */
 export class SettingsSelectorComponent extends Container {
@@ -696,6 +817,18 @@ export class SettingsSelectorComponent extends Container {
 				currentValue: config.currentTheme,
 				submenu: (currentValue, done) =>
 					new ThemeSubmenu(currentValue, config.terminalTheme, config.availableThemes, callbacks, done),
+			},
+			{
+				id: "browser",
+				label: "Aira browser",
+				description: "Native browser capability: enable, ambient context policy, auto-verify, context budget",
+				currentValue: `${config.browserSettings.context} · ${config.browserSettings.enabled ? "on" : "off"}`,
+				submenu: (_currentValue, done) =>
+					new AiraBrowserSubmenu(
+						config.browserSettings,
+						(settings) => callbacks.onBrowserSettingsChange(settings),
+						() => done(),
+					),
 			},
 		];
 

@@ -252,10 +252,11 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		thinkingLevel = clampThinkingLevel(model, thinkingLevel) as ThinkingLevel;
 	}
 
-	// Aira Phase 6: the native process runtime tools are part of the default
-	// tool set (they are core Aira tools; explicit `defaultTools`/`tools`
-	// selections still win). ToolName stays the Pi-builtin union — the Aira
-	// tools are resolved by name through the registry.
+	// Aira Phase 6/7: the native process runtime tools and the native browser
+	// tools are part of the default tool set (they are core Aira tools;
+	// explicit `defaultTools`/`tools` selections still win). ToolName stays
+	// the Pi-builtin union — the Aira tools are resolved by name through the
+	// registry.
 	const defaultActiveToolNames: string[] = [
 		"read",
 		"bash",
@@ -265,6 +266,21 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		"process_status",
 		"process_logs",
 		"process_stop",
+		"browser_open",
+		"browser_status",
+		"browser_observe",
+		"browser_navigate",
+		"browser_click",
+		"browser_fill",
+		"browser_press",
+		"browser_scroll",
+		"browser_wait",
+		"browser_evaluate",
+		"browser_console",
+		"browser_network",
+		"browser_screenshot",
+		"browser_verify",
+		"browser_close",
 	];
 	const configuredDefaultToolNames = settingsManager.getDefaultTools();
 	const allowedToolNames = options.tools ?? (options.noTools === "all" ? [] : undefined);

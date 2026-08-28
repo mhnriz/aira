@@ -21,7 +21,12 @@
  *            (inspect-first), still implement-capable; the independent
  *            verifier is a later phase (Phase 8), not part of this mode.
  */
-import { BUILTIN_READ_ONLY_CAPABILITIES, isAiraMutatingCapability } from "./capabilities.ts";
+import {
+	BUILTIN_READ_ONLY_CAPABILITIES,
+	classifyAiraBrowserOperation,
+	classifyAiraCapability,
+	isAiraMutatingCapability,
+} from "./capabilities.ts";
 import type { AiraMode, AiraSessionState } from "./state.ts";
 
 /** The fixed three-mode order of the native cycle. */
@@ -38,9 +43,23 @@ export const NEXT_AIRA_MODE: Record<AiraMode, AiraMode> = {
  * Built-in read-only tools available in PLAN mode. Reading, search,
  * inspection, and other safe operations stay usable in PLAN. Phase 6 adds
  * the diagnostic process-inspection tools (they only read managed-process
- * state; they never launch or stop anything).
+ * state; they never launch or stop anything). Phase 7 adds the browser
+ * observation/navigation surface — semantic page reads, evidence
+ * inspection, screenshots, and read-only navigation in the isolated
+ * disposable profile. Browser interaction/evaluation/verification and
+ * browser lifecycle (open/close) stay PLAN-blocked (see below).
  */
-export const AIRA_READ_ONLY_TOOLS: readonly string[] = [...BUILTIN_READ_ONLY_CAPABILITIES];
+export const AIRA_READ_ONLY_TOOLS: readonly string[] = [
+	...BUILTIN_READ_ONLY_CAPABILITIES,
+	"browser_status",
+	"browser_observe",
+	"browser_wait",
+	"browser_scroll",
+	"browser_console",
+	"browser_network",
+	"browser_screenshot",
+	"browser_navigate",
+];
 
 /**
  * Built-in tools that can mutate the workspace and are therefore blocked in
@@ -57,6 +76,16 @@ export const AIRA_MUTATING_TOOLS: ReadonlySet<string> = new Set([
 	"write",
 	"process_start",
 	"process_stop",
+	// PLAN-blocked browser surface: interaction/evaluation/verification and
+	// browser lifecycle. The semantic gate below derives this from the
+	// operation table, so this auditable set stays a documentation mirror.
+	"browser_open",
+	"browser_close",
+	"browser_click",
+	"browser_fill",
+	"browser_press",
+	"browser_evaluate",
+	"browser_verify",
 ]);
 
 /** The next mode after the given one in the cycle (pure). */
@@ -76,9 +105,23 @@ export function setAiraMode(state: AiraSessionState, mode: AiraMode): AiraMode {
 	return state.mode;
 }
 
-/** True when the given built-in tool can mutate the workspace (blocked in PLAN). */
+/**
+ * True when the given built-in tool is blocked in PLAN: workspace-mutating
+ * tools, process execution, and browser interaction/lifecycle operations
+ * (semantic, table-driven). Browser observation and navigation remain
+ * available in read-only mode (ADR-025).
+ */
 export function isAiraMutatingTool(name: string): boolean {
-	return isAiraMutatingCapability(name);
+	if (isAiraMutatingCapability(name)) {
+		return true;
+	}
+	// Browser tools are blocked in PLAN unless their semantic operation kind
+	// is read-only-safe (observe/navigate). Purely table-driven (ADR-022).
+	if (classifyAiraCapability(name) === "browser") {
+		const kind = classifyAiraBrowserOperation(name);
+		return kind === "interact" || kind === "lifecycle";
+	}
+	return false;
 }
 
 /** Human-facing label for a mode, e.g. "BUILD". */

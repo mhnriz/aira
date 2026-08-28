@@ -6,6 +6,7 @@
  * the package is Pi-derived.
  */
 
+export * from "./browser/index.ts";
 export * from "./commands/doctor.ts";
 export * from "./commands/import.ts";
 export * from "./commands/mode.ts";

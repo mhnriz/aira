@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
 	airaCapabilityClassLabel,
 	BUILTIN_READ_ONLY_CAPABILITIES,
+	classifyAiraBrowserOperation,
 	classifyAiraCapability,
 	isAiraCapabilityReadOnly,
 	isAiraMutatingCapability,
@@ -52,10 +53,48 @@ describe("Aira capability classification (native semantic contract)", () => {
 		expect(isAiraCapabilityReadOnly("some-extension-tool")).toBe(false);
 	});
 
+	it("classifies the native browser tools (Phase 7)", () => {
+		// Browser tools classify as "browser"; the operation kind decides the
+		// PLAN surface: observation/navigation stay read-only-safe,
+		// interact/lifecycle are blocked there.
+		expect(classifyAiraCapability("browser_observe")).toBe("browser");
+		expect(classifyAiraCapability("browser_click")).toBe("browser");
+		for (const tool of [
+			"browser_status",
+			"browser_observe",
+			"browser_wait",
+			"browser_scroll",
+			"browser_console",
+			"browser_network",
+			"browser_screenshot",
+		]) {
+			expect(classifyAiraBrowserOperation(tool), tool).toBe("observe");
+			expect(isAiraMutatingTool(tool), tool).toBe(false);
+		}
+		expect(classifyAiraBrowserOperation("browser_navigate")).toBe("navigate");
+		expect(isAiraMutatingTool("browser_navigate")).toBe(false);
+		for (const tool of ["browser_click", "browser_fill", "browser_press", "browser_evaluate", "browser_verify"]) {
+			expect(classifyAiraBrowserOperation(tool), tool).toBe("interact");
+			expect(isAiraMutatingTool(tool), tool).toBe(true);
+		}
+		for (const tool of ["browser_open", "browser_close"]) {
+			expect(classifyAiraBrowserOperation(tool), tool).toBe("lifecycle");
+			expect(isAiraMutatingTool(tool), tool).toBe(true);
+		}
+	});
+
 	it("keeps the PLAN gate consistent with the semantic classification", () => {
-		// The documented audit set (blocked in PLAN) is exactly the mutating+process classes.
+		// The documented audit set (blocked in PLAN) is the mutating+process
+		// classes plus the browser interact/lifecycle surface (Phase 7).
 		expect([...AIRA_MUTATING_TOOLS].sort()).toEqual([
 			"bash",
+			"browser_click",
+			"browser_close",
+			"browser_evaluate",
+			"browser_fill",
+			"browser_open",
+			"browser_press",
+			"browser_verify",
 			"edit",
 			"powershell",
 			"process_start",
@@ -65,7 +104,17 @@ describe("Aira capability classification (native semantic contract)", () => {
 		for (const tool of AIRA_MUTATING_TOOLS) {
 			expect(isAiraMutatingTool(tool), tool).toBe(true);
 		}
-		for (const tool of ["read", "grep", "find", "ls", "process_status", "process_logs"]) {
+		for (const tool of [
+			"read",
+			"grep",
+			"find",
+			"ls",
+			"process_status",
+			"process_logs",
+			"browser_observe",
+			"browser_navigate",
+			"browser_status",
+		]) {
 			expect(isAiraMutatingTool(tool), tool).toBe(false);
 		}
 	});

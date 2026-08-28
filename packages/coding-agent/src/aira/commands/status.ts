@@ -10,6 +10,8 @@
  * formatting is plain text so the TUI (and future surfaces) can render it in
  * their own style.
  */
+
+import type { AiraBrowserStatus } from "../browser/status.ts";
 import { formatAiraVersion } from "../meta.ts";
 import { displayPathUnderHome, getAiraHome } from "../paths.ts";
 import { summarizeAiraProject } from "../project/profile.ts";
@@ -27,6 +29,8 @@ export interface AiraStatusReport {
 	mode?: string;
 	project?: string;
 	capabilities?: string;
+	/** Compact browser line from the canonical snapshot (Phase 7). */
+	browser?: string;
 }
 
 export function buildAiraStatusReport(state: AiraSessionState | undefined): AiraStatusReport {
@@ -45,7 +49,18 @@ export function buildAiraStatusReport(state: AiraSessionState | undefined): Aira
 		mode: state.mode,
 		project: summarizeAiraProject(state.project),
 		capabilities: state.capabilities.length === 0 ? "none" : state.capabilities.join(", "),
+		browser: summarizeAiraBrowser(state.browser),
 	};
+}
+
+/** Compact one-line browser summary for /status ("idle", "active (url)"). */
+function summarizeAiraBrowser(browser: AiraBrowserStatus | undefined): string | undefined {
+	if (!browser) return undefined;
+	if (browser.status === "active") {
+		const url = browser.activeTab?.url || browser.devProcess?.url;
+		return `active${url ? ` (${url})` : ""}`;
+	}
+	return browser.status;
 }
 
 export function formatAiraStatusReport(report: AiraStatusReport): string {
@@ -61,5 +76,8 @@ export function formatAiraStatusReport(report: AiraStatusReport): string {
 		`project: ${report.project}`,
 		`capabilities: ${report.capabilities}`,
 	);
+	if (report.browser) {
+		lines.push(`browser: ${report.browser}`);
+	}
 	return lines.join("\n");
 }

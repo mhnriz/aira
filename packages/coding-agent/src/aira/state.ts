@@ -13,6 +13,7 @@
  * competing copy of the truth.
  */
 
+import type { AiraBrowserStatus } from "./browser/status.ts";
 import type { AiraExecutionStatus } from "./execution/status.ts";
 import type { AiraIntelligenceStatus } from "./intelligence/status.ts";
 import type { AiraProjectProfile } from "./project/profile.ts";
@@ -40,6 +41,8 @@ export interface AiraSessionState {
 	intelligence: AiraIntelligenceStatus | undefined;
 	/** Execution runtime snapshot; undefined until the runtime publishes. */
 	execution: AiraExecutionStatus | undefined;
+	/** Browser runtime snapshot; undefined until the runtime publishes. */
+	browser: AiraBrowserStatus | undefined;
 	/** Phase 1: always ["core"]. */
 	capabilities: readonly AiraCapability[];
 	/** Set when the owning session was disposed. */
@@ -74,6 +77,7 @@ export function acquireAiraSessionState(
 		project: undefined,
 		intelligence: undefined,
 		execution: undefined,
+		browser: undefined,
 		capabilities: DEFAULT_AIRA_CAPABILITIES,
 	};
 	sessionStates.set(sessionId, state);

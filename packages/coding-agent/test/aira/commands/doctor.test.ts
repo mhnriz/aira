@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { initialAiraBrowserStatus } from "../../../src/aira/browser/status.ts";
 import { buildAiraDoctorReport, formatAiraDoctorReport } from "../../../src/aira/commands/doctor.ts";
 import { initialAiraExecutionStatus } from "../../../src/aira/execution/status.ts";
 import { initialAiraIntelligenceStatus } from "../../../src/aira/intelligence/status.ts";
@@ -31,10 +32,14 @@ describe("Aira /doctor command (Phase 4 scope)", () => {
 		// A real session arms the execution runtime which publishes a snapshot;
 		// a bare acquired state has none, so publish the honest inactive one.
 		state.execution = initialAiraExecutionStatus();
+		// A real session arms the browser runtime which publishes a snapshot;
+		// a bare acquired state has none yet (probe pending is the honest
+		// state before the first probe).
+		state.browser = initialAiraBrowserStatus();
 		const report = buildAiraDoctorReport(state);
 
 		expect(report.home).toBe(expectedHome);
-		expect(report.checks.length).toBe(9);
+		expect(report.checks.length).toBe(10);
 		for (const check of report.checks) {
 			expect(check.pass, `${check.name} should pass`).toBe(true);
 		}
@@ -187,11 +192,13 @@ describe("Aira /doctor command (Phase 4 scope)", () => {
 		intelligence.activationReason = "no defensible project";
 		state.intelligence = intelligence;
 		state.execution = initialAiraExecutionStatus();
+		state.browser = initialAiraBrowserStatus();
 		const text = formatAiraDoctorReport(buildAiraDoctorReport(state));
 
 		expect(text).toContain(`home: ${expectedHome}`);
-		expect(text).toContain("summary: 9/9 checks passed");
+		expect(text).toContain("summary: 10/10 checks passed");
 		expect(text).toContain("ok  home:");
+		expect(text).toContain("ok  browser: availability probe pending");
 		disposeAiraSessionState("doctor-5", state);
 	});
 

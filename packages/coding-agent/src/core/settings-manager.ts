@@ -139,6 +139,13 @@ export interface Settings {
 	tuiMode?: TuiMode; // default: "regular"
 	fullscreenExitOutput?: FullscreenExitOutput; // default: "transcript"; no effect in regular TUI mode
 	fullscreenScrollbar?: ScrollViewScrollbar; // default: "auto"; no effect in regular TUI mode
+	/** Native Aira browser controls (Phase 7; single canonical settings owner). */
+	browser?: {
+		enabled?: boolean;
+		context?: "off" | "auto" | "on";
+		autoVerify?: boolean;
+		contextBudget?: "compact" | "balanced" | "expanded";
+	};
 }
 
 function isMergeableObject(value: unknown): value is Record<string, unknown> {
@@ -1118,6 +1125,45 @@ export class SettingsManager {
 	setEnableSkillCommands(enabled: boolean): void {
 		this.globalSettings.enableSkillCommands = enabled;
 		this.markModified("enableSkillCommands");
+		this.save();
+	}
+
+	// Native Aira browser settings (Phase 7). These live in the same canonical
+	// settings file; the browser subsystem consumes them through the manager's
+	// settings accessor. Invalid stored values normalize to defaults.
+	getBrowserSettings(): {
+		enabled: boolean;
+		context: "off" | "auto" | "on";
+		autoVerify: boolean;
+		contextBudget: "compact" | "balanced" | "expanded";
+	} {
+		const browser = this.settings.browser;
+		if (!browser || typeof browser !== "object") {
+			return { enabled: true, context: "auto", autoVerify: true, contextBudget: "compact" };
+		}
+		const context = browser.context === "off" || browser.context === "on" ? browser.context : "auto";
+		const budget =
+			browser.contextBudget === "compact" || browser.contextBudget === "balanced"
+				? browser.contextBudget
+				: browser.contextBudget === "expanded"
+					? "expanded"
+					: "compact";
+		return {
+			enabled: browser.enabled === undefined ? true : browser.enabled === true,
+			context,
+			autoVerify: browser.autoVerify === undefined ? true : browser.autoVerify === true,
+			contextBudget: budget,
+		};
+	}
+
+	setBrowserSettings(settings: {
+		enabled: boolean;
+		context: "off" | "auto" | "on";
+		autoVerify: boolean;
+		contextBudget: "compact" | "balanced" | "expanded";
+	}): void {
+		this.globalSettings.browser = settings;
+		this.markModified("browser");
 		this.save();
 	}
 

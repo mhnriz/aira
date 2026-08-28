@@ -46,6 +46,13 @@ import {
 	resetApiProviders,
 	streamSimple,
 } from "@earendil-works/pi-ai/compat";
+import {
+	AIRA_BROWSER_CONTEXT_TYPE,
+	type AiraBrowserDevRuntime,
+	type AiraBrowserHandle,
+	createAiraBrowserManager,
+} from "../aira/browser/manager.ts";
+import { createAiraBrowserToolDefinitions } from "../aira/browser/tools.ts";
 import { type AiraExecutionManagerOptions, createAiraExecutionManager } from "../aira/execution/manager.ts";
 import { createAiraProcessToolDefinitions } from "../aira/execution/tools.ts";
 import type { AiraExecutionHandle } from "../aira/execution/types.ts";
@@ -242,6 +249,8 @@ export interface AgentSessionConfig {
 	sessionStartEvent?: SessionStartEvent;
 	/** Execution-runtime options (Aira phase 6; tests use small timings). */
 	airaExecutionOptions?: AiraExecutionManagerOptions;
+	/** Browser-runtime options (Aira phase 7; tests inject fake providers). */
+	airaBrowserOptions?: Parameters<typeof createAiraBrowserManager>[1];
 }
 
 export interface ExtensionBindings {
@@ -376,6 +385,7 @@ export class AgentSession {
 	private _airaSessionState: AiraSessionState;
 	private _airaIntelligence: AiraIntelligenceHandle | undefined;
 	private _airaExecution: AiraExecutionHandle | undefined;
+	private _airaBrowser: AiraBrowserHandle | undefined;
 	private _extensionUIContext?: ExtensionUIContext;
 	private _extensionMode: ExtensionMode = "print";
 	private _extensionCommandContextActions?: ExtensionCommandContextActions;
@@ -436,6 +446,18 @@ export class AgentSession {
 		// live session overlapping this session file owns a separate manager,
 		// so dispose of one can never kill the other's processes (ADR-024).
 		this._airaExecution = createAiraExecutionManager(this._airaSessionState, this._cwd, config.airaExecutionOptions);
+
+		// Aira browser seam (Phase 7): the session owns its browser runtime. The
+		// manager is lazy — it never launches a browser at startup, only probes
+		// availability; settings and Phase 6 dev-process evidence are wired
+		// through accessors so the runtime stays TUI-independent.
+		this._airaBrowser = createAiraBrowserManager(this._airaSessionState, {
+			...config.airaBrowserOptions,
+			settings: () => this.settingsManager.getBrowserSettings(),
+			devRuntime: () => this.buildAiraBrowserDevRuntime(),
+			agent: this.agent,
+		});
+		void this._airaBrowser.activate();
 
 		// Always subscribe to agent events for internal handling
 		// (session persistence, extensions, auto-compaction, retry logic)
@@ -921,6 +943,7 @@ export class AgentSession {
 		// disposed can never kill processes a newer session over the same file
 		// launched, because each session owns its own manager (ADR-024).
 		void this._airaExecution?.dispose();
+		void this._airaBrowser?.dispose();
 		// Aira intelligence seam: shut down providers (language servers, timers).
 		void this._airaIntelligence?.dispose();
 		// Aira lifecycle seam: release canonical state, ownership-checked so a
@@ -976,6 +999,34 @@ export class AgentSession {
 	/** Aira execution runtime for this session (process manager; tests and host). */
 	get airaExecution(): AiraExecutionHandle | undefined {
 		return this._airaExecution;
+	}
+
+	/** Aira browser runtime for this session (tests and host). */
+	get airaBrowser(): AiraBrowserHandle | undefined {
+		return this._airaBrowser;
+	}
+
+	/** Bridge the browser runtime to the execution runtime's dev processes. */
+	private buildAiraBrowserDevRuntime(): AiraBrowserDevRuntime {
+		const execution = this._airaExecution;
+		if (!execution) {
+			return { running: false, output: "" };
+		}
+		const dev = execution
+			.list()
+			.filter((p) => p.purpose === "dev" && p.status === "running")
+			.sort((a, b) => b.createdAt - a.createdAt)[0];
+		if (!dev) {
+			return { running: false, output: "" };
+		}
+		const logs = execution.logs(dev.id, 8000);
+		const output = `${logs?.stdout.text ?? ""}\n${logs?.stderr.text ?? ""}`;
+		return {
+			running: true,
+			output,
+			processId: dev.id,
+			processStatus: dev.status,
+		};
 	}
 
 	/**
@@ -1369,6 +1420,20 @@ export class AgentSession {
 					role: "custom",
 					customType: AIRA_INTELLIGENCE_CONTEXT_TYPE,
 					content: airaContext,
+					display: false,
+					timestamp: Date.now(),
+				});
+			}
+			// Aira browser seam (Phase 7): bounded ambient browser evidence —
+			// off/auto/on policy, hard budget, unchanged-content dedupe. AUTO
+			// commonly injects zero tokens; the snapshot stays UI-visible either
+			// way (state.browser is token-free).
+			const airaBrowserContext = this._airaBrowser?.providePromptContext(expandedText);
+			if (airaBrowserContext !== undefined) {
+				messages.push({
+					role: "custom",
+					customType: AIRA_BROWSER_CONTEXT_TYPE,
+					content: airaBrowserContext,
 					display: false,
 					timestamp: Date.now(),
 				});
@@ -2823,6 +2888,15 @@ export class AgentSession {
 			: {};
 		Object.assign(baseToolDefinitions, airaExecutionTools);
 
+		// Aira browser seam (Phase 7): native browser tools bound to THIS
+		// session's runtime. Same policy as the process tools: they are core
+		// Aira tools regardless of the base-tools override, and included in the
+		// default active set.
+		const airaBrowserTools = this._airaBrowser
+			? createAiraBrowserToolDefinitions({ runtime: this._airaBrowser })
+			: {};
+		Object.assign(baseToolDefinitions, airaBrowserTools);
+
 		this._baseToolDefinitions = new Map(
 			Object.entries(baseToolDefinitions).map(([name, tool]) => [name, tool as ToolDefinition]),
 		);
@@ -2848,8 +2922,12 @@ export class AgentSession {
 		this._applyExtensionBindings(this._extensionRunner);
 
 		const defaultActiveToolNames = this._baseToolsOverride
-			? [...Object.keys(this._baseToolsOverride), ...Object.keys(airaExecutionTools)]
-			: ["read", "bash", "edit", "write", ...Object.keys(airaExecutionTools)];
+			? [
+					...Object.keys(this._baseToolsOverride),
+					...Object.keys(airaExecutionTools),
+					...Object.keys(airaBrowserTools),
+				]
+			: ["read", "bash", "edit", "write", ...Object.keys(airaExecutionTools), ...Object.keys(airaBrowserTools)];
 		const baseActiveToolNames = options.activeToolNames ?? defaultActiveToolNames;
 		this._refreshToolRegistry({
 			activeToolNames: baseActiveToolNames,

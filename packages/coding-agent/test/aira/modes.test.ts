@@ -53,11 +53,38 @@ describe("Aira modes", () => {
 		for (const tool of ["bash", "powershell", "edit", "write", "process_start", "process_stop"]) {
 			expect(isAiraMutatingTool(tool)).toBe(true);
 		}
-		expect(AIRA_MUTATING_TOOLS.size).toBe(6);
+		// Phase 7: browser interact/lifecycle operations join the blocked set.
+		for (const tool of [
+			"browser_click",
+			"browser_fill",
+			"browser_press",
+			"browser_evaluate",
+			"browser_verify",
+			"browser_open",
+			"browser_close",
+		]) {
+			expect(isAiraMutatingTool(tool)).toBe(true);
+		}
+		expect(AIRA_MUTATING_TOOLS.size).toBe(13);
 	});
 
 	it("keeps read-only inspection tools available", () => {
-		expect(AIRA_READ_ONLY_TOOLS).toEqual(["read", "grep", "find", "ls", "process_status", "process_logs"]);
+		expect(AIRA_READ_ONLY_TOOLS).toEqual([
+			"read",
+			"grep",
+			"find",
+			"ls",
+			"process_status",
+			"process_logs",
+			"browser_status",
+			"browser_observe",
+			"browser_wait",
+			"browser_scroll",
+			"browser_console",
+			"browser_network",
+			"browser_screenshot",
+			"browser_navigate",
+		]);
 		for (const tool of AIRA_READ_ONLY_TOOLS) {
 			expect(isAiraMutatingTool(tool)).toBe(false);
 		}

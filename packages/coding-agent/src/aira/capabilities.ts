@@ -25,6 +25,13 @@
  * `process_status`/`process_logs` classify as `diagnostic` (read-only
  * inspection of managed execution state, safe in PLAN).
  *
+ * Phase 7 extends the table with the native browser runtime: every
+ * `browser_*` tool classifies as `browser`, plus a semantic operation kind
+ * (observe | navigate | interact | lifecycle) that PLAN policy consumes:
+ * observation and navigation stay available in read-only mode; interaction,
+ * evaluation, verification, and browser lifecycle are blocked there (see
+ * modes.ts). Keep the vocabulary small: a table, not per-tool plumbing.
+ *
  * Compatibility rule (ADR-020 extension): unknown/third-party tool classes are
  * NOT treated as mutating by host policy, so existing Pi extensions keep
  * working in PLAN without adopting Aira metadata. `classifyAiraCapability`
@@ -55,7 +62,49 @@ const BUILTIN_AIRA_CAPABILITY_CLASSES = {
 	process_stop: "process",
 	process_status: "diagnostic",
 	process_logs: "diagnostic",
+	browser_open: "browser",
+	browser_close: "browser",
+	browser_status: "browser",
+	browser_observe: "browser",
+	browser_navigate: "browser",
+	browser_click: "browser",
+	browser_fill: "browser",
+	browser_press: "browser",
+	browser_scroll: "browser",
+	browser_wait: "browser",
+	browser_evaluate: "browser",
+	browser_console: "browser",
+	browser_network: "browser",
+	browser_screenshot: "browser",
+	browser_verify: "browser",
 } satisfies Record<string, AiraCapabilityClass>;
+
+/** Semantic browser operation kinds (Phase 7; ADR-022 refinement). Table
+ * driven like the capability classes — never tool-name heuristics.
+ *
+ * - observe:   read-only semantic observation / evidence inspection;
+ * - navigate:  read-only navigation in the isolated profile;
+ * - interact:  page interaction / evaluation / verification;
+ * - lifecycle: opening and closing the browser itself. */
+export type AiraBrowserOperationKind = "observe" | "navigate" | "interact" | "lifecycle";
+
+const BUILTIN_AIRA_BROWSER_OPERATIONS = {
+	browser_status: "observe",
+	browser_observe: "observe",
+	browser_wait: "observe",
+	browser_scroll: "observe",
+	browser_console: "observe",
+	browser_network: "observe",
+	browser_screenshot: "observe",
+	browser_navigate: "navigate",
+	browser_click: "interact",
+	browser_fill: "interact",
+	browser_press: "interact",
+	browser_evaluate: "interact",
+	browser_verify: "interact",
+	browser_open: "lifecycle",
+	browser_close: "lifecycle",
+} satisfies Record<string, AiraBrowserOperationKind>;
 
 /** Classify a tool/capability name (`"unknown"` for anything not built-in). */
 export function classifyAiraCapability(name: string): AiraClassifiedCapability {
@@ -102,6 +151,13 @@ export function airaCapabilityClassLabel(cls: AiraClassifiedCapability): string 
 		unknown: "unknown",
 	} satisfies Record<AiraClassifiedCapability, string>;
 	return labels[cls as keyof typeof labels] ?? "unknown";
+}
+
+/** The semantic operation kind of a browser tool ("observe" for anything not
+ * classified as a browser operation). Table-driven; no name heuristics. */
+export function classifyAiraBrowserOperation(name: string): AiraBrowserOperationKind {
+	const kind = BUILTIN_AIRA_BROWSER_OPERATIONS[name as keyof typeof BUILTIN_AIRA_BROWSER_OPERATIONS];
+	return kind ?? "observe";
 }
 
 /** Every built-in read-only tool name (source of truth for PLAN availability). */
