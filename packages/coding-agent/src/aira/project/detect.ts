@@ -140,7 +140,7 @@ function depTokens(deps: Record<string, unknown> | undefined): string[] {
 	return tokens;
 }
 
-type Commands = { test: string[]; build: string[]; dev: string[] };
+type Commands = { test: string[]; build: string[]; check: string[]; dev: string[] };
 
 interface PartialProfile {
 	languages: Set<string>;
@@ -156,14 +156,14 @@ function emptyPartial(): PartialProfile {
 		languages: new Set(),
 		frameworks: new Set(),
 		managers: new Set(),
-		commands: { test: [], build: [], dev: [] },
+		commands: { test: [], build: [], check: [], dev: [] },
 		browser: false,
 		deployment: new Set(),
 	};
 }
 
 function addCommands(target: Commands, src: Commands): void {
-	for (const k of ["test", "build", "dev"] as const) {
+	for (const k of ["test", "build", "check", "dev"] as const) {
 		if (src[k].length > 0 && target[k].length === 0) {
 			target[k] = src[k];
 		}
@@ -217,9 +217,11 @@ function detectNode(env: DirEnv, out: PartialProfile): void {
 				? "pnpm"
 				: "bun";
 	const scripts = pkg.scripts ?? {};
+	const check = scripts.check ?? (env.names.has("tsconfig.json") ? "npx tsc --noEmit" : undefined);
 	addCommands(out.commands, {
 		test: [scripts.test ?? `${pm} test`],
 		build: [scripts.build ?? `${pm} run build`],
+		check: check ? [check] : [],
 		dev: [scripts.dev ?? `${pm} run dev`],
 	});
 }
@@ -241,7 +243,7 @@ function detectPython(env: DirEnv, out: PartialProfile): void {
 	else out.managers.add("pip");
 
 	const pyproject = readText(join(env.root, "pyproject.toml"));
-	const hints = textHints(pyproject, ["django", "flask", "fastapi", "uvicorn"]);
+	const hints = textHints(pyproject, ["django", "flask", "fastapi", "uvicorn", "mypy", "ruff"]);
 	for (const token of hints) {
 		out.frameworks.add(token);
 		if (token === "django" || token === "flask" || token === "fastapi") out.browser = true;
@@ -249,9 +251,17 @@ function detectPython(env: DirEnv, out: PartialProfile): void {
 	if (env.names.has("manage.py") && !out.frameworks.has("django")) out.frameworks.add("django");
 	if (env.names.has("manage.py")) out.browser = true;
 
+	// Type/check commands from explicit tool hints (mypy/ruff); nothing
+	// speculative is added.
+	const check: string[] = [];
+	const reqText = readText(join(env.root, "requirements.txt")) ?? "";
+	if (hints.has("mypy") || reqText.includes("mypy")) check.push("python -m mypy .");
+	if (hints.has("ruff") || reqText.includes("ruff")) check.push("python -m ruff check .");
+
 	addCommands(out.commands, {
 		test: ["python -m pytest"],
 		build: ["python -m build"],
+		check,
 		dev: out.frameworks.has("django") ? ["python manage.py runserver"] : ["python -m uvicorn app.main:app"],
 	});
 }
@@ -264,6 +274,7 @@ function detectGo(env: DirEnv, out: PartialProfile): void {
 	addCommands(out.commands, {
 		test: ["go test ./..."],
 		build: ["go build ./..."],
+		check: ["go vet ./..."],
 		dev: ["go run ."],
 	});
 }
@@ -276,6 +287,7 @@ function detectRust(env: DirEnv, out: PartialProfile): void {
 	addCommands(out.commands, {
 		test: ["cargo test"],
 		build: ["cargo build"],
+		check: ["cargo check"],
 		dev: ["cargo run"],
 	});
 }
@@ -289,6 +301,7 @@ function detectDotnet(env: DirEnv, out: PartialProfile): void {
 	addCommands(out.commands, {
 		test: ["dotnet test"],
 		build: ["dotnet build"],
+		check: [],
 		dev: ["dotnet run"],
 	});
 }
@@ -308,6 +321,7 @@ function detectCpp(env: DirEnv, out: PartialProfile): void {
 	addCommands(out.commands, {
 		test: [hasCmake ? "ctest" : "make test"],
 		build: [hasCmake ? "cmake --build ." : hasMake ? "make" : "meson compile"],
+		check: [],
 		dev: [],
 	});
 }
@@ -318,6 +332,7 @@ function detectMakefile(env: DirEnv, out: PartialProfile): void {
 	addCommands(out.commands, {
 		test: ["make test"],
 		build: ["make"],
+		check: [],
 		dev: ["make run"],
 	});
 }
@@ -334,6 +349,7 @@ function detectRuby(env: DirEnv, out: PartialProfile): void {
 	addCommands(out.commands, {
 		test: ["bundle exec rspec"],
 		build: [],
+		check: [],
 		dev: out.frameworks.has("rails") ? ["bundle exec rails server"] : [],
 	});
 }
@@ -349,6 +365,7 @@ function detectJvm(env: DirEnv, out: PartialProfile): void {
 	addCommands(out.commands, {
 		test: [hasMaven ? "mvn test" : "./gradlew test"],
 		build: [hasMaven ? "mvn package" : "./gradlew build"],
+		check: [],
 		dev: [hasMaven ? "mvn spring-boot:run" : "./gradlew run"],
 	});
 }
@@ -361,6 +378,7 @@ function detectPhp(env: DirEnv, out: PartialProfile): void {
 	addCommands(out.commands, {
 		test: ["composer test"],
 		build: [],
+		check: [],
 		dev: [],
 	});
 }
@@ -373,6 +391,7 @@ function detectSwift(env: DirEnv, out: PartialProfile): void {
 	addCommands(out.commands, {
 		test: ["swift test"],
 		build: ["swift build"],
+		check: [],
 		dev: ["swift run"],
 	});
 }
@@ -386,6 +405,7 @@ function detectElixir(env: DirEnv, out: PartialProfile): void {
 	addCommands(out.commands, {
 		test: ["mix test"],
 		build: [],
+		check: [],
 		dev: ["mix phx.server"],
 	});
 }
@@ -477,6 +497,7 @@ export function detectAiraProject(cwd: string, options?: DetectProjectOptions): 
 		packageManagers: [...out.managers].sort(),
 		testCommands: out.commands.test,
 		buildCommands: out.commands.build,
+		checkCommands: out.commands.check,
 		devCommands: out.commands.dev,
 		browserRelevant: out.browser,
 		deploymentHints: [...out.deployment].sort(),

@@ -35,6 +35,8 @@ export interface AiraProjectProfile {
 	testCommands: readonly string[];
 	/** Conventional build commands for the detected toolchain. */
 	buildCommands: readonly string[];
+	/** Conventional type/check commands for the detected toolchain (Phase 6). */
+	checkCommands: readonly string[];
 	/** Conventional dev/run commands for the detected toolchain. */
 	devCommands: readonly string[];
 	/** True when the project plausibly runs a browser-testable web app. */
@@ -54,6 +56,7 @@ export const NO_AIRA_PROJECT: AiraProjectProfile = {
 	packageManagers: [],
 	testCommands: [],
 	buildCommands: [],
+	checkCommands: [],
 	devCommands: [],
 	browserRelevant: false,
 	deploymentHints: [],
