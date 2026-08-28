@@ -46,6 +46,9 @@ import {
 	resetApiProviders,
 	streamSimple,
 } from "@earendil-works/pi-ai/compat";
+import { type AiraExecutionManagerOptions, createAiraExecutionManager } from "../aira/execution/manager.ts";
+import { createAiraProcessToolDefinitions } from "../aira/execution/tools.ts";
+import type { AiraExecutionHandle } from "../aira/execution/types.ts";
 import {
 	AIRA_INTELLIGENCE_CONTEXT_TYPE,
 	type AiraIntelligenceHandle,
@@ -237,6 +240,8 @@ export interface AgentSessionConfig {
 	extensionRunnerRef?: { current?: ExtensionRunner };
 	/** Session start event metadata emitted when extensions bind to this runtime. */
 	sessionStartEvent?: SessionStartEvent;
+	/** Execution-runtime options (Aira phase 6; tests use small timings). */
+	airaExecutionOptions?: AiraExecutionManagerOptions;
 }
 
 export interface ExtensionBindings {
@@ -370,6 +375,7 @@ export class AgentSession {
 	private _sessionStartEvent: SessionStartEvent;
 	private _airaSessionState: AiraSessionState;
 	private _airaIntelligence: AiraIntelligenceHandle | undefined;
+	private _airaExecution: AiraExecutionHandle | undefined;
 	private _extensionUIContext?: ExtensionUIContext;
 	private _extensionMode: ExtensionMode = "print";
 	private _extensionCommandContextActions?: ExtensionCommandContextActions;
@@ -423,6 +429,13 @@ export class AgentSession {
 			cacheDir: join(getAiraCacheDir(), "intelligence"),
 		});
 		void this._airaIntelligence.activate();
+
+		// Aira execution seam (Phase 6): the session owns its process runtime.
+		// This manager is created BEFORE the tool registry is built so the
+		// process tools can bind to it. It is session-instance-scoped: another
+		// live session overlapping this session file owns a separate manager,
+		// so dispose of one can never kill the other's processes (ADR-024).
+		this._airaExecution = createAiraExecutionManager(this._airaSessionState, this._cwd, config.airaExecutionOptions);
 
 		// Always subscribe to agent events for internal handling
 		// (session persistence, extensions, auto-compaction, retry logic)
@@ -903,6 +916,11 @@ export class AgentSession {
 		);
 		this._disconnectFromAgent();
 		this._eventListeners = [];
+		// Aira execution seam: clean up THIS session's managed processes
+		// (graceful → forced). Session-instance-scoped: a stale session being
+		// disposed can never kill processes a newer session over the same file
+		// launched, because each session owns its own manager (ADR-024).
+		void this._airaExecution?.dispose();
 		// Aira intelligence seam: shut down providers (language servers, timers).
 		void this._airaIntelligence?.dispose();
 		// Aira lifecycle seam: release canonical state, ownership-checked so a
@@ -953,6 +971,11 @@ export class AgentSession {
 	/** Aira canonical session state (tests and host diagnostics). */
 	get airaSessionState(): AiraSessionState {
 		return this._airaSessionState;
+	}
+
+	/** Aira execution runtime for this session (process manager; tests and host). */
+	get airaExecution(): AiraExecutionHandle | undefined {
+		return this._airaExecution;
 	}
 
 	/**
@@ -2787,6 +2810,19 @@ export class AgentSession {
 					bash: { commandPrefix: shellCommandPrefix, shellPath },
 				});
 
+		// Aira execution seam (Phase 6): every session gets the native process
+		// runtime tools bound to THIS session's manager. They are core Aira
+		// tools, so they are merged in regardless of the base-tools override and
+		// included in the default active set (the model can use managed
+		// execution out of the box; explicit initialActiveToolNames still wins).
+		const airaExecutionTools = this._airaExecution
+			? createAiraProcessToolDefinitions({
+					manager: this._airaExecution,
+					state: this._airaSessionState,
+				})
+			: {};
+		Object.assign(baseToolDefinitions, airaExecutionTools);
+
 		this._baseToolDefinitions = new Map(
 			Object.entries(baseToolDefinitions).map(([name, tool]) => [name, tool as ToolDefinition]),
 		);
@@ -2812,8 +2848,8 @@ export class AgentSession {
 		this._applyExtensionBindings(this._extensionRunner);
 
 		const defaultActiveToolNames = this._baseToolsOverride
-			? Object.keys(this._baseToolsOverride)
-			: ["read", "bash", "edit", "write"];
+			? [...Object.keys(this._baseToolsOverride), ...Object.keys(airaExecutionTools)]
+			: ["read", "bash", "edit", "write", ...Object.keys(airaExecutionTools)];
 		const baseActiveToolNames = options.activeToolNames ?? defaultActiveToolNames;
 		this._refreshToolRegistry({
 			activeToolNames: baseActiveToolNames,

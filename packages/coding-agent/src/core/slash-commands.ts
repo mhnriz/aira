@@ -35,6 +35,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		argumentHint: "<build|plan|review|cycle>",
 	},
 	{ name: "doctor", description: "Run Aira health checks" },
+	{ name: "processes", description: "Show Aira managed processes" },
 	{ name: "changelog", description: "Show changelog entries" },
 	{ name: "hotkeys", description: "Show all keyboard shortcuts" },
 	{ name: "fork", description: "Create a new fork from a previous user message" },

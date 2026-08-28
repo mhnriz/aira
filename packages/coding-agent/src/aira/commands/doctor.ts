@@ -94,23 +94,29 @@ export function buildAiraDoctorReport(state: AiraSessionState | undefined): Aira
 	});
 
 	// 5. PLAN read-only boundary.
-	const mutating = ["bash", "powershell", "edit", "write"].filter((t) => AIRA_MUTATING_TOOLS.has(t));
+	const mutating = ["bash", "powershell", "edit", "write", "process_start", "process_stop"].filter((t) =>
+		AIRA_MUTATING_TOOLS.has(t),
+	);
 	const readOnly = AIRA_READ_ONLY_TOOLS.filter((t) => AIRA_READ_ONLY_TOOLS.includes(t));
 	checks.push({
 		name: "plan read-only",
-		pass: mutating.length === 4 && readOnly.length === 4,
+		pass: mutating.length === 6 && readOnly.length === 6,
 		detail: `blocked: ${mutating.join(", ")} | allowed: ${readOnly.join(", ")}`,
 	});
 
 	// 6. Semantic capability classification contract.
-	const classifiedReadOnly = ["read", "grep", "find", "ls"].every((t) => classifyAiraCapability(t) === "read-only");
-	const classifiedMutating = ["edit", "write", "bash", "powershell"].every((t) => !isAiraCapabilityReadOnly(t));
+	const classifiedReadOnly = ["read", "grep", "find", "ls", "process_status", "process_logs"].every(
+		(t) => classifyAiraCapability(t) === "read-only" || classifyAiraCapability(t) === "diagnostic",
+	);
+	const classifiedMutating = ["edit", "write", "bash", "powershell", "process_start", "process_stop"].every(
+		(t) => !isAiraCapabilityReadOnly(t),
+	);
 	const unknownPermissive =
 		!isAiraCapabilityReadOnly("unknown-extension-tool") && !AIRA_MUTATING_TOOLS.has("unknown-extension-tool");
 	checks.push({
 		name: "capabilities",
 		pass: classifiedReadOnly && classifiedMutating && unknownPermissive,
-		detail: `read-only: read, grep, find, ls | mutating/process: edit, write, bash, powershell | unknown: not flagged mutating`,
+		detail: `read-only/diagnostic: read, grep, find, ls, process_status, process_logs | mutating/process: edit, write, bash, powershell, process_start, process_stop | unknown: not flagged mutating`,
 	});
 
 	// 7. Project awareness: canonical state carries a resolved project profile.
@@ -143,6 +149,30 @@ export function buildAiraDoctorReport(state: AiraSessionState | undefined): Aira
 			name: "intelligence",
 			pass: !intelligence.degraded,
 			detail: `repository: ${repoLine} | ${liveLine} | findings: ${intelligence.findings.errors} errors / ${intelligence.findings.warnings} warnings`,
+		});
+	}
+
+	// 9. Execution runtime: armed manager + bounded snapshot in canonical state.
+	const execution = state?.execution;
+	if (!execution) {
+		checks.push({
+			name: "execution",
+			pass: false,
+			detail: "no execution snapshot (runtime wiring)",
+		});
+	} else if (!execution.active) {
+		checks.push({
+			name: "execution",
+			pass: true,
+			detail: `inactive (${execution.processes.length} process(es) retained)`,
+		});
+	} else {
+		const running = execution.processes.filter((p) => p.status === "running").length;
+		const degraded = execution.degraded ? " · degraded" : "";
+		checks.push({
+			name: "execution",
+			pass: !execution.degraded,
+			detail: `active · ${execution.processes.length} process(es) (${running} running) · ${execution.recentResults.length} recent result(s)${degraded}`,
 		});
 	}
 

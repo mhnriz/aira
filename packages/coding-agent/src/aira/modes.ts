@@ -36,7 +36,9 @@ export const NEXT_AIRA_MODE: Record<AiraMode, AiraMode> = {
 
 /**
  * Built-in read-only tools available in PLAN mode. Reading, search,
- * inspection, and other safe operations stay usable in PLAN.
+ * inspection, and other safe operations stay usable in PLAN. Phase 6 adds
+ * the diagnostic process-inspection tools (they only read managed-process
+ * state; they never launch or stop anything).
  */
 export const AIRA_READ_ONLY_TOOLS: readonly string[] = [...BUILTIN_READ_ONLY_CAPABILITIES];
 
@@ -44,9 +46,18 @@ export const AIRA_READ_ONLY_TOOLS: readonly string[] = [...BUILTIN_READ_ONLY_CAP
  * Built-in tools that can mutate the workspace and are therefore blocked in
  * PLAN mode. This is the host/tool-policy enforcement set. It intentionally
  * covers every built-in tool that can write or execute; read/search/inspection
- * tools are not listed.
+ * tools are not listed. Phase 6 adds the native process runtime tools
+ * (process_start/process_stop) — the semantic gate (capabilities.ts) already
+ * blocks them via the `process` class; this auditable set stays in sync.
  */
-export const AIRA_MUTATING_TOOLS: ReadonlySet<string> = new Set(["bash", "powershell", "edit", "write"]);
+export const AIRA_MUTATING_TOOLS: ReadonlySet<string> = new Set([
+	"bash",
+	"powershell",
+	"edit",
+	"write",
+	"process_start",
+	"process_stop",
+]);
 
 /** The next mode after the given one in the cycle (pure). */
 export function nextAiraMode(mode: AiraMode): AiraMode {

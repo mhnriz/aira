@@ -54,6 +54,7 @@ import {
 	formatAiraDoctorReport,
 	formatAiraModeReport,
 	formatAiraStatusReport,
+	formatProcessLine,
 	getAiraSessionState,
 	nextAiraMode,
 	parseAiraModeArg,
@@ -3047,6 +3048,11 @@ export class InteractiveMode {
 				this.editor.setText("");
 				return;
 			}
+			if (text === "/processes") {
+				this.handleProcessesCommand();
+				this.editor.setText("");
+				return;
+			}
 			if (text === "/changelog") {
 				this.handleChangelogCommand();
 				this.editor.setText("");
@@ -4242,6 +4248,42 @@ export class InteractiveMode {
 		const report = buildAiraDoctorReport(getAiraSessionState(this.session.sessionId));
 		this.chatContainer.addChild(new Spacer(1));
 		this.chatContainer.addChild(new Text(theme.fg("dim", formatAiraDoctorReport(report)), 1, 0));
+		this.ui.requestRender();
+	}
+
+	/**
+	 * `/processes` — restrained managed-process inspection (Phase 6). Lists
+	 * THIS session's managed processes (the canonical state's snapshot is for
+	 * doctors; the manager is the source of truth for the live session).
+	 */
+	private handleProcessesCommand(): void {
+		const manager = this.session.airaExecution;
+		const lines: string[] = ["managed processes"];
+		if (!manager) {
+			lines.push("execution runtime unavailable");
+		} else {
+			const records = manager.list();
+			if (records.length === 0) {
+				lines.push("(none)");
+			} else {
+				for (const record of records) {
+					lines.push(
+						formatProcessLine({
+							id: record.id,
+							status: record.status,
+							command:
+								record.request.command ?? [record.request.exe ?? "", ...(record.request.args ?? [])].join(" "),
+							startedAt: record.startedAt,
+							exitedAt: record.exitedAt,
+							exitCode: record.exitCode,
+							pid: record.pid,
+						}),
+					);
+				}
+			}
+		}
+		this.chatContainer.addChild(new Spacer(1));
+		this.chatContainer.addChild(new Text(theme.fg("dim", lines.join("\n")), 1, 0));
 		this.ui.requestRender();
 	}
 

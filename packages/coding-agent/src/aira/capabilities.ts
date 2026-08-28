@@ -20,6 +20,11 @@
  * unknown      a capability the host does not classify (extension tools)
  * ```
  *
+ * Phase 6 extends the built-in table with the native process runtime:
+ * `process_start`/`process_stop` classify as `process` (PLAN-blocked), and
+ * `process_status`/`process_logs` classify as `diagnostic` (read-only
+ * inspection of managed execution state, safe in PLAN).
+ *
  * Compatibility rule (ADR-020 extension): unknown/third-party tool classes are
  * NOT treated as mutating by host policy, so existing Pi extensions keep
  * working in PLAN without adopting Aira metadata. `classifyAiraCapability`
@@ -46,6 +51,10 @@ const BUILTIN_AIRA_CAPABILITY_CLASSES = {
 	write: "mutating",
 	bash: "process",
 	powershell: "process",
+	process_start: "process",
+	process_stop: "process",
+	process_status: "diagnostic",
+	process_logs: "diagnostic",
 } satisfies Record<string, AiraCapabilityClass>;
 
 /** Classify a tool/capability name (`"unknown"` for anything not built-in). */
@@ -96,4 +105,13 @@ export function airaCapabilityClassLabel(cls: AiraClassifiedCapability): string 
 }
 
 /** Every built-in read-only tool name (source of truth for PLAN availability). */
-export const BUILTIN_READ_ONLY_CAPABILITIES: readonly string[] = ["read", "grep", "find", "ls"];
+export const BUILTIN_READ_ONLY_CAPABILITIES: readonly string[] = [
+	"read",
+	"grep",
+	"find",
+	"ls",
+	// Diagnostic (Phase 6): managed-process inspection never mutates and is
+	// safe in read-only contexts.
+	"process_status",
+	"process_logs",
+];
