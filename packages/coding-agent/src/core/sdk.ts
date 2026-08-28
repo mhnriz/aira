@@ -27,7 +27,6 @@ import {
 	createReadOnlyTools,
 	createReadTool,
 	createWriteTool,
-	type ToolName,
 	withFileMutationQueue,
 } from "./tools/index.ts";
 
@@ -253,7 +252,20 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		thinkingLevel = clampThinkingLevel(model, thinkingLevel) as ThinkingLevel;
 	}
 
-	const defaultActiveToolNames: ToolName[] = ["read", "bash", "edit", "write"];
+	// Aira Phase 6: the native process runtime tools are part of the default
+	// tool set (they are core Aira tools; explicit `defaultTools`/`tools`
+	// selections still win). ToolName stays the Pi-builtin union — the Aira
+	// tools are resolved by name through the registry.
+	const defaultActiveToolNames: string[] = [
+		"read",
+		"bash",
+		"edit",
+		"write",
+		"process_start",
+		"process_status",
+		"process_logs",
+		"process_stop",
+	];
 	const configuredDefaultToolNames = settingsManager.getDefaultTools();
 	const allowedToolNames = options.tools ?? (options.noTools === "all" ? [] : undefined);
 	const excludedToolNames = options.excludeTools;

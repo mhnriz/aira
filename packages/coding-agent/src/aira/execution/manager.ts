@@ -23,7 +23,13 @@
  */
 import { spawn } from "node:child_process";
 import { stripAnsi } from "../../utils/ansi.ts";
-import { getShellConfig, getShellEnv, sanitizeBinaryOutput } from "../../utils/shell.ts";
+import {
+	getShellConfig,
+	getShellEnv,
+	sanitizeBinaryOutput,
+	trackDetachedChildPid,
+	untrackDetachedChildPid,
+} from "../../utils/shell.ts";
 import type { AiraSessionState } from "../state.ts";
 import { BoundedOutputBuffer, DEFAULT_EXECUTION_LOG_BYTES } from "./buffer.ts";
 import { createProcessTerminator, type KillEffects, type ProcessTerminator } from "./platform.ts";
@@ -226,6 +232,12 @@ export class AiraExecutionManager {
 	private attach(record: AiraProcessRecord, child: ReturnType<typeof spawn>): void {
 		record.child = child;
 		record.pid = child.pid;
+		if (child.pid !== undefined) {
+			// Last-resort orphan protection: the host's shutdown paths kill
+			// tracked detached children (SIGHUP/SIGTERM, crash exit). Tracking
+			// is removed when the managed process exits.
+			trackDetachedChildPid(child.pid);
+		}
 		const stdoutDecoder = new TextDecoder();
 		const stderrDecoder = new TextDecoder();
 		// Output may still be in flight when the process exits (a child of the
@@ -244,6 +256,9 @@ export class AiraExecutionManager {
 			if (postExitTimer) {
 				clearTimeout(postExitTimer);
 				postExitTimer = undefined;
+			}
+			if (record.pid !== undefined) {
+				untrackDetachedChildPid(record.pid);
 			}
 			this.finalizeExit(record, code);
 		};
