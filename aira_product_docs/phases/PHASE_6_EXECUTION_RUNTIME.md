@@ -266,11 +266,23 @@ biome check (changed trees)            → clean
 
 `npm run check` (biome `--error-on-warnings` whole repo, pinned-deps,
 ts-imports, shrinkwrap, install-lock, `tsgo --noEmit`, browser-smoke) ran on
-every Phase 6 commit via the pre-commit hook: PASS on all five commits. The
-full non-e2e suite was not re-run in this phase; Phase 5's documented single
-environmental failure (`packages/ai zai-coding-plan-models`, machine-hydrated
-catalog pricing) is unrelated to Phase 6 and remains unchanged. The broader
-`./test.sh` run is the standard next-session verification.
+every Phase 6 commit via the pre-commit hook: PASS on all six commits.
+
+The full non-e2e suite (`./test.sh`, isolated HOME) passed except the two
+documented pre-existing environmental failures in `packages/ai`
+(`fireworks-models` Fire Pass turbo router, `zai-coding-plan-models` zero
+costs — machine-hydrated catalog pricing, zero Phase 6 diff in
+`packages/ai`; the zai failure is the same one documented in Phase 5):
+
+```text
+coding-agent    2189 passed / 50 skipped — 0 failed (Phase 5: 2139/50)
+packages/ai     2 failed / 946 passed (pre-existing environmental only)
+agent 147 · tui 50 · client 15 · evals 36 · session-backends 87 · scripts 23 — all passed
+```
+
+One new Phase 6 finding was fixed during the full run: the
+`default-tools-setting` regressions needed the extended built-in
+enumeration for the process tools (committed as `3c9bad704`).
 
 ## Compatibility concerns
 
@@ -301,7 +313,8 @@ a013fbde3 feat(aira): add native execution runtime with managed process lifecycl
 c0033ad09 feat(aira): add check commands to the canonical project profile
 f08d83660 test(aira): cover the Phase 6 execution runtime through the host
 43323ef9a fix(aira): make process tools active by default in SDK-created sessions
-<docs commit> docs: Phase 6 report, ADR-024, changelog, architecture, UI backlog
+3c9bad704 test(coding-agent): extend default-tools regression for the native process tools
+bd93e93f0 docs(aira): Phase 6 report, ADR-024, changelog, architecture, UI backlog
 ```
 
 ## Final `git status`
