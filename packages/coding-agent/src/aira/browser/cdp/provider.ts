@@ -17,6 +17,7 @@
 import type { ChildProcess } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { trackDetachedChildPid, untrackDetachedChildPid } from "../../../utils/shell.ts";
 import {
 	type AiraBrowserAvailability,
 	type AiraBrowserClickOptions,
@@ -140,6 +141,12 @@ export class CdpBrowserProvider implements AiraBrowserProvider {
 			return failResult("open", launched.error);
 		}
 		this.child = launched.child;
+		// Crash-path orphan protection: the host's shutdown teardown reaps
+		// tracked detached children (SIGHUP/SIGTERM, crash exit). Tracking is
+		// removed when Aira closes the browser itself.
+		if (launched.child.pid !== undefined) {
+			trackDetachedChildPid(launched.child.pid);
+		}
 		this.client = new CdpClient({
 			url: launched.handle.wsUrl,
 			onEvent: (event) => this.onEvent(event),
@@ -478,7 +485,11 @@ export class CdpBrowserProvider implements AiraBrowserProvider {
 			const terminate = this.options.terminate ?? terminateBrowserProcess;
 			later.push(terminate(this.child, process.platform, 1500));
 		}
+		const disposedPid = this.child?.pid;
 		this.child = undefined;
+		if (disposedPid !== undefined) {
+			untrackDetachedChildPid(disposedPid);
+		}
 		const callbacks = [...this.exitListeners];
 		this.exitListeners.clear();
 		for (const listener of callbacks) {
@@ -608,6 +619,9 @@ export class CdpBrowserProvider implements AiraBrowserProvider {
 
 	private onBrowserExited(code: number | null, signal: string | null): void {
 		if (this.closedReason || this.disposed) return;
+		if (this.child?.pid !== undefined) {
+			untrackDetachedChildPid(this.child.pid);
+		}
 		this.closedReason = `browser process exited (code ${code ?? "?"}, signal ${signal ?? "none"})`;
 		try {
 			this.client?.close();
