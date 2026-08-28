@@ -232,23 +232,49 @@ Phase 5 ships a native minimal LSP client with project-scoped, lazy, reused lang
 
 ## 11. Execution runtime
 
-Aira needs native management for long-running commands.
+Aira operates the software it edits through a native per-session execution
+runtime (ADR-024). One `AiraExecutionManager` per `AgentSession` owns the
+lifecycle: launch, status, bounded stdout/stderr capture, termination
+(graceful → forced with group-survivor reaping), disposal cleanup, and
+conservative dev-server reuse. The canonical session state carries a bounded
+snapshot (`state.execution`); logs and truth live in the manager.
 
 ```text
-ProcessRecord
-├── id
-├── command
-├── cwd
-├── pid
-├── startedAt
-├── status
-├── logs
-└── owner
+AiraExecutionManager (per session)
+├── start(request, {mode, timeoutMs, reuse, signal}) → ExecutionResult
+├── get / list / logs(id, tail) / terminate(id, reason)
+├── subscribe(events)                     # started / backgrounded / exited
+├── dispose()                             # graceful → forced, own processes only
+└── ProcessRecord                         # id, request, cwd, pid, purpose,
+                                          # ownerSessionId, status, exitCode,
+                                          # bounded stdout/stderr buffers,
+                                          # lifecycle metadata
 ```
 
-The harness should start/reuse/restart development servers when appropriate and consume their logs without requiring the user to manage tmux manually.
+- Foreground commands wait and return structured evidence (exit code,
+  duration, bounded output tails with truncation markers). Background
+  commands return a managed id immediately; `auto` stays foreground until it
+  outlives the auto-background threshold (~20s), then becomes managed
+  background (runtime signal, not a command-name heuristic).
+- Ownership is per-session-instance (ADR-024): disposal kills only the
+  session's own processes, so overlapping sessions over the same session
+  file cannot kill each other's processes. Managed pids join the host's
+  last-resort detached-child tracking for crash-path reaping.
+- Project-aware execution consumes the canonical `ProjectProfile` commands
+  (test/build/check/dev) with explicit depth semantics: TARGETED (toolchain-
+  aware target suffix), RELATED (nearest subpackage with its own profile),
+  PROJECT (full command). `runCheck` prefers profile check commands and
+  falls back to build.
+- Model-facing tools: `process_start`, `process_status`, `process_logs`,
+  `process_stop` (registered by default; `process` class for start/stop,
+  `diagnostic` for status/logs). The restrained `/processes` command lists
+  the live table; `/doctor` gained an `execution` check.
 
-Testing should distinguish targeted checks, related tests, full suites, builds/type checks, and runtime/browser verification.
+The harness should start/reuse/restart development servers when appropriate
+and consume their logs without requiring the user to manage tmux manually.
+
+Testing should distinguish targeted checks, related tests, full suites,
+builds/type checks, and runtime/browser verification.
 
 ## 12. Browser
 

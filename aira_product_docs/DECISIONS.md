@@ -331,6 +331,29 @@ ADR-001 and ADR-003 establish Aira as a standalone Pi-derived product. Pi's `piC
 - Pi's official first-time setup is gated to the official Pi distribution; Aira skips it (its own onboarding arrives later).
 - Pi self-update/installer machinery (`pi update`, managed installs) remains Pi-oriented until Aira distribution exists; Aira update/packaging is a later phase.
 
+## ADR-024 — Execution is a session-owned runtime service; process ownership is per-session-instance with explicit lifecycle semantics
+
+**Status:** Accepted
+
+### Decision
+
+- Aira execution is a native harness service (`src/aira/execution/`): one `AiraExecutionManager` per `AgentSession` instance, created at session construction and disposed with it. The canonical session state publishes a bounded snapshot (`state.execution`: process table + recent results, capped, no log contents), never a competing process truth (ADR-005).
+- **Ownership is per-session-instance.** Every `ProcessRecord` carries `ownerSessionId` and belongs to exactly one manager. A session's dispose() terminates ONLY its own manager's processes (graceful → grace period → forced group/tree kill). Two live sessions over the same session file (the legal overlapping lifecycle, ADR-018) therefore cannot kill each other's processes: a stale session's disposal kills only what the stale session launched. Stale canonical-state disposal remains a no-op (ADR-018).
+- **Reuse is conservative and same-manager-only.** `reuse: "reuse"` returns the manager's own still-running `dev` background process when cwd+command match exactly; `reuse: "restart"` terminates a matching one first. Arbitrary OS processes are never adopted; cross-session adoption is out of scope until evidence demands it.
+- **Lifecycle semantics are explicit**: foreground waits for completion (optional timeout, AbortSignal cancels); background returns immediately with a managed id (optional timeout bounds it); `auto` stays foreground until the auto-background threshold (default 20s) with the process still alive, then reclassifies to managed background (documented contract: the runtime signal is "still alive past threshold", not a command-name heuristic). Background/timeout/cancelled/session-end termination is graceful first (SIGTERM to the process group; taskkill without /F on Windows), then forced (SIGKILL to the group; taskkill /F /T), including a group-survivor probe so a shell whose child ignored SIGTERM gets reaped. Log buffers are capped per stream (128 KiB tail, truncation flagged); records are capped (oldest exited evicted; running processes never evicted); results carry bounded tails, never full logs. No durable process history across application restarts (Phase 6 scope).
+- Managed pids are registered with the host's last-resort detached-child tracking so crash/shutdown paths can still reap them.
+
+### Rationale
+
+Phase 1 characterized overlapping session lifecycles (ADR-018); naive dispose-by-id cleanup would let a stale session kill a newer owner's processes. Per-instance managers make ownership structurally testable (the overlap suite runs two managers over one session id) and deterministic. The runtime signal for auto-backgrounding avoids fragile command-name heuristics. Force-after-grace with a survivor probe is required because a polite SIGTERM frequently kills only the shell while a descendant (e.g. a dev tool ignoring SIGTERM) survives holding the pipes.
+
+### Consequences
+
+- `AgentSession` owns the manager; model tools (`process_start/status/logs/stop`) bind to it; `/processes` lists it; dispose drives cleanup (ADR-005 preserved).
+- Dev-server reuse is per-session by contract: resuming/replacing a session does not adopt another session's server; a later phase may define cross-session adoption explicitly.
+- Termination of a managed process kills its whole spawned tree by contract (documented); processes that must outlive the session must not be launched through the runtime.
+- `state.execution` is a snapshot only; logs and truth live in the manager, so `/processes` and tools always report live state rather than a stored copy.
+
 ## Adding decisions
 
 When a future architectural choice materially changes one of these assumptions:

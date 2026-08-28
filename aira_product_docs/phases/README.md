@@ -44,7 +44,7 @@ Stopping point / next phase
 | 3 — Native Modes and UX | ✅ done 2026-08-26 | [PHASE_3_NATIVE_MODES_UX.md](PHASE_3_NATIVE_MODES_UX.md) | BUILD/PLAN/REVIEW cycle (`Shift+Tab`), PLAN read-only at tool-policy boundary, `/mode` + `/doctor`, footer mode badge |
 | 4 — Project Awareness | ✅ done 2026-08-27 | [PHASE_4_PROJECT_AWARENESS.md](PHASE_4_PROJECT_AWARENESS.md) | evidence-based `ProjectProfile` in canonical state; root/languages/frameworks/managers/commands/browser/deployment/confidence; home safety boundary |
 | 5 — Intelligence | ✅ done 2026-08-27 | [PHASE_5_NATIVE_INTELLIGENCE.md](PHASE_5_NATIVE_INTELLIGENCE.md) | native intelligence service: repository + live-code providers, ambient context, automatic post-edit diagnostics, capability classification, graceful degradation |
-| 6 — Execution Runtime | — | — | — |
+| 6 — Execution Runtime | ✅ done 2026-08-28 | [PHASE_6_EXECUTION_RUNTIME.md](PHASE_6_EXECUTION_RUNTIME.md) | native per-session process runtime: managed processes, bounded log capture, cross-platform termination, project-aware test/build/check/dev primitives, process tools + `/processes` |
 | 7 — Browser Runtime | — | — | — |
 | 8 — Independent Verification | — | — | — |
 | 9 — Task Graph and Delegation | — | — | — |

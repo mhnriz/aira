@@ -232,6 +232,10 @@ Aira can operate the software it edits.
 - targeted vs full verification is distinguishable;
 - failures enter supervision coherently.
 
+### Status
+
+✅ done 2026-08-28 — [PHASE_6_EXECUTION_RUNTIME.md](phases/PHASE_6_EXECUTION_RUNTIME.md)
+
 ---
 
 ## Phase 7 — Browser Runtime

@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Aira Workbench UI Mockup</title>
+<style>
+:root{
+  --bg:#141619;
+  --panel:#191c20;
+  --panel2:#1f2328;
+  --line:#2c3137;
+  --text:#e7eaee;
+  --muted:#838a93;
+  --green:#79e2a8;
+  --cyan:#75d7ff;
+  --purple:#cb9cff;
+  --amber:#f2c66d;
+  --red:#ff7d8a;
+  --accent:#dc5ad3;
+}
+*{box-sizing:border-box}
+html,body{
+  height:100%;margin:0;background:#0d0f11;color:var(--text);
+  font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono",monospace;
+}
+body{overflow:hidden}
+button{font:inherit}
+
+.shell{
+  height:100%;
+  display:flex;
+  flex-direction:column;
+  background:var(--bg);
+}
+.top{
+  height:34px;
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:0 12px;
+  border-bottom:1px solid var(--line);
+  background:#111316;
+}
+.brand{font-weight:800;letter-spacing:.08em}
+.brand span{color:var(--green)}
+.top .grow{flex:1}
+.top .hint{color:var(--muted);font-size:11px}
+
+.main{
+  flex:1;
+  min-height:0;
+  display:grid;
+  grid-template-columns:minmax(560px,1.48fr) minmax(365px,.92fr);
+}
+.left{
+  min-width:0;
+  display:flex;
+  flex-direction:column;
+  background:#17191c;
+}
+.right{
+  min-width:0;
+  overflow:auto;
+  border-left:1px solid var(--line);
+  background:#15171a;
+}
+.pane-title{
+  height:29px;
+  display:flex;
+  align-items:center;
+  padding:0 10px;
+  border-bottom:1px solid var(--line);
+  background:#131518;
+  color:#9ba1a9;
+  font-size:10px;
+  letter-spacing:.08em;
+}
+.conversation{
+  flex:1;
+  overflow:auto;
+  padding:14px 16px;
+}
+.chatmsg{
+  max-width:980px;
+  margin:15px 0;
+}
+.prompt{color:var(--green)}
+.tool{
+  display:flex;
+  gap:10px;
+  margin:4px 0;
+  color:#b8bdc4;
+}
+.tool .verb{
+  width:52px;
+  color:#7e8690;
+}
+.tool .path{
+  color:#d7dae0;
+}
+.tool .delta{
+  margin-left:auto;
+  color:#969da6;
+}
+.ok{color:var(--green)}
+.warn{color:var(--amber)}
+.err{color:var(--red)}
+.cyan{color:var(--cyan)}
+.purple{color:var(--purple)}
+.muted{color:var(--muted)}
+.label{
+  font-size:10px;
+  text-transform:uppercase;
+  letter-spacing:.08em;
+  color:#737a83;
+}
+.card{
+  padding:10px;
+  border-bottom:1px solid var(--line);
+}
+.row{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding:3px 0;
+}
+.key{
+  width:86px;
+  color:#777f88;
+  flex:none;
+}
+.val{
+  color:#d6dae0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.symbol{color:#91d7ff}
+.change{color:#f6cd7c}
+.progress{
+  height:5px;
+  background:#262b31;
+  border-radius:99px;
+  overflow:hidden;
+  margin-top:7px;
+}
+.progress > span{
+  display:block;
+  height:100%;
+  width:64%;
+  background:#6ed89f;
+}
+.diffblock{
+  margin-top:7px;
+  border:1px solid #30363d;
+  border-radius:6px;
+  overflow:hidden;
+  font-size:12px;
+}
+.diffline{
+  padding:1px 8px;
+  white-space:pre;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.add{background:rgba(76,200,117,.09);color:#9fe1b5}
+.del{background:rgba(255,102,115,.08);color:#f0a0a9}
+.diag{
+  padding:7px 8px;
+  border:1px solid #493137;
+  background:#21171a;
+  border-radius:6px;
+  color:#f0b3b9;
+  margin-top:6px;
+}
+.input{
+  border-top:1px solid var(--accent);
+  margin-top:22px;
+  padding-top:9px;
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+.cursor{
+  width:7px;
+  height:14px;
+  background:#e8eaed;
+  animation:blink 1s step-end infinite;
+}
+@keyframes blink{50%{opacity:0}}
+
+.footer{
+  height:30px;
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:0 10px;
+  border-top:1px solid var(--line);
+  background:#101215;
+  font-size:11px;
+  white-space:nowrap;
+}
+.mode{color:var(--green);font-weight:800}
+.sep{color:#555c64}
+.footer .grow{flex:1;text-align:center}
+.finding{
+  color:#f3b9bf;
+  max-width:420px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.badge{
+  border:1px solid #343a42;
+  background:#1b1f24;
+  border-radius:5px;
+  padding:2px 6px;
+}
+
+@media(max-width:1000px){
+  .main{grid-template-columns:1fr 330px}
+  .key{width:74px}
+}
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <div class="top">
+    <div class="brand"><span>AIRA</span> WORKBENCH</div>
+    <div class="hint">terminal-native engineering view</div>
+    <div class="grow"></div>
+    <span class="badge">Shift+Tab mode</span>
+    <span class="badge">Ctrl+O details</span>
+  </div>
+
+  <div class="main">
+
+    <section class="left">
+      <div class="pane-title">CONVERSATION</div>
+      <div class="conversation">
+
+        <div class="chatmsg">
+          <span class="prompt">&gt;</span> fix why live-code reports unavailable before it has been probed
+        </div>
+
+        <div class="chatmsg">
+          I’ll inspect the language-intelligence status path first and keep lazy server startup intact.
+        </div>
+
+        <div class="tool">
+          <span class="verb">read</span>
+          <span class="path">src/aira/intelligence/providers/live-code/index.ts</span>
+        </div>
+        <div class="tool">
+          <span class="verb">read</span>
+          <span class="path">src/aira/commands/doctor.ts</span>
+        </div>
+
+        <div class="chatmsg">
+          The provider is healthy but cold. The current health renderer conflates
+          <span class="warn">unprobed</span> with genuinely unavailable.
+        </div>
+
+        <div class="tool">
+          <span class="verb">edit</span>
+          <span class="path">providers/live-code/index.ts</span>
+          <span class="delta">+18 -4</span>
+        </div>
+        <div class="tool">
+          <span class="verb">edit</span>
+          <span class="path">commands/doctor.ts</span>
+          <span class="delta">+4 -1</span>
+        </div>
+        <div class="tool">
+          <span class="verb">test</span>
+          <span class="path">aira/intelligence</span>
+          <span class="delta ok">✓ 45 passed</span>
+        </div>
+
+        <div class="chatmsg">
+          Done. Cold but resolvable language servers now report
+          <span class="warn">idle</span> without spawning.
+          <span class="ok">Focused verification passed.</span>
+        </div>
+
+        <div class="input">
+          <span class="prompt">&gt;</span>
+          <div class="cursor"></div>
+        </div>
+
+      </div>
+    </section>
+
+    <aside class="right">
+      <div class="pane-title">ENGINEERING CONTEXT</div>
+
+      <div class="card">
+        <div class="label">Working Set</div>
+        <div class="row"><span class="change">M</span><span class="val">providers/live-code/index.ts</span></div>
+        <div class="row"><span class="change">M</span><span class="val">commands/doctor.ts</span></div>
+      </div>
+
+      <div class="card">
+        <div class="label">Relevant Symbols</div>
+        <div class="row"><span class="key">symbol</span><span class="symbol">statusInfo()</span></div>
+        <div class="row"><span class="key">symbol</span><span class="symbol">resolveLaunchSpec()</span></div>
+        <div class="row"><span class="key">symbol</span><span class="symbol">liveCodeLine()</span></div>
+      </div>
+
+      <div class="card">
+        <div class="label">Changeset <span class="muted">· 2 files</span></div>
+        <div class="row">
+          <span class="key">Summary</span>
+          <span class="val"><span class="ok">+22</span> <span class="err">-5</span> · 2 modified</span>
+        </div>
+
+        <div class="diffblock">
+          <div class="diffline muted">providers/live-code/index.ts</div>
+          <div class="diffline del">- status: "unavailable"</div>
+          <div class="diffline add">+ status: probe.resolvableCount ? "idle" : "unavailable"</div>
+          <div class="diffline add">+ servers: probe.servers</div>
+          <div class="diffline muted">commands/doctor.ts</div>
+          <div class="diffline add">+ live-code: idle (3 server(s) available)</div>
+        </div>
+
+        <div class="row" style="margin-top:6px">
+          <span class="key">Commit</span>
+          <span class="val muted">not committed yet</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="label">Intelligence</div>
+        <div class="row"><span class="key">Repo</span><span class="ok">ready · 1471 files</span></div>
+        <div class="row"><span class="key">LSP</span><span class="warn">TS idle</span></div>
+        <div class="row"><span class="key">Diagnostics</span><span class="ok">0E 0W</span></div>
+      </div>
+
+      <div class="card">
+        <div class="label">Verification</div>
+        <div class="row"><span class="key">Focused</span><span class="ok">45 / 45</span></div>
+        <div class="row"><span class="key">Check</span><span class="ok">passed</span></div>
+        <div class="progress"><span></span></div>
+      </div>
+
+      <div class="card">
+        <div class="label">Current Finding</div>
+        <div class="diag">
+          <b>TS2304</b> · Cannot find name 'handle'<br/>
+          <span class="muted">coordinator.test.ts:1128 · stale</span>
+        </div>
+      </div>
+
+    </aside>
+  </div>
+
+  <div class="footer">
+    <span class="mode">◈ BUILD</span><span class="sep">│</span>
+    <span>LSP TS <span class="err">1E</span></span><span class="sep">│</span>
+    <span class="finding">TS2304: Cannot find name 'handle'</span>
+    <span class="grow">~/proj/aira <span class="muted">(main)</span></span>
+    <span>Δ2</span>
+    <span>8.2%/262k</span>
+    <span class="purple">kimi-k2.6 · high</span>
+  </div>
+
+</div>
+</body>
+</html>
