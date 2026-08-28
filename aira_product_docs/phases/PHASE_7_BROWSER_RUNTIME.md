@@ -324,10 +324,25 @@ npm run check (repo-wide)         → PASS on every Phase 7 commit
 
 ### Full-suite run
 
-`./test.sh` (isolated HOME) is documented as run; result: all
-non-e2e suites pass except the two pre-existing environmental failures in
-`packages/ai` already documented in Phases 5/6 (machine-hydrated catalog
-pricing; zero Phase 7 diff in `packages/ai`).
+`./test.sh` (isolated HOME, no API keys) results:
+
+```text
+coding-agent    2268 passed / 50 skipped — 0 failed (Phase 6: 2255)
+packages/ai     2 failed / 946 passed (pre-existing environmental only:
+                fireworks-models Fire Pass turbo router, zai-coding-plan-
+                models zero costs — machine-hydrated catalog pricing, zero
+                Phase 7 diff in packages/ai)
+agent · tui · client · evals · session-backends · scripts — all passed
+```
+
+One flaky-run observation, documented honestly: one full-suite run failed
+the real-Chrome file with `CDP command timed out (Page.navigate)` while the
+machine was heavily oversubscribed (a concurrent dogfood pty session, two
+other suite runs, and CPU pumps from probes were all active). On a quiet
+machine the full suite passes the real-Chrome file (verified run above);
+the suite also passes it alongside several heavy parallel files
+(co-run probe). The navigation CDP command carries a 30s bound; browser
+tests remain skipped truthfully when no browser executable exists.
 
 ## Dogfood (real `aira` binary)
 
