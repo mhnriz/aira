@@ -417,7 +417,9 @@ the TUI surface changed. Aira continues to have zero dependency on
 8e2ed2349 feat(aira): real-Chrome integration tests; ref staleness hardening across navigations
 b95dada30 test(coding-agent): extend default-tools regressions for the native browser tools
 5cfa9ff72 fix(aira): track Aira-owned browser pids for crash-path reaping
-<docs commit> docs(aira): Phase 7 report, ADR-025, changelog, architecture, roadmap, UI backlog
+ab747beac fix(aira): longer navigation CDP bound; selector default; extend default-tools list
+2a9bce705 docs(aira): Phase 7 report, ADR-025, changelog, architecture, roadmap, UI backlog
+19e997eab docs(aira): record final full-suite results and load flake note in Phase 7 report
 ```
 
 ## Final `git status`
