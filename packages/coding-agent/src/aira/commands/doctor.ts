@@ -153,6 +153,9 @@ function liveCodeLine(live: { status: string; servers: Array<{ available: boolea
 	if (live.status === "ready") {
 		return `live-code: ready (${live.servers.filter((s) => s.available).length} server(s))`;
 	}
+	if (live.status === "idle") {
+		return `live-code: idle (${live.servers.filter((s) => s.available).length} server(s) available)`;
+	}
 	const crashes = live.crashCount > 0 ? ` (${live.crashCount} crash(es))` : "";
 	return `live-code: ${live.status}${crashes}`;
 }

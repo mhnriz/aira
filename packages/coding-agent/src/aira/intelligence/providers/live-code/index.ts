@@ -30,18 +30,24 @@ import {
 	type LspClientStatus,
 	type LspDiagnostic,
 } from "./lsp-client.ts";
-import { type LaunchSpec, type LspServerDefinition, resolveLaunchSpec, serverForLanguage } from "./registry.ts";
+import {
+	type LaunchSpec,
+	LIVE_CODE_SERVER_DEFINITIONS,
+	type LspServerDefinition,
+	resolveLaunchSpec,
+	serverForLanguage,
+} from "./registry.ts";
 
 export type LiveCodeProviderStatus =
-	| "unavailable" // no supported language in the project
-	| "idle" // project supported; no server spawned yet
+	| "unavailable" // no relevant language server resolvable (project or PATH)
+	| "idle" // supported project; server resolvable but nothing spawned yet
 	| "ready" // at least one server running
 	| "degraded"; // servers exist but all are crashed/unavailable
 
 export interface LiveCodeServerStatus {
 	id: string;
 	language: string;
-	status: LspClientStatus;
+	status: LspClientStatus | "unprobed";
 	available: boolean;
 	error?: string;
 }
@@ -515,7 +521,15 @@ export class LiveCodeProvider {
 		const anyRunning = [...this.clients.values()].some((c) => c.status === "running" || c.status === "starting");
 		const anyAvailable = servers.some((s) => s.available);
 		let overall: LiveCodeProviderStatus = "unavailable";
-		if (servers.length > 0 && !anyAvailable && this.crashCount > 0) {
+		if (servers.length === 0 && this.spawnCount === 0) {
+			// Cold/unprobed: nothing was ever spawned. Resolve availability
+			// through the normal launch path (never spawns) so a supported
+			// project with a resolvable server reports `idle`, not `unavailable`.
+			servers.push(...this.probeUnprobedServers());
+			if (servers.some((s) => s.available)) {
+				overall = "idle";
+			}
+		} else if (servers.length > 0 && !anyAvailable && this.crashCount > 0) {
 			overall = "degraded";
 		} else if (anyRunning) {
 			overall = "ready";
@@ -529,6 +543,21 @@ export class LiveCodeProvider {
 			crashCount: this.crashCount,
 			evictionCount: this.evictionCount,
 		};
+	}
+
+	/** Resolve every registered server's launchability without spawning. */
+	private probeUnprobedServers(): LiveCodeServerStatus[] {
+		const probed: LiveCodeServerStatus[] = [];
+		for (const definition of LIVE_CODE_SERVER_DEFINITIONS) {
+			const spec = this.launchOverrides?.[definition.id] ?? resolveLaunchSpec(definition, this.projectRoot);
+			probed.push({
+				id: definition.id,
+				language: definition.languageIds[0] ?? definition.id,
+				status: "unprobed",
+				available: spec !== undefined,
+			});
+		}
+		return probed;
 	}
 
 	/** Registered server ids (health surface). */

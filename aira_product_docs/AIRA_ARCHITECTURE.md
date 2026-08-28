@@ -228,7 +228,7 @@ Live code intelligence answers:
 
 > What does the actual language/toolchain say about the code now?
 
-Phase 5 ships a native minimal LSP client with project-scoped, lazy, reused language servers (TypeScript/JavaScript, Python, Go, Rust, C/C++, C#), post-edit diagnostics, warm-only navigation, idle eviction, and crash degradation. Missing servers degrade to plain search. The reference implementations (pi-lens, pi-codeontime-code-intelligence) were studied as laboratory specimens; Aira does not depend on either.
+Phase 5 ships a native minimal LSP client with project-scoped, lazy, reused language servers (TypeScript/JavaScript, Python, Go, Rust, C/C++, C#), post-edit diagnostics, warm-only navigation, idle eviction, and crash degradation. Missing servers degrade to plain search. Health reporting never spawns a server: a supported project with a resolvable server reports `idle` (cold/unprobed), an actively running server reports `ready`, `unavailable` is reserved for when no relevant server actually resolves, and crashed/cooldown states report `degraded`. The reference implementations (pi-lens, pi-codeontime-code-intelligence) were studied as laboratory specimens; Aira does not depend on either.
 
 ## 11. Execution runtime
 
@@ -286,12 +286,15 @@ verification evidence
 Keep the permanent taxonomy deliberately small.
 
 ### Scout
+
 Read-only exploration for unfamiliar or cross-cutting repositories.
 
 ### Researcher
+
 External documentation/research when local information is insufficient.
 
 ### Verifier
+
 Independent fresh-context completion review.
 
 The root agent can act as Builder initially; a permanent Builder subprocess is not required.

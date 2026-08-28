@@ -220,4 +220,52 @@ describe("live-code provider (mock language server)", () => {
 		expect(server?.status).toBe("closed");
 		await provider.dispose();
 	});
+
+	it("reports idle (not unavailable) while cold when a matching server resolves", async () => {
+		const root = makeRoot("cold-idle");
+		const { provider } = providerFor(root);
+
+		const info = provider.statusInfo();
+		expect(info.status).toBe("idle");
+		expect(info.spawnCount).toBe(0);
+		expect(info.crashCount).toBe(0);
+		const server = info.servers.find((s) => s.id === "typescript");
+		expect(server?.status).toBe("unprobed");
+		expect(server?.available).toBe(true);
+
+		// Still cold: nothing was spawned and navigation refuses to wake it.
+		const file = join(root, "src", "tray.ts");
+		mkdirSync(join(root, "src"), { recursive: true });
+		writeFileSync(file, "export function a() {}");
+		expect(provider.isWarm(file)).toBe(false);
+		expect(await provider.navigate(file, "definition", "a")).toBeUndefined();
+		expect(provider.statusInfo().spawnCount).toBe(0);
+		await provider.dispose();
+	});
+
+	it("reports unavailable while cold when no matching server resolves", async () => {
+		const root = makeRoot("cold-unavailable");
+		const emptyPath = join(root, "no-binaries");
+		mkdirSync(emptyPath, { recursive: true });
+		const findings = new AiraFindingsStore();
+		const provider = new LiveCodeProvider(root, findings, {
+			diagnosticWaitMs: 600,
+			idleTimeoutMs: 30_000,
+			crashCooldownMs: 0,
+		});
+
+		// No launch overrides and an empty PATH: no registry command resolves,
+		// so the cold provider is genuinely unavailable.
+		const originalPath = process.env.PATH;
+		process.env.PATH = emptyPath;
+		try {
+			const info = provider.statusInfo();
+			expect(info.status).toBe("unavailable");
+			expect(info.spawnCount).toBe(0);
+			expect(info.servers.every((s) => !s.available)).toBe(true);
+		} finally {
+			process.env.PATH = originalPath;
+		}
+		await provider.dispose();
+	});
 });

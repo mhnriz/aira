@@ -148,6 +148,33 @@ describe("Aira /doctor command (Phase 4 scope)", () => {
 		disposeAiraSessionState("doctor-intel-3", state);
 	});
 
+	it("renders a cold but resolvable live-code provider as idle", () => {
+		const state = acquireAiraSessionState("doctor-intel-4", "startup");
+		const status = initialAiraIntelligenceStatus();
+		status.active = true;
+		status.activationReason = "project detected";
+		status.repository = {
+			status: "ready",
+			filesIndexed: 10,
+			cacheLoaded: false,
+			changesAvailable: false,
+			changeCount: undefined,
+		};
+		status.liveCode = {
+			status: "idle",
+			servers: [{ id: "typescript", status: "unprobed", available: true }],
+			spawnCount: 0,
+			crashCount: 0,
+		};
+		status.findings = { total: 0, errors: 0, warnings: 0, stale: 0 };
+		state.intelligence = status;
+		const report = buildAiraDoctorReport(state);
+		const check = report.checks.find((c) => c.name === "intelligence");
+		expect(check?.pass).toBe(true);
+		expect(check?.detail).toContain("live-code: idle (1 server(s) available)");
+		disposeAiraSessionState("doctor-intel-4", state);
+	});
+
 	it("formats a human-readable report with a summary", () => {
 		const state = acquireAiraSessionState("doctor-5", "startup");
 		resolveAiraProjectInto(state, makeNodeProject());
