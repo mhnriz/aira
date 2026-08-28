@@ -354,6 +354,37 @@ Phase 1 characterized overlapping session lifecycles (ADR-018); naive dispose-by
 - Termination of a managed process kills its whole spawned tree by contract (documented); processes that must outlive the session must not be launched through the runtime.
 - `state.execution` is a snapshot only; logs and truth live in the manager, so `/processes` and tools always report live state rather than a stored copy.
 
+
+## ADR-025 — Browser is a native Aira-owned runtime behind a replaceable provider boundary, with an isolated profile and strict state/context separation
+
+**Status:** Accepted
+
+### Decision
+
+- Aira owns ONE native browser runtime (`src/aira/browser/`): activation, settings, eligibility, session/tab ownership, evidence selection, ambient-context injection, cleanup, and canonical state. One `AiraBrowserManager` per `AgentSession` instance, created at construction (lazy; never launches anything at startup) and disposed with it.
+- Browser mechanics sit behind a replaceable provider boundary (`AiraBrowserProvider`: availability/open/observe/navigate/interact/evaluate/wait/screenshot/evidence/close/dispose). Plain data crosses the boundary; no Playwright/CDP objects leak into Aira. The Phase 7 implementation is an Aira-native CDP provider (zero new npm dependencies; Node >= 22 native WebSocket) that launches an isolated Chromium.
+- **The default is an isolated, disposable profile.** Aira launches its own browser with a fresh profile under canonical cache paths (`~/.aira/agent/cache/browser/`); DevToolsActivePort on a random loopback port; headless by default. Aira NEVER attaches to the user's personal browser profile. Personal/existing-browser control is an explicit future opt-in mode only.
+- Aira has zero runtime dependency on the installed stock-Pi browser extensions (`betterwright`, `pi-browser-harness`); they were studied as laboratory specimens only.
+- Session/tab resources are Aira-owned and per-session-instance (ADR-024 pattern): dispose kills only Aira's own browser process (pid tracked for crash-path reaping); a stale/replaced session cannot close another session's browser.
+- **Subsystem state ≠ model context.** The canonical snapshot (`state.browser`) is bounded, serializable, provider-independent, and token-free; ambient model context (`browser.context` off|auto|on) is a separate, budgeted, deduplicated selection. Disabling context never hides UI-visible state.
+- `ProjectProfile` drives eligibility; Phase 6 execution remains the sole owner of dev processes; local URL discovery consumes Phase 6 evidence first (dev-process output), then framework conventions, never network scans.
+- PLAN keeps browser observation + navigation (read-only surface) and blocks browser interaction/evaluation/verification/lifecycle via the semantic capability table (ADR-022 refinement: `observe | navigate | interact | lifecycle` operation kinds, no tool-name heuristics).
+- Automatic verification (`browser.autoVerify`) is exactly ONE bounded pass per relevant edit (debounced, min-gap throttled, dev-server + URL + eligibility gated); no repair→verify loops.
+- Structured semantic observation (accessibility tree, bounded, stable refs) is the preferred evidence; screenshots are opt-in, stored as path references only, and pruned. Console/network evidence is bounded, deduplicated (counts + top finding).
+
+### Rationale
+
+Browser verification is core product capability (ADR-010); the Phase 7 study of the installed reference implementations showed (a) token-inefficient DOM dumps are avoidable via compressed a11y-tree observation with stable refs, (b) attach-to-personal-Chrome is a safety boundary Aira must not default to, (c) a persistent daemon is unnecessary because the Aira session lifecycle already owns lifetime, and (d) bounded console/network failure evidence with dedupe is the actionable shape. The provider boundary keeps the option of a Playwright/cloud provider later without touching Aira. State/context separation is what makes the future Workbench a rendering exercise instead of an architectural retrofit.
+
+### Consequences
+
+- `browser_*` tools classify as `browser` with semantic operation kinds; PLAN availability and gate derive from the tables in capabilities.ts/modes.ts.
+- `browser.enabled`, `browser.context`, `browser.autoVerify`, `browser.contextBudget` live in the canonical settings file through the host `SettingsManager` and the existing `/settings` surface.
+- Auto-verify requires output-derived local URLs; convention guesses never drive automatic checks.
+- Ref staleness is truthful: refs are invalidated on main-frame navigation and re-verified against the live document at action time (URL + connectedness); a stale ref never silently targets a different element.
+- Browser absence degrades to normal coding behavior (availability `unavailable`, snapshot truthful, Aira always installs and runs without a browser).
+- The future shared context broker (Repository/LSP/Execution/Browser → one selection layer) must keep subsystem state token-free and injectable; context.ts already emits content hashes and hard budgets with that seam in mind.
+
 ## Adding decisions
 
 When a future architectural choice materially changes one of these assumptions:

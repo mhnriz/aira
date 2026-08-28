@@ -242,6 +242,50 @@ Aira can operate the software it edits.
 
 ### Goal
 
+Aira can understand and verify browser-based software it edits, through a
+native browser subsystem with an isolated default profile and strict
+state/context separation.
+
+### Work
+
+- native browser provider boundary + Aira-owned runtime (ADR-025);
+- isolated Chromium launch (zero new npm dependencies, CDP over native
+  WebSocket);
+- bounded semantic observation with stable refs;
+- console/network evidence capture (deduplicated, top finding);
+- ref-based interaction primitives;
+- screenshots with managed paths;
+- local URL discovery from Phase 6 dev-process evidence;
+- ambient eligibility + `browser.context` off/auto/on with hard budgets
+  and dedupe;
+- canonical `state.browser` snapshot (token-free, UI-ready);
+- settings (`browser.enabled` / `browser.context` / `browser.autoVerify` /
+  `browser.contextBudget`) via the canonical `/settings` surface;
+- PLAN-safe capability semantics (observe/navigate allowed;
+  interact/lifecycle blocked);
+- reference-extension study (betterwright, pi-browser-harness) —
+  laboratory specimens, zero runtime dependency.
+
+### Exit criteria
+
+- one native runtime owner with a replaceable provider boundary;
+- isolated profile default; no personal-browser attachment;
+- bounded evidence + hard context budgets; AUTO commonly injects zero
+  browser tokens; unchanged evidence deduplicated;
+- truthful availability/eligible/active/degraded/unavailable states;
+- BUILD/PLAN/REVIEW semantics; cleanup without orphans;
+- real-Aira local-fixture dogfood passes on the NATIVE path.
+
+### Status
+
+✅ done 2026-08-28 — [PHASE_7_BROWSER_RUNTIME.md](phases/PHASE_7_BROWSER_RUNTIME.md)
+
+---
+
+## Phase 7 — Browser Runtime
+
+### Goal
+
 Aira can verify browser-based applications.
 
 ### Work

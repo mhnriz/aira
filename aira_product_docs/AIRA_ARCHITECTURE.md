@@ -278,15 +278,30 @@ builds/type checks, and runtime/browser verification.
 
 ## 12. Browser
 
-Browser and public-web research are separate capabilities.
+Browser and public-web research are separate capabilities. Phase 7 ships a
+native browser subsystem (`src/aira/browser/`) with ONE runtime owner per
+session (`AiraBrowserManager`, ADR-025) behind a replaceable provider
+boundary (`AiraBrowserProvider`); the Phase 7 provider is an Aira-native
+CDP/Chromium implementation (zero new npm dependencies).
 
-Default browser behavior:
-
-- isolated Aira profile;
-- DOM/accessibility-tree inspection first;
-- CDP/runtime console/network evidence;
-- screenshots/vision when appearance matters;
-- personal signed-in browser only through explicit authorization.
+- **Isolated by default**: Aira launches its own disposable Chromium
+  (headless, fresh profile under `~/.aira/agent/cache/browser/`, random
+  loopback DevTools port). Personal signed-in browsers are never touched;
+  attached use would be an explicit future opt-in mode.
+- **Observation first**: bounded accessibility-tree/semantic observation
+  with stable element refs is the primary evidence; DOM dumps never enter
+  state or context. Console/network evidence is bounded and deduplicated
+  (counts + top finding). Screenshots are opt-in, path-referenced only,
+  and pruned.
+- **State ≠ context**: `state.browser` is a bounded, provider-independent,
+  token-free snapshot (future Workbench/footer render it without model
+  tokens). Ambient prompt context (`browser.context` off|auto|on) is a
+  separate budgeted, deduplicated selection; AUTO commonly injects zero
+  browser tokens.
+- **Verification**: one bounded auto-verify pass after a browser-relevant
+  edit when a Phase 6 dev process runs and a local URL was discovered
+  (output-derived only); `browser_verify` for explicit checks (REVIEW).
+  No retry loops; browser absence degrades truthfully.
 
 Desired web-app verification:
 
@@ -298,13 +313,13 @@ diagnostics
 start/reuse app
  ↓
 browser
- ├── DOM/a11y
- ├── interaction
+ ├── semantic observation (a11y first)
+ ├── interaction (ref-based)
  ├── console
  ├── network
  └── screenshot when useful
  ↓
-verification evidence
+bounded verification evidence
 ```
 
 ## 13. Agents
@@ -467,7 +482,8 @@ Canonical Aira paths remain under `~/.aira/` — `~/.aira/agent` for the Pi-comp
 9. Task complexity controls orchestration complexity.
 10. Subagents do not own competing task truth.
 11. Verification is independent from implementation completion claims.
-12. Browser defaults to an isolated profile.
+12. Browser defaults to an isolated profile (ADR-025); browser state is
+    token-free and separate from ambient model context.
 13. Projects cannot silently grant privileges.
 14. Optional specialist engines degrade gracefully.
 15. Mature machinery is not rewritten without a measured reason.

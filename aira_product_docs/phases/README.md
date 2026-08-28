@@ -45,7 +45,7 @@ Stopping point / next phase
 | 4 — Project Awareness | ✅ done 2026-08-27 | [PHASE_4_PROJECT_AWARENESS.md](PHASE_4_PROJECT_AWARENESS.md) | evidence-based `ProjectProfile` in canonical state; root/languages/frameworks/managers/commands/browser/deployment/confidence; home safety boundary |
 | 5 — Intelligence | ✅ done 2026-08-27 | [PHASE_5_NATIVE_INTELLIGENCE.md](PHASE_5_NATIVE_INTELLIGENCE.md) | native intelligence service: repository + live-code providers, ambient context, automatic post-edit diagnostics, capability classification, graceful degradation |
 | 6 — Execution Runtime | ✅ done 2026-08-28 | [PHASE_6_EXECUTION_RUNTIME.md](PHASE_6_EXECUTION_RUNTIME.md) | native per-session process runtime: managed processes, bounded log capture, cross-platform termination, project-aware test/build/check/dev primitives, process tools + `/processes` |
-| 7 — Browser Runtime | — | — | — |
+| 7 — Browser Runtime | ✅ done 2026-08-28 | [PHASE_7_BROWSER_RUNTIME.md](PHASE_7_BROWSER_RUNTIME.md) | native browser runtime: isolated Chromium provider, bounded semantic observation + refs, console/network evidence, ambient context off/auto/on with budgets, canonical snapshot, settings, PLAN semantics |
 | 8 — Independent Verification | — | — | — |
 | 9 — Task Graph and Delegation | — | — | — |
 | 10 — Durable Autonomous Work | — | — | — |
