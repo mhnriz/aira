@@ -34,6 +34,8 @@
 
 ### Fixed
 
+- Fixed a Phase 5 live-code process leak surfaced during Phase 8 print-mode dogfood: a language server whose `initialize` handshake failed (or which crashed) was abandoned without killing the spawned child, so the untracked child's stdio pipes kept the host process alive after session teardown and leaked one server process per failed spawn. `LspClient` now force-kills the child on crash and on handshake failure (regression test with a hanging-handshake mock; `requestTimeoutMs` is injectable for tests).
+
 - Fixed Phase 5 live-code health reporting: a cold (never-spawned) live-code provider whose matching language server resolves on PATH or project `node_modules` now reports `idle` in `/doctor` instead of `unavailable`; `unavailable` is reserved for projects where no relevant language server can actually be resolved. Health reporting never spawns a language server, and crashed/cooldown states remain `degraded`.
 
 ## [0.84.3] - 2026-08-24
