@@ -250,6 +250,29 @@ export function buildAiraDoctorReport(state: AiraSessionState | undefined): Aira
 		});
 	}
 
+	// 12. Orchestration: canonical settings + snapshot. Health reporting never
+	// dispatches children (no model tokens). A disabled feature reports its
+	// disabled state truthfully and is NOT a failure; active children and
+	// bounded failure telemetry are reflected. Orchestration failure must not
+	// break the host.
+	const orchestration = state?.orchestration;
+	if (!orchestration) {
+		checks.push({
+			name: "orchestration",
+			pass: false,
+			detail: "no orchestration snapshot (manager wiring)",
+		});
+	} else {
+		const active = orchestration.runningCount + orchestration.queuedCount;
+		const failureLine =
+			orchestration.failures.length > 0 ? ` · ${orchestration.failures.length} failure(s) in bounded telemetry` : "";
+		checks.push({
+			name: "orchestration",
+			pass: true,
+			detail: `${orchestration.enabled ? "enabled" : "disabled"} · ${orchestration.status} · concurrency ${orchestration.runningCount}/${orchestration.maxConcurrency} · ${orchestration.children.length} child record(s) (${active} active)${failureLine}`,
+		});
+	}
+
 	return { product: "Aira doctor", home: displayPathUnderHome(home), checks };
 }
 

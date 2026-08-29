@@ -13,6 +13,7 @@
 
 import type { AiraBrowserStatus } from "../browser/status.ts";
 import { formatAiraVersion } from "../meta.ts";
+import { summarizeAiraOrchestration } from "../orchestration/status.ts";
 import { displayPathUnderHome, getAiraHome } from "../paths.ts";
 import { summarizeAiraProject } from "../project/profile.ts";
 import type { AiraSessionState } from "../state.ts";
@@ -33,6 +34,8 @@ export interface AiraStatusReport {
 	browser?: string;
 	/** Compact verification line from the canonical snapshot (Phase 8). */
 	verification?: string;
+	/** Compact orchestration line from the canonical snapshot (Phase 9). */
+	orchestration?: string;
 }
 
 export function buildAiraStatusReport(state: AiraSessionState | undefined): AiraStatusReport {
@@ -53,6 +56,7 @@ export function buildAiraStatusReport(state: AiraSessionState | undefined): Aira
 		capabilities: state.capabilities.length === 0 ? "none" : state.capabilities.join(", "),
 		browser: summarizeAiraBrowser(state.browser),
 		verification: summarizeAiraVerification(state.verification),
+		orchestration: summarizeAiraOrchestration(state.orchestration),
 	};
 }
 
@@ -95,6 +99,9 @@ export function formatAiraStatusReport(report: AiraStatusReport): string {
 	}
 	if (report.verification) {
 		lines.push(`verification: ${report.verification}`);
+	}
+	if (report.orchestration) {
+		lines.push(`orchestration: ${report.orchestration}`);
 	}
 	return lines.join("\n");
 }

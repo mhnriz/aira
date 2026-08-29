@@ -191,6 +191,13 @@ interface Expandable {
 	setExpanded(expanded: boolean): void;
 }
 
+/** Compact elapsed-time rendering for orchestration rows. */
+function formatAiraElapsed(ms: number): string {
+	if (ms < 1000) return `${ms}ms`;
+	if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+	return `${Math.floor(ms / 60_000)}m${Math.floor((ms % 60_000) / 1000)}s`;
+}
+
 function isExpandable(obj: unknown): obj is Expandable {
 	return typeof obj === "object" && obj !== null && "setExpanded" in obj && typeof obj.setExpanded === "function";
 }
@@ -3068,6 +3075,11 @@ export class InteractiveMode {
 				this.editor.setText("");
 				return;
 			}
+			if (text === "/agents" || text.startsWith("/agents ")) {
+				this.handleAgentsCommand(text);
+				this.editor.setText("");
+				return;
+			}
 			if (text === "/changelog") {
 				this.handleChangelogCommand();
 				this.editor.setText("");
@@ -4329,6 +4341,85 @@ export class InteractiveMode {
 		}
 	}
 
+	/**
+	 * `/agents` — restrained orchestration inspection (Phase 9). Renders the
+	 * live manager status (the canonical snapshot is for doctors; the manager
+	 * is the source of truth for the live session). `/agents cancel [id]`
+	 * cancels one run or all active orchestration. Never dispatches children.
+	 */
+	private handleAgentsCommand(text: string): void {
+		const args = text.startsWith("/agents ") ? text.slice(8).trim() : "";
+		const orchestration = this.session.airaOrchestration;
+		const lines: string[] = ["agents"];
+		if (!orchestration) {
+			lines.push("orchestration runtime unavailable");
+			this.renderAgentsLines(lines);
+			return;
+		}
+		if (args === "cancel") {
+			orchestration.cancel(undefined, "cancelled via /agents cancel");
+			this.showStatus("agents: cancelling all active orchestration");
+			return;
+		}
+		if (args.startsWith("cancel ")) {
+			const runId = args.slice(7).trim();
+			if (runId.length === 0 || !orchestration.get(runId)) {
+				this.showStatus(`agents: unknown run id "${runId}"`);
+				return;
+			}
+			orchestration.cancel(runId, "cancelled via /agents cancel");
+			this.showStatus(`agents: cancelling run ${runId}`);
+			return;
+		}
+		if (args !== "" && args !== "status") {
+			this.showStatus(`agents: unknown subcommand "${args}" (use /agents, /agents status, /agents cancel [id])`);
+			return;
+		}
+		const status = orchestration.status();
+		lines.push(
+			`state: ${status.enabled ? "enabled" : "disabled"} · ${status.summary} · concurrency ${status.runningCount}/${status.maxConcurrency}`,
+		);
+		if (status.aggregateTokenUsage && status.aggregateTokenUsage.total > 0) {
+			lines.push(
+				`tokens: ${status.aggregateTokenUsage.total} (${status.aggregateTokenUsage.input} in / ${status.aggregateTokenUsage.output} out)`,
+			);
+		}
+		const children = orchestration.list();
+		if (children.length === 0) {
+			lines.push("(no children)");
+		} else {
+			for (const run of children.slice(0, 12)) {
+				const model = run.resolvedModel ?? run.model ?? "";
+				const elapsed =
+					run.durationMs !== undefined
+						? formatAiraElapsed(run.durationMs)
+						: run.startedAt !== undefined
+							? `${formatAiraElapsed(Date.now() - run.startedAt)} …`
+							: "";
+				const deps = run.dependencies.length > 0 ? ` · deps [${run.dependencies.join(", ")}]` : "";
+				lines.push(
+					`- ${run.taskId} [${run.role}] ${run.status}${model ? ` · ${model}` : ""}${elapsed ? ` · ${elapsed}` : ""}${deps}`,
+				);
+				if (run.error) {
+					lines.push(`    ${run.error.category}: ${run.error.message}`);
+				}
+				if (run.result) {
+					lines.push(`    ${run.result.summary}`);
+					if (run.result.changedFiles.length > 0) {
+						lines.push(`    changed: ${run.result.changedFiles.join(", ")}`);
+					}
+				}
+			}
+		}
+		this.renderAgentsLines(lines);
+	}
+
+	private renderAgentsLines(lines: string[]): void {
+		this.chatContainer.addChild(new Spacer(1));
+		this.chatContainer.addChild(new Text(theme.fg("dim", lines.map((line) => `  ${line}`).join("\n")), 1, 0));
+		this.ui.requestRender();
+	}
+
 	/** `/verify status` — render the canonical verification snapshot (token-free). */
 	private showVerificationStatus(): void {
 		const verification = this.session.airaVerification;
@@ -4799,6 +4890,7 @@ export class InteractiveMode {
 			const defaultModel = defaultProvider && defaultModelId ? `${defaultProvider}/${defaultModelId}` : "not set";
 			const browserSettings = this.settingsManager.getBrowserSettings();
 			const verificationSettings = this.settingsManager.getVerificationSettings();
+			const orchestrationSettings = this.settingsManager.getOrchestrationSettings();
 			selector = new SettingsSelectorComponent(
 				{
 					autoCompact: this.session.autoCompactionEnabled,
@@ -4841,6 +4933,7 @@ export class InteractiveMode {
 					warnings: this.settingsManager.getWarnings(),
 					browserSettings,
 					verificationSettings,
+					orchestrationSettings,
 				},
 				{
 					onAutoCompactChange: (enabled) => {
@@ -5026,6 +5119,9 @@ export class InteractiveMode {
 					},
 					onVerificationSettingsChange: (settings) => {
 						this.settingsManager.setVerificationSettings(settings);
+					},
+					onOrchestrationSettingsChange: (settings) => {
+						this.settingsManager.setOrchestrationSettings(settings);
 					},
 					onCancel: () => {
 						done();

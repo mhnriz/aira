@@ -49,6 +49,18 @@ function verificationSettingsOf(config: SettingsConfig): SettingsConfig["verific
 	);
 }
 
+/** Older hosts/tests may omit orchestrationSettings; defaults keep the selector stable. */
+function orchestrationSettingsOf(config: SettingsConfig): SettingsConfig["orchestrationSettings"] {
+	return (
+		config.orchestrationSettings ?? {
+			enabled: true,
+			maxParallel: 2,
+			model: "inherit",
+			timeoutMs: 300_000,
+		}
+	);
+}
+
 const THINKING_DESCRIPTIONS: Record<ThinkingLevel, string> = {
 	off: "No reasoning",
 	minimal: "Very brief reasoning (~1k tokens)",
@@ -119,6 +131,12 @@ export interface SettingsConfig {
 		auto: "off" | "smart" | "always";
 		contextBudget: "compact" | "balanced" | "expanded";
 	};
+	orchestrationSettings: {
+		enabled: boolean;
+		maxParallel: number;
+		model: string;
+		timeoutMs: number;
+	};
 }
 
 export interface SettingsCallbacks {
@@ -165,6 +183,12 @@ export interface SettingsCallbacks {
 		enabled: boolean;
 		auto: "off" | "smart" | "always";
 		contextBudget: "compact" | "balanced" | "expanded";
+	}) => void;
+	onOrchestrationSettingsChange: (settings: {
+		enabled: boolean;
+		maxParallel: number;
+		model: string;
+		timeoutMs: number;
 	}) => void;
 	onCancel: () => void;
 }
@@ -680,6 +704,97 @@ class AiraVerificationSubmenu extends Container {
 }
 
 /**
+ * Orchestration settings submenu (Phase 9): enable child delegation, bound
+ * parallel agents, choose the default child model behavior, and set the
+ * per-child timeout. Conservative defaults; persisted through the canonical
+ * settings owner (`/settings` → `orchestration.*`).
+ */
+class AiraOrchestrationSubmenu extends Container {
+	private settingsList: SettingsList;
+	private state: {
+		enabled: boolean;
+		maxParallel: number;
+		model: string;
+		timeoutMs: number;
+	};
+
+	constructor(
+		initial: { enabled: boolean; maxParallel: number; model: string; timeoutMs: number },
+		onChange: (settings: { enabled: boolean; maxParallel: number; model: string; timeoutMs: number }) => void,
+		onCancel: () => void,
+	) {
+		super();
+
+		this.state = { ...initial };
+
+		const items: SettingItem[] = [
+			{
+				id: "orchestration-enabled",
+				label: "Enable agents",
+				description: "Child-agent delegation may run (consumes model tokens only when children run)",
+				currentValue: this.state.enabled ? "true" : "false",
+				values: ["true", "false"],
+			},
+			{
+				id: "orchestration-max-parallel",
+				label: "Max parallel agents",
+				description: "Maximum children executing at once (1-8; default 2). Queued children wait",
+				currentValue: String(this.state.maxParallel),
+				values: ["1", "2", "3", "4", "6", "8"],
+			},
+			{
+				id: "orchestration-model",
+				label: "Default child model",
+				description:
+					"inherit: children run the session's current model (default). default: the configured default model. Otherwise an explicit provider/model selector",
+				currentValue: this.state.model,
+				values: ["inherit", "default"],
+			},
+			{
+				id: "orchestration-timeout",
+				label: "Child timeout",
+				description: "Hard per-child timeout (30s-15m; default 5m). Cancellation propagates into the child",
+				currentValue: String(this.state.timeoutMs),
+				values: ["60000", "180000", "300000", "600000", "900000"],
+			},
+		];
+
+		this.settingsList = new SettingsList(
+			items,
+			Math.min(items.length, 10),
+			getSettingsListTheme(),
+			(id, newValue) => {
+				switch (id) {
+					case "orchestration-enabled":
+						this.state = { ...this.state, enabled: newValue === "true" };
+						onChange(this.state);
+						break;
+					case "orchestration-max-parallel":
+						this.state = { ...this.state, maxParallel: Number.parseInt(newValue, 10) };
+						onChange(this.state);
+						break;
+					case "orchestration-model":
+						this.state = { ...this.state, model: newValue };
+						onChange(this.state);
+						break;
+					case "orchestration-timeout":
+						this.state = { ...this.state, timeoutMs: Number.parseInt(newValue, 10) };
+						onChange(this.state);
+						break;
+				}
+			},
+			onCancel,
+		);
+
+		this.addChild(this.settingsList);
+	}
+
+	handleInput(data: string): void {
+		this.settingsList.handleInput(data);
+	}
+}
+
+/**
  * Main settings selector component.
  */
 export class SettingsSelectorComponent extends Container {
@@ -966,6 +1081,19 @@ export class SettingsSelectorComponent extends Container {
 					new AiraVerificationSubmenu(
 						verificationSettingsOf(config),
 						(settings) => callbacks.onVerificationSettingsChange(settings),
+						() => done(),
+					),
+			},
+			{
+				id: "orchestration",
+				label: "Aira agents",
+				description:
+					"Native child-agent delegation: enable, max parallel agents, default child model, per-child timeout",
+				currentValue: `${orchestrationSettingsOf(config).maxParallel} parallel · ${orchestrationSettingsOf(config).enabled ? "on" : "off"}`,
+				submenu: (_currentValue, done) =>
+					new AiraOrchestrationSubmenu(
+						orchestrationSettingsOf(config),
+						(settings) => callbacks.onOrchestrationSettingsChange(settings),
 						() => done(),
 					),
 			},

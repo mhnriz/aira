@@ -152,6 +152,13 @@ export interface Settings {
 		auto?: "off" | "smart" | "always";
 		contextBudget?: "compact" | "balanced" | "expanded";
 	};
+	/** Native Aira orchestration controls (Phase 9; canonical settings owner). */
+	orchestration?: {
+		enabled?: boolean;
+		maxParallel?: number;
+		model?: string;
+		timeoutMs?: number;
+	};
 }
 
 function isMergeableObject(value: unknown): value is Record<string, unknown> {
@@ -1196,6 +1203,53 @@ export class SettingsManager {
 			auto,
 			contextBudget,
 		};
+	}
+
+	// Native Aira orchestration settings (Phase 9). Same canonical store;
+	// invalid stored values normalize to defaults (conservative by default).
+	getOrchestrationSettings(): {
+		enabled: boolean;
+		maxParallel: number;
+		model: string;
+		timeoutMs: number;
+	} {
+		const orchestration = this.settings.orchestration;
+		if (!orchestration || typeof orchestration !== "object") {
+			return { enabled: true, maxParallel: 2, model: "inherit", timeoutMs: 300_000 };
+		}
+		const rawMax = orchestration.maxParallel;
+		const maxParallel =
+			typeof rawMax === "number" && Number.isInteger(rawMax) && rawMax >= 1 && rawMax <= 8 ? rawMax : 2;
+		const rawTimeout = orchestration.timeoutMs;
+		const timeoutMs =
+			typeof rawTimeout === "number" && Number.isFinite(rawTimeout) && rawTimeout >= 30_000 && rawTimeout <= 900_000
+				? Math.floor(rawTimeout)
+				: 300_000;
+		const rawModel = orchestration.model;
+		const model =
+			typeof rawModel === "string" &&
+			(rawModel === "inherit" ||
+				rawModel === "default" ||
+				(rawModel.length <= 200 && /^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._:/-]+$/.test(rawModel)))
+				? rawModel
+				: "inherit";
+		return {
+			enabled: orchestration.enabled === undefined ? true : orchestration.enabled === true,
+			maxParallel,
+			model,
+			timeoutMs,
+		};
+	}
+
+	setOrchestrationSettings(settings: {
+		enabled: boolean;
+		maxParallel: number;
+		model: string;
+		timeoutMs: number;
+	}): void {
+		this.globalSettings.orchestration = settings;
+		this.markModified("orchestration");
+		this.save();
 	}
 
 	setVerificationSettings(settings: {

@@ -47,7 +47,12 @@ export const NEXT_AIRA_MODE: Record<AiraMode, AiraMode> = {
  * observation/navigation surface — semantic page reads, evidence
  * inspection, screenshots, and read-only navigation in the isolated
  * disposable profile. Browser interaction/evaluation/verification and
- * browser lifecycle (open/close) stay PLAN-blocked (see below).
+ * browser lifecycle (open/close) stay PLAN-blocked (see below). Phase 9
+ * adds the orchestration surface: delegation itself never mutates — the
+ * orchestration scheduler IS the read-only enforcement point (PLAN
+ * children receive read-only/diagnostic tool sets and mutation-capable
+ * roles are refused at dispatch), so the tools stay usable in PLAN for
+ * read-only exploratory children.
  */
 export const AIRA_READ_ONLY_TOOLS: readonly string[] = [
 	...BUILTIN_READ_ONLY_CAPABILITIES,
@@ -59,6 +64,9 @@ export const AIRA_READ_ONLY_TOOLS: readonly string[] = [
 	"browser_network",
 	"browser_screenshot",
 	"browser_navigate",
+	"agents_delegate",
+	"agents_status",
+	"agents_cancel",
 ];
 
 /**

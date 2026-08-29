@@ -17,6 +17,7 @@ export * from "./lifecycle.ts";
 export * from "./meta.ts";
 export * from "./migration.ts";
 export * from "./modes.ts";
+export * from "./orchestration/index.ts";
 export * from "./paths.ts";
 export * from "./project/index.ts";
 export * from "./state.ts";

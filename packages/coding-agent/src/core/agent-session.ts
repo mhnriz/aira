@@ -63,6 +63,11 @@ import {
 } from "../aira/intelligence/coordinator.ts";
 import { onAiraSessionCreated, onAiraSessionDisposed } from "../aira/lifecycle.ts";
 import { AIRA_READ_ONLY_TOOLS, isAiraMutatingTool } from "../aira/modes.ts";
+import type { AiraOrchestrationHandle, AiraOrchestrationManagerOptions } from "../aira/orchestration/manager.ts";
+import { createAiraOrchestrationManager } from "../aira/orchestration/manager.ts";
+import { createAiraOrchestrationToolDefinitions } from "../aira/orchestration/model-tools.ts";
+import type { AiraChildRuntime } from "../aira/orchestration/runner.ts";
+import type { AiraOrchestrationSettings } from "../aira/orchestration/settings.ts";
 import { getAiraCacheDir } from "../aira/paths.ts";
 import { resolveAiraProjectInto } from "../aira/project/index.ts";
 import type { AiraMode, AiraSessionState } from "../aira/state.ts";
@@ -256,6 +261,11 @@ export interface AgentSessionConfig {
 	airaBrowserOptions?: Parameters<typeof createAiraBrowserManager>[1];
 	/** Verification-runtime options (Aira phase 8; tests inject seams/runners). */
 	airaVerificationOptions?: Omit<AiraVerificationManagerOptions, "cwd" | "settings" | "changeSeam" | "runtime">;
+	/** Orchestration-runtime options (Aira phase 9; tests inject seams/runners). */
+	airaOrchestrationOptions?: Omit<
+		AiraOrchestrationManagerOptions,
+		"cwd" | "settings" | "resolveRuntime" | "executionManager"
+	>;
 }
 
 export interface ExtensionBindings {
@@ -392,6 +402,7 @@ export class AgentSession {
 	private _airaExecution: AiraExecutionHandle | undefined;
 	private _airaBrowser: AiraBrowserHandle | undefined;
 	private _airaVerification: AiraVerificationHandle | undefined;
+	private _airaOrchestration: AiraOrchestrationHandle | undefined;
 	private _extensionUIContext?: ExtensionUIContext;
 	private _extensionMode: ExtensionMode = "print";
 	private _extensionCommandContextActions?: ExtensionCommandContextActions;
@@ -480,6 +491,18 @@ export class AgentSession {
 				runtime: () => this.resolveAiraVerifierRuntime(),
 			},
 		);
+
+		// Aira orchestration seam (Phase 9): the session owns the native
+		// multi-agent runtime. The manager publishes `state.orchestration` and
+		// never launches anything at startup; children run only when the model
+		// or the user delegates.
+		this._airaOrchestration = createAiraOrchestrationManager(this._airaSessionState, {
+			...config.airaOrchestrationOptions,
+			cwd: this._cwd,
+			settings: () => this.settingsManager.getOrchestrationSettings(),
+			resolveRuntime: (request) => this.resolveAiraChildRuntime(request),
+			executionManager: this._airaExecution,
+		});
 
 		// Always subscribe to agent events for internal handling
 		// (session persistence, extensions, auto-compaction, retry logic)
@@ -969,6 +992,9 @@ export class AgentSession {
 		// Aira verification seam: abort any in-flight verifier run and release
 		// the per-session listener subscription.
 		void this._airaVerification?.dispose();
+		// Aira orchestration seam: abort every child run (model streams, timers)
+		// and release listeners. No orphan children after session teardown.
+		void this._airaOrchestration?.dispose();
 		// Aira intelligence seam: shut down providers (language servers, timers).
 		void this._airaIntelligence?.dispose();
 		// Aira lifecycle seam: release canonical state, ownership-checked so a
@@ -1036,6 +1062,11 @@ export class AgentSession {
 		return this._airaVerification;
 	}
 
+	/** Aira orchestration runtime for this session (tests and host). */
+	get airaOrchestration(): AiraOrchestrationHandle | undefined {
+		return this._airaOrchestration;
+	}
+
 	/** Resolve the fresh-context verifier runtime (current model + auth). */
 	private async resolveAiraVerifierRuntime(): Promise<AiraVerifierRuntime | undefined> {
 		const model = this.model;
@@ -1053,6 +1084,55 @@ export class AgentSession {
 			};
 		} catch {
 			return undefined;
+		}
+	}
+
+	/**
+	 * Resolve a child model runtime: per-task selector, else the settings
+	 * policy (inherit = current session model, default = configured default,
+	 * or an explicit "provider/model"). Truthful degradation: an unavailable
+	 * or unauthenticated model is reported by name and never substituted.
+	 */
+	private async resolveAiraChildRuntime(request: {
+		model?: string;
+		settings: AiraOrchestrationSettings;
+	}): Promise<{ runtime: AiraChildRuntime; resolvedModel: string } | { unavailable: string } | undefined> {
+		const selector =
+			request.model?.trim() === "" ? request.settings.model : (request.model ?? request.settings.model);
+		let model: Model<any> | undefined;
+		let resolvedLabel = selector;
+		if (selector === "inherit" || selector === undefined) {
+			model = this.model;
+			resolvedLabel = model ? `${model.provider}/${model.id}` : "inherit";
+		} else if (selector === "default") {
+			const provider = this.settingsManager.getDefaultProvider();
+			const modelId = this.settingsManager.getDefaultModel();
+			model = provider && modelId ? this._modelRuntime.getModel(provider, modelId) : undefined;
+			resolvedLabel = provider && modelId ? `${provider}/${modelId}` : "default";
+		} else {
+			const slash = selector.indexOf("/");
+			if (slash <= 0 || slash === selector.length - 1) {
+				return { unavailable: `invalid child model selector "${selector}" (expected provider/model)` };
+			}
+			model = this._modelRuntime.getModel(selector.slice(0, slash), selector.slice(slash + 1));
+		}
+		if (!model) {
+			return { unavailable: `requested child model "${selector}" is not configured` };
+		}
+		try {
+			const auth = await this._getRequiredRequestAuth(model);
+			return {
+				runtime: {
+					model: auth.model,
+					streamFn: this.agent.streamFunction,
+					apiKey: auth.apiKey,
+					headers: auth.headers,
+					env: auth.env,
+				},
+				resolvedModel: resolvedLabel,
+			};
+		} catch {
+			return { unavailable: `child model "${selector}" is not authenticated` };
 		}
 	}
 
@@ -2947,6 +3027,15 @@ export class AgentSession {
 			: {};
 		Object.assign(baseToolDefinitions, airaBrowserTools);
 
+		// Aira orchestration seam (Phase 9): native delegation tools bound to
+		// THIS session's orchestration manager. Same policy as the process and
+		// browser tools: core Aira tools regardless of the base-tools override,
+		// included in the default active set.
+		const airaOrchestrationTools = this._airaOrchestration
+			? createAiraOrchestrationToolDefinitions({ runtime: this._airaOrchestration })
+			: {};
+		Object.assign(baseToolDefinitions, airaOrchestrationTools);
+
 		this._baseToolDefinitions = new Map(
 			Object.entries(baseToolDefinitions).map(([name, tool]) => [name, tool as ToolDefinition]),
 		);
@@ -2976,8 +3065,17 @@ export class AgentSession {
 					...Object.keys(this._baseToolsOverride),
 					...Object.keys(airaExecutionTools),
 					...Object.keys(airaBrowserTools),
+					...Object.keys(airaOrchestrationTools),
 				]
-			: ["read", "bash", "edit", "write", ...Object.keys(airaExecutionTools), ...Object.keys(airaBrowserTools)];
+			: [
+					"read",
+					"bash",
+					"edit",
+					"write",
+					...Object.keys(airaExecutionTools),
+					...Object.keys(airaBrowserTools),
+					...Object.keys(airaOrchestrationTools),
+				];
 		const baseActiveToolNames = options.activeToolNames ?? defaultActiveToolNames;
 		this._refreshToolRegistry({
 			activeToolNames: baseActiveToolNames,
