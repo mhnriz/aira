@@ -54,6 +54,9 @@ describe("regression #5109: exclude tools", () => {
 			expect(allToolNames).toContain("process_start");
 			expect(allToolNames).toContain("process_stop");
 			expect(harness.session.getActiveToolNames().sort()).toEqual([
+				"agents_cancel",
+				"agents_delegate",
+				"agents_status",
 				"bash",
 				"browser_click",
 				"browser_close",

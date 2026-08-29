@@ -38,6 +38,9 @@ describe("Aira PLAN read-only enforcement (host/tool-policy level)", () => {
 		const harness = harnesses[0]!;
 		expect(harness.session.airaMode).toBe("build");
 		expect(harness.session.getActiveToolNames().sort()).toEqual([
+			"agents_cancel",
+			"agents_delegate",
+			"agents_status",
 			"bash",
 			"browser_click",
 			"browser_close",
@@ -70,6 +73,9 @@ describe("Aira PLAN read-only enforcement (host/tool-policy level)", () => {
 
 		expect(harness.session.airaMode).toBe("plan");
 		expect(harness.session.getActiveToolNames().sort()).toEqual([
+			"agents_cancel",
+			"agents_delegate",
+			"agents_status",
 			"browser_console",
 			"browser_navigate",
 			"browser_network",
@@ -92,6 +98,9 @@ describe("Aira PLAN read-only enforcement (host/tool-policy level)", () => {
 		harness.session.setAiraMode("review");
 		expect(harness.session.airaMode).toBe("review");
 		expect(harness.session.getActiveToolNames().sort()).toEqual([
+			"agents_cancel",
+			"agents_delegate",
+			"agents_status",
 			"bash",
 			"browser_click",
 			"browser_close",
@@ -120,6 +129,9 @@ describe("Aira PLAN read-only enforcement (host/tool-policy level)", () => {
 		harness.session.setAiraMode("build");
 		expect(harness.session.airaMode).toBe("build");
 		expect(harness.session.getActiveToolNames().sort()).toEqual([
+			"agents_cancel",
+			"agents_delegate",
+			"agents_status",
 			"bash",
 			"browser_click",
 			"browser_close",

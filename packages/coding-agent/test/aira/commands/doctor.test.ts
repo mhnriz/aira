@@ -6,6 +6,7 @@ import { initialAiraBrowserStatus } from "../../../src/aira/browser/status.ts";
 import { buildAiraDoctorReport, formatAiraDoctorReport } from "../../../src/aira/commands/doctor.ts";
 import { initialAiraExecutionStatus } from "../../../src/aira/execution/status.ts";
 import { initialAiraIntelligenceStatus } from "../../../src/aira/intelligence/status.ts";
+import { initialAiraOrchestrationStatus } from "../../../src/aira/orchestration/status.ts";
 import { resolveAiraProjectInto } from "../../../src/aira/project/index.ts";
 import { acquireAiraSessionState, disposeAiraSessionState } from "../../../src/aira/state.ts";
 import { initialAiraVerificationStatus } from "../../../src/aira/verification/types.ts";
@@ -44,10 +45,13 @@ describe("Aira /doctor command (Phase 4 scope)", () => {
 			auto: "smart",
 			contextBudget: "compact",
 		});
+		// A real session arms the orchestration manager which publishes a
+		// snapshot; a bare acquired state has none, so publish the honest idle one.
+		state.orchestration = initialAiraOrchestrationStatus(true, 2);
 		const report = buildAiraDoctorReport(state);
 
 		expect(report.home).toBe(expectedHome);
-		expect(report.checks.length).toBe(11);
+		expect(report.checks.length).toBe(12);
 		for (const check of report.checks) {
 			expect(check.pass, `${check.name} should pass`).toBe(true);
 		}
@@ -202,10 +206,11 @@ describe("Aira /doctor command (Phase 4 scope)", () => {
 		state.execution = initialAiraExecutionStatus();
 		state.browser = initialAiraBrowserStatus();
 		state.verification = initialAiraVerificationStatus({ enabled: true, auto: "smart", contextBudget: "compact" });
+		state.orchestration = initialAiraOrchestrationStatus(true, 2);
 		const text = formatAiraDoctorReport(buildAiraDoctorReport(state));
 
 		expect(text).toContain(`home: ${expectedHome}`);
-		expect(text).toContain("summary: 11/11 checks passed");
+		expect(text).toContain("summary: 12/12 checks passed");
 		expect(text).toContain("ok  home:");
 		expect(text).toContain("ok  browser: availability probe pending");
 		disposeAiraSessionState("doctor-5", state);

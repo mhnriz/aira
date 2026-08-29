@@ -142,6 +142,9 @@ describe("Aira ambient intelligence through the host (Phase 5)", () => {
 		harness.session.setAiraMode("plan");
 		try {
 			expect(harness.session.getActiveToolNames().sort()).toEqual([
+				"agents_cancel",
+				"agents_delegate",
+				"agents_status",
 				"browser_console",
 				"browser_navigate",
 				"browser_network",

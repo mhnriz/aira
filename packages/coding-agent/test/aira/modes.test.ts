@@ -84,6 +84,9 @@ describe("Aira modes", () => {
 			"browser_network",
 			"browser_screenshot",
 			"browser_navigate",
+			"agents_delegate",
+			"agents_status",
+			"agents_cancel",
 		]);
 		for (const tool of AIRA_READ_ONLY_TOOLS) {
 			expect(isAiraMutatingTool(tool)).toBe(false);

@@ -1,0 +1,205 @@
+/**
+ * Phase 9 — child runner: structured result parsing, bounding, provider
+ * failure behavior, tool-budget failsafe, timeout, and cancellation.
+ *
+ * Deterministic: the faux provider serves scripted assistant messages; the
+ * child's tool set (read/grep/find/ls) executes against real fixture files.
+ */
+import { mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+	fauxAssistantMessage,
+	fauxText,
+	fauxToolCall,
+	registerFauxProvider,
+	streamSimple,
+} from "@earendil-works/pi-ai/compat";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+	type AiraChildRuntime,
+	normalizeChildResult,
+	parseChildResult,
+	runAiraChild,
+} from "../../../src/aira/orchestration/runner.ts";
+import { createFindTool } from "../../../src/core/tools/find.ts";
+import { createGrepTool } from "../../../src/core/tools/grep.ts";
+import { createLsTool } from "../../../src/core/tools/ls.ts";
+import { createReadTool } from "../../../src/core/tools/read.ts";
+
+const COMPLETED_RESULT = JSON.stringify({
+	status: "completed",
+	summary: "Mapped the player module: seek() lives in src/player.ts.",
+	findings: ["stream switching happens in streamController.ts"],
+	evidence: ["src/player.ts:12", "src/streams.ts:40"],
+	relevantFiles: ["src/player.ts", "src/streams.ts"],
+	changedFiles: [],
+	tests: [],
+	errors: [],
+});
+
+function makeProjectDir(): string {
+	const root = join(tmpdir(), `aira-orchestration-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+	mkdirSync(join(root, "src"), { recursive: true });
+	writeFileSync(join(root, "src", "player.ts"), "export function seek(t: number) { return t; }\n");
+	return root;
+}
+
+const registrations: Array<{ unregister: () => void }> = [];
+afterEach(() => {
+	while (registrations.length > 0) {
+		registrations.shift()?.unregister();
+	}
+});
+
+function fauxRuntime(): { runtime: AiraChildRuntime; setResponses: (responses: unknown[]) => void } {
+	const registration = registerFauxProvider({});
+	registrations.push(registration);
+	const model = registration.getModel();
+	return {
+		runtime: { model, streamFn: streamSimple, apiKey: "faux-key" },
+		setResponses: (responses: unknown[]) => registration.setResponses(responses as never),
+	};
+}
+
+function readOnlyTools(cwd: string) {
+	return [createReadTool(cwd), createGrepTool(cwd), createFindTool(cwd), createLsTool(cwd)];
+}
+
+describe("Aira child runner (Phase 9)", () => {
+	it("runs a tool round and returns the structured result with the resolved model", async () => {
+		const root = makeProjectDir();
+		const { runtime, setResponses } = fauxRuntime();
+		setResponses([
+			fauxAssistantMessage([fauxToolCall("read", { path: "src/player.ts" })]),
+			fauxAssistantMessage(fauxText(COMPLETED_RESULT)),
+		]);
+		const outcome = await runAiraChild(runtime, {
+			cwd: root,
+			prompt: "TASK map it",
+			systemPrompt: "Child role",
+			tools: readOnlyTools(root),
+			timeoutMs: 5000,
+		});
+		expect(outcome.ok).toBe(true);
+		if (outcome.ok) {
+			expect(outcome.result.status).toBe("completed");
+			expect(outcome.result.summary).toContain("seek()");
+			expect(outcome.result.relevantFiles).toContain("src/player.ts");
+			expect(outcome.result.changedFiles).toEqual([]);
+			expect(outcome.model).toBeTruthy();
+		}
+	});
+
+	it("accepts fenced JSON and fails closed on unparseable output", async () => {
+		expect(parseChildResult(`\`\`\`json\n${COMPLETED_RESULT}\n\`\`\``)).toBeDefined();
+		const root = makeProjectDir();
+		const { runtime, setResponses } = fauxRuntime();
+		setResponses([fauxAssistantMessage(fauxText("let me think about this"))]);
+		const outcome = await runAiraChild(runtime, {
+			cwd: root,
+			prompt: "TASK",
+			systemPrompt: "",
+			tools: readOnlyTools(root),
+			timeoutMs: 5000,
+		});
+		expect(outcome.ok).toBe(false);
+		if (!outcome.ok) {
+			expect(outcome.driverError).toContain("no valid structured result");
+		}
+	});
+
+	it("normalizes + bounds malformed result fields", () => {
+		const result = normalizeChildResult({
+			status: "failed",
+			summary: "s".repeat(5000),
+			findings: Array.from({ length: 100 }, (_, index) => `f${index}`.repeat(100)),
+			changedFiles: "not-an-array",
+			evidence: [42, "ok", ""],
+		});
+		expect(result.status).toBe("failed");
+		expect(result.summary.length).toBeLessThanOrEqual(600);
+		expect(result.findings.length).toBeLessThanOrEqual(12);
+		expect(result.findings[0]!.length).toBeLessThanOrEqual(300);
+		expect(result.changedFiles).toEqual([]);
+		expect(result.evidence).toEqual(["ok"]);
+		expect(result.summary).not.toHaveLength(0);
+	});
+
+	it("maps provider errors to a driver error (never a fabricated result)", async () => {
+		const root = makeProjectDir();
+		const { runtime, setResponses } = fauxRuntime();
+		setResponses([
+			fauxAssistantMessage(fauxText("boom"), { stopReason: "error", errorMessage: "provider exploded" }),
+		]);
+		const outcome = await runAiraChild(runtime, {
+			cwd: root,
+			prompt: "TASK",
+			systemPrompt: "",
+			tools: readOnlyTools(root),
+			timeoutMs: 5000,
+		});
+		expect(outcome.ok).toBe(false);
+		if (!outcome.ok) {
+			expect(outcome.driverError).toContain("provider exploded");
+		}
+	});
+
+	it("fails closed when the model keeps calling tools beyond the budget", async () => {
+		const root = makeProjectDir();
+		const { runtime, setResponses } = fauxRuntime();
+		setResponses([
+			fauxAssistantMessage([fauxToolCall("ls", { path: "." })]),
+			fauxAssistantMessage([fauxToolCall("ls", { path: "." })]),
+			fauxAssistantMessage([fauxToolCall("ls", { path: "." })]),
+		]);
+		const outcome = await runAiraChild(runtime, {
+			cwd: root,
+			prompt: "TASK",
+			systemPrompt: "",
+			tools: readOnlyTools(root),
+			timeoutMs: 5000,
+			maxToolRounds: 2,
+		});
+		expect(outcome.ok).toBe(false);
+		if (!outcome.ok) {
+			expect(outcome.driverError).toContain("tool budget");
+		}
+	});
+
+	it("timeout settles as a driver error", async () => {
+		const root = makeProjectDir();
+		const { runtime, setResponses } = fauxRuntime();
+		// A hanging child response: the run must settle on timeout, not hang.
+		setResponses([() => new Promise(() => {}) as never]);
+		const outcome = await runAiraChild(runtime, {
+			cwd: root,
+			prompt: "TASK",
+			systemPrompt: "",
+			tools: readOnlyTools(root),
+			timeoutMs: 200,
+		});
+		expect(outcome.ok).toBe(false);
+		if (!outcome.ok) {
+			expect(outcome.driverError).toContain("timed out");
+		}
+	});
+
+	it("cancellation settles as a driver error", async () => {
+		const root = makeProjectDir();
+		const { runtime, setResponses } = fauxRuntime();
+		setResponses([() => new Promise(() => {}) as never]);
+		const controller = new AbortController();
+		const run = runAiraChild(
+			runtime,
+			{ cwd: root, prompt: "TASK", systemPrompt: "", tools: readOnlyTools(root), timeoutMs: 60_000 },
+			controller.signal,
+		);
+		controller.abort();
+		const outcome = await run;
+		expect(outcome.ok).toBe(false);
+		if (!outcome.ok) {
+			expect(outcome.driverError).toContain("cancelled");
+		}
+	});
+});

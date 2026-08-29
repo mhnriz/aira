@@ -143,6 +143,14 @@ function chromiumBaseArgs(profileDir: string, platform: NodeJS.Platform): string
 		"--disable-features=Translate,OptimizationHints",
 		"--window-size=1280,800",
 	];
+	if (platform === "darwin") {
+		// Automation Chromium must not touch the macOS login keychain (headless
+		// CI/automation environments regularly have a locked or missing
+		// keychain, which pops an OS-level "A keychain cannot be found to
+		// store ..." dialog and stalls the run). --use-mock-keychain replaces
+		// the Safe Storage key handling with an in-memory mock.
+		args.push("--use-mock-keychain");
+	}
 	if (platform === "linux") {
 		args.push("--disable-dev-shm-usage");
 		if (isSandboxForced()) {

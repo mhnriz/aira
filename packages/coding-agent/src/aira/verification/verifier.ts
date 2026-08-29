@@ -181,30 +181,23 @@ function callStream(
 function raceWithTimeout<T>(promise: Promise<T>, timeout: Promise<never>, signal?: AbortSignal): Promise<T> {
 	return new Promise<T>((resolve, reject) => {
 		let settled = false;
-		const onAbort = () => {
+		const settle = (action: () => void): void => {
 			if (!settled) {
 				settled = true;
-				reject(new Error("verifier cancelled"));
+				action();
 			}
+		};
+		const onAbort = () => {
+			settle(() => reject(new Error("verifier cancelled")));
 		};
 		signal?.addEventListener("abort", onAbort, { once: true });
 		promise.then(
-			(value) => {
-				if (!settled) {
-					settled = true;
-					resolve(value);
-				}
-			},
-			(error) => {
-				if (!settled) {
-					settled = true;
-					reject(error instanceof Error ? error : new Error(String(error)));
-				}
-			},
+			(value) => settle(() => resolve(value)),
+			(error) => settle(() => reject(error instanceof Error ? error : new Error(String(error)))),
 		);
 		timeout.then(
 			() => undefined,
-			() => undefined,
+			(error) => settle(() => reject(error instanceof Error ? error : new Error(String(error)))),
 		);
 	});
 }

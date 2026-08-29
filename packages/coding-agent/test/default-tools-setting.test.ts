@@ -64,6 +64,9 @@ describe("defaultTools setting", () => {
 				.map((tool) => tool.name)
 				.sort(),
 		).toEqual([
+			"agents_cancel",
+			"agents_delegate",
+			"agents_status",
 			"bash",
 			"browser_click",
 			"browser_close",
@@ -181,6 +184,9 @@ describe("defaultTools setting", () => {
 				.map((tool) => tool.name)
 				.sort(),
 		).toEqual([
+			"agents_cancel",
+			"agents_delegate",
+			"agents_status",
 			"bash",
 			"browser_click",
 			"browser_close",

@@ -17,6 +17,7 @@ import type {
 import { registerFauxProvider, streamSimple } from "@earendil-works/pi-ai/compat";
 import type { AiraBrowserManagerOptions } from "../../src/aira/browser/manager.ts";
 import type { AiraExecutionManagerOptions } from "../../src/aira/execution/manager.ts";
+import type { AiraOrchestrationManagerOptions } from "../../src/aira/orchestration/manager.ts";
 import type { AiraVerificationManagerOptions } from "../../src/aira/verification/manager.ts";
 import { AgentSession, type AgentSessionEvent } from "../../src/core/agent-session.ts";
 import { AuthStorage } from "../../src/core/auth-storage.ts";
@@ -82,6 +83,11 @@ export interface HarnessOptions {
 	airaBrowserOptions?: AiraBrowserManagerOptions;
 	/** Aira verification-runtime options (tests inject seams/runners). */
 	airaVerificationOptions?: Omit<AiraVerificationManagerOptions, "cwd" | "settings" | "changeSeam" | "runtime">;
+	/** Aira orchestration-runtime options (tests inject seams/runners). */
+	airaOrchestrationOptions?: Omit<
+		AiraOrchestrationManagerOptions,
+		"cwd" | "settings" | "resolveRuntime" | "executionManager"
+	>;
 }
 
 export interface Harness {
@@ -204,6 +210,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 		airaExecutionOptions: options.airaExecutionOptions,
 		airaBrowserOptions: options.airaBrowserOptions,
 		airaVerificationOptions: options.airaVerificationOptions,
+		airaOrchestrationOptions: options.airaOrchestrationOptions,
 	});
 
 	const events: AgentSessionEvent[] = [];
