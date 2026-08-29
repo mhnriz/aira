@@ -16,6 +16,7 @@
 import type { AiraBrowserStatus } from "./browser/status.ts";
 import type { AiraExecutionStatus } from "./execution/status.ts";
 import type { AiraIntelligenceStatus } from "./intelligence/status.ts";
+import type { AiraOrchestrationStatus } from "./orchestration/types.ts";
 import type { AiraProjectProfile } from "./project/profile.ts";
 import type { AiraVerificationStatus } from "./verification/types.ts";
 
@@ -46,6 +47,8 @@ export interface AiraSessionState {
 	browser: AiraBrowserStatus | undefined;
 	/** Verification snapshot; undefined until the manager publishes. */
 	verification: AiraVerificationStatus | undefined;
+	/** Orchestration snapshot; undefined until the manager publishes. */
+	orchestration: AiraOrchestrationStatus | undefined;
 	/** Phase 1: always ["core"]. */
 	capabilities: readonly AiraCapability[];
 	/** Set when the owning session was disposed. */
@@ -82,6 +85,7 @@ export function acquireAiraSessionState(
 		execution: undefined,
 		browser: undefined,
 		verification: undefined,
+		orchestration: undefined,
 		capabilities: DEFAULT_AIRA_CAPABILITIES,
 	};
 	sessionStates.set(sessionId, state);

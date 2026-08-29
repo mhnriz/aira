@@ -17,6 +17,12 @@
  *              write anywhere
  * network      performs network I/O (future: web research, api clients)
  * browser      drives a browser (future: Phase 7)
+ * orchestration manages child agents (Phase 9: agents_delegate/agents_status/
+ *              agents_cancel). Host-level PLAN policy does NOT block this
+ *              class; the orchestration scheduler is the enforcement point
+ *              (children in PLAN only receive read-only/diagnostic tool sets,
+ *              and mutation-capable roles are refused at dispatch) — see
+ *              orchestration/scheduler.ts.
  * unknown      a capability the host does not classify (extension tools)
  * ```
  *
@@ -40,7 +46,14 @@
  * `process` capabilities. `isAiraCapabilityReadOnly` is the wider "safe to
  * run in a read-only context" test (read-only + diagnostic).
  */
-export type AiraCapabilityClass = "read-only" | "diagnostic" | "mutating" | "process" | "network" | "browser";
+export type AiraCapabilityClass =
+	| "read-only"
+	| "diagnostic"
+	| "mutating"
+	| "process"
+	| "network"
+	| "browser"
+	| "orchestration";
 
 /** The built-in capability class of a tool name, or "unknown" when unclassified. */
 export type AiraClassifiedCapability = AiraCapabilityClass | "unknown";
@@ -62,6 +75,9 @@ const BUILTIN_AIRA_CAPABILITY_CLASSES = {
 	process_stop: "process",
 	process_status: "diagnostic",
 	process_logs: "diagnostic",
+	agents_delegate: "orchestration",
+	agents_status: "orchestration",
+	agents_cancel: "orchestration",
 	browser_open: "browser",
 	browser_close: "browser",
 	browser_status: "browser",
@@ -148,6 +164,7 @@ export function airaCapabilityClassLabel(cls: AiraClassifiedCapability): string 
 		process: "process",
 		network: "network",
 		browser: "browser",
+		orchestration: "orchestration",
 		unknown: "unknown",
 	} satisfies Record<AiraClassifiedCapability, string>;
 	return labels[cls as keyof typeof labels] ?? "unknown";
