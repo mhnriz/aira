@@ -8,6 +8,7 @@ import { initialAiraExecutionStatus } from "../../../src/aira/execution/status.t
 import { initialAiraIntelligenceStatus } from "../../../src/aira/intelligence/status.ts";
 import { resolveAiraProjectInto } from "../../../src/aira/project/index.ts";
 import { acquireAiraSessionState, disposeAiraSessionState } from "../../../src/aira/state.ts";
+import { initialAiraVerificationStatus } from "../../../src/aira/verification/types.ts";
 
 const expectedHome = join(homedir(), ".aira").replace(homedir(), "~");
 
@@ -36,10 +37,17 @@ describe("Aira /doctor command (Phase 4 scope)", () => {
 		// a bare acquired state has none yet (probe pending is the honest
 		// state before the first probe).
 		state.browser = initialAiraBrowserStatus();
+		// A real session arms the verification manager which publishes a snapshot;
+		// a bare acquired state has none, so publish the honest idle one.
+		state.verification = initialAiraVerificationStatus({
+			enabled: true,
+			auto: "smart",
+			contextBudget: "compact",
+		});
 		const report = buildAiraDoctorReport(state);
 
 		expect(report.home).toBe(expectedHome);
-		expect(report.checks.length).toBe(10);
+		expect(report.checks.length).toBe(11);
 		for (const check of report.checks) {
 			expect(check.pass, `${check.name} should pass`).toBe(true);
 		}
@@ -193,10 +201,11 @@ describe("Aira /doctor command (Phase 4 scope)", () => {
 		state.intelligence = intelligence;
 		state.execution = initialAiraExecutionStatus();
 		state.browser = initialAiraBrowserStatus();
+		state.verification = initialAiraVerificationStatus({ enabled: true, auto: "smart", contextBudget: "compact" });
 		const text = formatAiraDoctorReport(buildAiraDoctorReport(state));
 
 		expect(text).toContain(`home: ${expectedHome}`);
-		expect(text).toContain("summary: 10/10 checks passed");
+		expect(text).toContain("summary: 11/11 checks passed");
 		expect(text).toContain("ok  home:");
 		expect(text).toContain("ok  browser: availability probe pending");
 		disposeAiraSessionState("doctor-5", state);

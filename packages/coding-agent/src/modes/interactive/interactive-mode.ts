@@ -3058,6 +3058,16 @@ export class InteractiveMode {
 				this.editor.setText("");
 				return;
 			}
+			if (text === "/verify") {
+				void this.handleVerifyCommand();
+				this.editor.setText("");
+				return;
+			}
+			if (text === "/verify status") {
+				this.showVerificationStatus();
+				this.editor.setText("");
+				return;
+			}
 			if (text === "/changelog") {
 				this.handleChangelogCommand();
 				this.editor.setText("");
@@ -4293,6 +4303,74 @@ export class InteractiveMode {
 	}
 
 	/**
+	 * `/verify` — explicit independent verification (Phase 8). Runs the
+	 * fresh-context verifier when the implementation revision is new or its
+	 * result is stale; reuses a current result for an unchanged revision
+	 * (no duplicate verifier runs). `verification.auto` does not affect this
+	 * explicit path beyond `verification.enabled`.
+	 */
+	private async handleVerifyCommand(): Promise<void> {
+		const verification = this.session.airaVerification;
+		if (!verification) {
+			this.showStatus("verification runtime unavailable");
+			return;
+		}
+		const result = await verification.verify();
+		if (result.ok) {
+			const status = verification.status();
+			const verdict = status.currentResult ? status.currentResult.verdict : status.status;
+			this.showStatus(
+				result.outcome === "reused"
+					? `verification: unchanged revision already verified (${verdict})`
+					: `verification: ${verdict} (${status.requirementsVerified}/${status.requirementsTotal} requirements)`,
+			);
+		} else {
+			this.showStatus(`verification: ${result.reason ?? result.outcome}`);
+		}
+	}
+
+	/** `/verify status` — render the canonical verification snapshot (token-free). */
+	private showVerificationStatus(): void {
+		const verification = this.session.airaVerification;
+		const lines: string[] = ["verification"];
+		if (!verification) {
+			lines.push("verification runtime unavailable");
+		} else {
+			const status = verification.status();
+			const result = status.currentResult;
+			lines.push(
+				`state: ${status.status}${status.enabled ? "" : " (disabled)"} · auto ${status.auto} · budget ${status.contextBudget}`,
+			);
+			if (result) {
+				lines.push(
+					`verdict: ${result.verdict}${result.stale ? " (stale)" : " (current)"} · confidence ${result.confidence}`,
+					`requirements: ${status.requirementsVerified}/${status.requirementsTotal} verified`,
+					`scope: ${result.scopeAssessment.verdict}`,
+				);
+				if (status.highestFinding) {
+					const finding = status.highestFinding;
+					lines.push(
+						`current finding: ${finding.requirementId ? `${finding.requirementId} · ` : ""}${finding.message}`,
+					);
+				}
+				if (result.missingEvidence.length > 0) {
+					lines.push(`missing evidence: ${result.missingEvidence.join("; ")}`);
+				}
+				lines.push(result.summary);
+			}
+			if (status.lastError) {
+				lines.push(`last error: ${status.lastError}`);
+			}
+			if (status.lastSkipReason) {
+				lines.push(`last skip: ${status.lastSkipReason}`);
+			}
+		}
+		this.chatContainer.addChild(new Spacer(1));
+		this.chatContainer.addChild(new Text(theme.fg("dim", lines.join("\n")), 1, 0));
+		this.ui.requestRender();
+	}
+
+	/**
 	 * `/browser` — restrained browser inspection (Phase 7). Renders the
 	 * canonical browser snapshot (token-free; provider-independent). The
 	 * future Workbench/footer consume the same state.
@@ -4720,6 +4798,7 @@ export class InteractiveMode {
 			const defaultModelId = this.settingsManager.getDefaultModel();
 			const defaultModel = defaultProvider && defaultModelId ? `${defaultProvider}/${defaultModelId}` : "not set";
 			const browserSettings = this.settingsManager.getBrowserSettings();
+			const verificationSettings = this.settingsManager.getVerificationSettings();
 			selector = new SettingsSelectorComponent(
 				{
 					autoCompact: this.session.autoCompactionEnabled,
@@ -4761,6 +4840,7 @@ export class InteractiveMode {
 					fullscreenScrollbar: this.settingsManager.getFullscreenScrollbar(),
 					warnings: this.settingsManager.getWarnings(),
 					browserSettings,
+					verificationSettings,
 				},
 				{
 					onAutoCompactChange: (enabled) => {
@@ -4943,6 +5023,9 @@ export class InteractiveMode {
 					},
 					onBrowserSettingsChange: (settings) => {
 						this.settingsManager.setBrowserSettings(settings);
+					},
+					onVerificationSettingsChange: (settings) => {
+						this.settingsManager.setVerificationSettings(settings);
 					},
 					onCancel: () => {
 						done();

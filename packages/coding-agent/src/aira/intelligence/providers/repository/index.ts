@@ -12,7 +12,13 @@
 import { stat } from "node:fs/promises";
 import { relative } from "node:path";
 import { loadRepositoryCache, type RepositoryCacheV1, saveRepositoryCache } from "./cache.ts";
-import { changedFilesInGit, type GitChangeInfo, RepositoryRelationships } from "./relationships.ts";
+import {
+	changedFilesInGit,
+	type GitChangeFileStats,
+	type GitChangeInfo,
+	gitChangeStats,
+	RepositoryRelationships,
+} from "./relationships.ts";
 import {
 	type RepositoryFileIndex,
 	type RepositoryLanguage,
@@ -142,6 +148,23 @@ export class RepositoryProvider {
 	async refreshChanges(): Promise<void> {
 		const info = await changedFilesInGit(this.root);
 		this.changeInfo = info;
+	}
+
+	/**
+	 * Bounded per-file change stats for the Phase 8 verifier (paths, status,
+	 * added/deleted line counts). Undefined when git is unavailable. Refreshes
+	 * the cached change list so verifier input is never stale by construction.
+	 */
+	async verificationChanges(): Promise<GitChangeFileStats[] | undefined> {
+		try {
+			const stats = await gitChangeStats(this.root);
+			if (stats !== undefined) {
+				this.changeInfo = { changed: stats.map((file) => file.path) };
+			}
+			return stats;
+		} catch {
+			return undefined;
+		}
 	}
 
 	/** Mark an edited absolute path so change awareness works without git churn. */

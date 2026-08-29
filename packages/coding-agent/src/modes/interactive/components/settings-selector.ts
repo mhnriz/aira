@@ -38,6 +38,17 @@ function browserSettingsOf(config: SettingsConfig): SettingsConfig["browserSetti
 	);
 }
 
+/** Older hosts/tests may omit verificationSettings; defaults keep the selector stable. */
+function verificationSettingsOf(config: SettingsConfig): SettingsConfig["verificationSettings"] {
+	return (
+		config.verificationSettings ?? {
+			enabled: true,
+			auto: "smart",
+			contextBudget: "compact",
+		}
+	);
+}
+
 const THINKING_DESCRIPTIONS: Record<ThinkingLevel, string> = {
 	off: "No reasoning",
 	minimal: "Very brief reasoning (~1k tokens)",
@@ -103,6 +114,11 @@ export interface SettingsConfig {
 		autoVerify: boolean;
 		contextBudget: "compact" | "balanced" | "expanded";
 	};
+	verificationSettings: {
+		enabled: boolean;
+		auto: "off" | "smart" | "always";
+		contextBudget: "compact" | "balanced" | "expanded";
+	};
 }
 
 export interface SettingsCallbacks {
@@ -143,6 +159,11 @@ export interface SettingsCallbacks {
 		enabled: boolean;
 		context: "off" | "auto" | "on";
 		autoVerify: boolean;
+		contextBudget: "compact" | "balanced" | "expanded";
+	}) => void;
+	onVerificationSettingsChange: (settings: {
+		enabled: boolean;
+		auto: "off" | "smart" | "always";
 		contextBudget: "compact" | "balanced" | "expanded";
 	}) => void;
 	onCancel: () => void;
@@ -566,6 +587,99 @@ class AiraBrowserSubmenu extends Container {
 }
 
 /**
+ * Aira verification settings submenu (Phase 8). These controls live in the
+ * canonical settings store (settings.json) and gate the independent
+ * verifier: whether verification may run, the automatic policy (off/smart/
+ * always), and the evidence-envelope budget. Verification STATE stays
+ * UI-visible regardless (state vs model-execution separation).
+ */
+class AiraVerificationSubmenu extends Container {
+	private settingsList: SettingsList;
+	private state: {
+		enabled: boolean;
+		auto: "off" | "smart" | "always";
+		contextBudget: "compact" | "balanced" | "expanded";
+	};
+
+	constructor(
+		initial: {
+			enabled: boolean;
+			auto: "off" | "smart" | "always";
+			contextBudget: "compact" | "balanced" | "expanded";
+		},
+		onChange: (settings: {
+			enabled: boolean;
+			auto: "off" | "smart" | "always";
+			contextBudget: "compact" | "balanced" | "expanded";
+		}) => void,
+		onCancel: () => void,
+	) {
+		super();
+
+		this.state = { ...initial };
+
+		const items: SettingItem[] = [
+			{
+				id: "verification-enabled",
+				label: "Enable verification",
+				description: "Independent completion verification may run (consumes model tokens only when it runs)",
+				currentValue: this.state.enabled ? "true" : "false",
+				values: ["true", "false"],
+			},
+			{
+				id: "verification-auto",
+				label: "Automatic verification",
+				description:
+					"off: never automatic (explicit /verify still works). smart: verify non-trivial engineering work, skip trivial changes (default). always: verify every meaningful implementation, still bounded",
+				currentValue: this.state.auto,
+				values: ["off", "smart", "always"],
+			},
+			{
+				id: "verification-budget",
+				label: "Context budget",
+				description:
+					"Size class of the verifier evidence envelope (compact ~6k chars, balanced ~10k, expanded ~16k)",
+				currentValue: this.state.contextBudget,
+				values: ["compact", "balanced", "expanded"],
+			},
+		];
+
+		this.settingsList = new SettingsList(
+			items,
+			Math.min(items.length, 10),
+			getSettingsListTheme(),
+			(id, newValue) => {
+				switch (id) {
+					case "verification-enabled":
+						this.state = { ...this.state, enabled: newValue === "true" };
+						onChange(this.state);
+						break;
+					case "verification-auto":
+						if (newValue === "off" || newValue === "smart" || newValue === "always") {
+							this.state = { ...this.state, auto: newValue };
+							onChange(this.state);
+						}
+						break;
+					case "verification-budget":
+						if (newValue === "compact" || newValue === "balanced" || newValue === "expanded") {
+							this.state = { ...this.state, contextBudget: newValue };
+							onChange(this.state);
+						}
+						break;
+				}
+			},
+			onCancel,
+		);
+
+		this.addChild(this.settingsList);
+	}
+
+	handleInput(data: string): void {
+		this.settingsList.handleInput(data);
+	}
+}
+
+/**
  * Main settings selector component.
  */
 export class SettingsSelectorComponent extends Container {
@@ -839,6 +953,19 @@ export class SettingsSelectorComponent extends Container {
 					new AiraBrowserSubmenu(
 						browserSettingsOf(config),
 						(settings) => callbacks.onBrowserSettingsChange(settings),
+						() => done(),
+					),
+			},
+			{
+				id: "verification",
+				label: "Aira verification",
+				description:
+					"Independent completion verification: enable, automatic policy (off/smart/always), evidence budget",
+				currentValue: `${verificationSettingsOf(config).auto} · ${verificationSettingsOf(config).enabled ? "on" : "off"}`,
+				submenu: (_currentValue, done) =>
+					new AiraVerificationSubmenu(
+						verificationSettingsOf(config),
+						(settings) => callbacks.onVerificationSettingsChange(settings),
 						() => done(),
 					),
 			},

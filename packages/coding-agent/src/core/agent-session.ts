@@ -66,6 +66,9 @@ import { AIRA_READ_ONLY_TOOLS, isAiraMutatingTool } from "../aira/modes.ts";
 import { getAiraCacheDir } from "../aira/paths.ts";
 import { resolveAiraProjectInto } from "../aira/project/index.ts";
 import type { AiraMode, AiraSessionState } from "../aira/state.ts";
+import type { AiraVerificationHandle } from "../aira/verification/manager.ts";
+import { type AiraVerificationManagerOptions, createAiraVerificationManager } from "../aira/verification/manager.ts";
+import type { AiraVerifierRuntime } from "../aira/verification/verifier.ts";
 import { getThemeByName, theme } from "../modes/interactive/theme/theme.ts";
 import { stripFrontmatter } from "../utils/frontmatter.ts";
 import { sleep } from "../utils/sleep.ts";
@@ -251,6 +254,8 @@ export interface AgentSessionConfig {
 	airaExecutionOptions?: AiraExecutionManagerOptions;
 	/** Browser-runtime options (Aira phase 7; tests inject fake providers). */
 	airaBrowserOptions?: Parameters<typeof createAiraBrowserManager>[1];
+	/** Verification-runtime options (Aira phase 8; tests inject seams/runners). */
+	airaVerificationOptions?: Omit<AiraVerificationManagerOptions, "cwd" | "settings" | "changeSeam" | "runtime">;
 }
 
 export interface ExtensionBindings {
@@ -386,6 +391,7 @@ export class AgentSession {
 	private _airaIntelligence: AiraIntelligenceHandle | undefined;
 	private _airaExecution: AiraExecutionHandle | undefined;
 	private _airaBrowser: AiraBrowserHandle | undefined;
+	private _airaVerification: AiraVerificationHandle | undefined;
 	private _extensionUIContext?: ExtensionUIContext;
 	private _extensionMode: ExtensionMode = "print";
 	private _extensionCommandContextActions?: ExtensionCommandContextActions;
@@ -458,6 +464,22 @@ export class AgentSession {
 			agent: this.agent,
 		});
 		void this._airaBrowser.activate();
+
+		// Aira verification seam (Phase 8): the session owns the independent
+		// verifier. The manager subscribes to agent events (completion boundary),
+		// consumes canonical snapshots only, and publishes `state.verification`.
+		// It never launches anything at startup and degrades silently.
+		this._airaVerification = createAiraVerificationManager(
+			this._airaSessionState,
+			(listener) => this.agent.subscribe(listener),
+			{
+				...config.airaVerificationOptions,
+				cwd: this._cwd,
+				settings: () => this.settingsManager.getVerificationSettings(),
+				changeSeam: () => this._airaIntelligence?.verificationChanges() ?? Promise.resolve(undefined),
+				runtime: () => this.resolveAiraVerifierRuntime(),
+			},
+		);
 
 		// Always subscribe to agent events for internal handling
 		// (session persistence, extensions, auto-compaction, retry logic)
@@ -944,6 +966,9 @@ export class AgentSession {
 		// launched, because each session owns its own manager (ADR-024).
 		void this._airaExecution?.dispose();
 		void this._airaBrowser?.dispose();
+		// Aira verification seam: abort any in-flight verifier run and release
+		// the per-session listener subscription.
+		void this._airaVerification?.dispose();
 		// Aira intelligence seam: shut down providers (language servers, timers).
 		void this._airaIntelligence?.dispose();
 		// Aira lifecycle seam: release canonical state, ownership-checked so a
@@ -1004,6 +1029,31 @@ export class AgentSession {
 	/** Aira browser runtime for this session (tests and host). */
 	get airaBrowser(): AiraBrowserHandle | undefined {
 		return this._airaBrowser;
+	}
+
+	/** Aira verification runtime for this session (tests and host). */
+	get airaVerification(): AiraVerificationHandle | undefined {
+		return this._airaVerification;
+	}
+
+	/** Resolve the fresh-context verifier runtime (current model + auth). */
+	private async resolveAiraVerifierRuntime(): Promise<AiraVerifierRuntime | undefined> {
+		const model = this.model;
+		if (!model) {
+			return undefined;
+		}
+		try {
+			const auth = await this._getRequiredRequestAuth(model);
+			return {
+				model: auth.model,
+				streamFn: this.agent.streamFunction,
+				apiKey: auth.apiKey,
+				headers: auth.headers,
+				env: auth.env,
+			};
+		} catch {
+			return undefined;
+		}
 	}
 
 	/** Bridge the browser runtime to the execution runtime's dev processes. */

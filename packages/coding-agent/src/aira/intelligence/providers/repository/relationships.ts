@@ -355,32 +355,114 @@ export interface GitChangeInfo {
 	error?: string;
 }
 
-/** Changed files in the working tree via `git status --porcelain` (respects .gitignore). */
-export async function changedFilesInGit(root: string, timeoutMs = 3000): Promise<GitChangeInfo> {
+export interface GitChangeFileStats {
+	/** Path relative to the project root. */
+	path: string;
+	status: "added" | "modified" | "deleted" | "renamed" | "untracked";
+	/** Added lines (git numstat; 0 for untracked/deleted-without-numstat). */
+	added: number;
+	/** Deleted lines (git numstat; 0 for untracked). */
+	deleted: number;
+}
+
+/**
+ * Bounded per-file change stats (`git status --porcelain` + `git diff
+ * --numstat`). Consumed by the Phase 8 verifier for the change summary,
+ * scope-drift input, and change-identity hashing. Paths are relative to the
+ * root; the list is capped; git errors degrade to `undefined` results.
+ */
+export async function gitChangeStats(root: string, timeoutMs = 3000): Promise<GitChangeFileStats[] | undefined> {
+	const status = await changedFilesInGit(root, timeoutMs);
+	if (!status.changed) {
+		return undefined;
+	}
+	const numstat = await new Promise<string>((resolvePromise) => {
+		execFile(
+			"git",
+			["diff", "--numstat", "--no-renames"],
+			{ cwd: root, timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024 },
+			(error, stdout) => {
+				resolvePromise(error ? "" : stdout);
+			},
+		);
+	});
+	const numstatByPath = new Map<string, { added: number; deleted: number }>();
+	for (const line of numstat.split("\n")) {
+		const match = /^(\d+)\s+(\d+)\s+(.+)$/.exec(line.trim());
+		if (!match) {
+			continue;
+		}
+		const path = normalize(match[3]).replace(/\\/g, "/");
+		numstatByPath.set(path, { added: Number(match[1]), deleted: Number(match[2]) });
+	}
+	const files: GitChangeFileStats[] = [];
+	const porcelain = (await gitPorcelainEntries(root, timeoutMs)) ?? [];
+	for (const entry of porcelain) {
+		const stats = numstatByPath.get(entry.path);
+		files.push({
+			path: entry.path,
+			status:
+				entry.kind === "??"
+					? "untracked"
+					: entry.kind.startsWith("A")
+						? "added"
+						: entry.kind.startsWith("D")
+							? "deleted"
+							: entry.kind.startsWith("R")
+								? "renamed"
+								: "modified",
+			added: stats?.added ?? 0,
+			deleted: stats?.deleted ?? 0,
+		});
+	}
+	return files;
+}
+
+interface GitPorcelainEntry {
+	path: string;
+	kind: string;
+}
+
+async function gitPorcelainEntries(root: string, timeoutMs: number): Promise<GitPorcelainEntry[] | undefined> {
+	let stdout: string;
 	try {
-		const stdout = await execFileAsync("git", ["status", "--porcelain", "--untracked-files=all"], {
+		stdout = await execFileAsync("git", ["status", "--porcelain", "--untracked-files=all"], {
 			cwd: root,
 			timeout: timeoutMs,
 			maxBuffer: 1024 * 1024,
 		});
-		const changed: string[] = [];
-		for (const line of stdout.split("\n")) {
-			// Porcelain v1 (no trim!): `XY <path>` (e.g. " M src/a.ts", "?? src/b.ts",
-			// "R  old -> new"); the path starts at index 3.
-			if (line.length < 4) {
-				continue;
-			}
-			const pathPart = line.slice(3).split(" -> ").at(-1) ?? "";
-			const rel = normalize(pathPart).replace(/\\/g, "/");
-			if (!rel || rel.startsWith("..")) {
-				continue;
-			}
-			const relToRoot = normalize(relative(root, join(root, rel))).replace(/\\/g, "/");
-			if (relToRoot && !relToRoot.startsWith("..") && changed.length < 200) {
-				changed.push(relToRoot);
-			}
+	} catch {
+		return undefined;
+	}
+	const entries: GitPorcelainEntry[] = [];
+	for (const line of stdout.split("\n")) {
+		// Porcelain v1 (no trim!): `XY <path>` (e.g. " M src/a.ts", "?? src/b.ts",
+		// "R  old -> new"); the path starts at index 3.
+		if (line.length < 4) {
+			continue;
 		}
-		return { changed };
+		const kind = line.slice(0, 2);
+		const pathPart = line.slice(3).split(" -> ").at(-1) ?? "";
+		const rel = normalize(pathPart).replace(/\\/g, "/");
+		if (!rel || rel.startsWith("..")) {
+			continue;
+		}
+		const relToRoot = normalize(relative(root, join(root, rel))).replace(/\\/g, "/");
+		if (relToRoot && !relToRoot.startsWith("..") && entries.length < 200) {
+			entries.push({ path: relToRoot, kind });
+		}
+	}
+	return entries;
+}
+
+/** Changed files in the working tree via `git status --porcelain` (respects .gitignore). */
+export async function changedFilesInGit(root: string, timeoutMs = 3000): Promise<GitChangeInfo> {
+	try {
+		const entries = await gitPorcelainEntries(root, timeoutMs);
+		if (entries === undefined) {
+			return { changed: undefined, error: "git status failed" };
+		}
+		return { changed: entries.map((entry) => entry.path) };
 	} catch (error) {
 		return { changed: undefined, error: error instanceof Error ? error.message : String(error) };
 	}

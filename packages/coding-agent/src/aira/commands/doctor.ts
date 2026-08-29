@@ -224,6 +224,32 @@ export function buildAiraDoctorReport(state: AiraSessionState | undefined): Aira
 		});
 	}
 
+	// 11. Independent verification: canonical settings + snapshot. Health
+	// reporting NEVER runs a verification (no model tokens): it reflects the
+	// manager wiring and the last verdict/staleness. A verifier driver error
+	// is reported truthfully but is not a doctor failure — verification
+	// failure must not break the host.
+	const verification = state?.verification;
+	if (!verification) {
+		checks.push({
+			name: "verifier",
+			pass: false,
+			detail: "no verification snapshot (manager wiring)",
+		});
+	} else {
+		const result = verification.currentResult;
+		const verdictLine = result
+			? `${result.verdict}${verification.stale ? " (stale)" : " (current)"} · ${result.requirements.filter((r) => r.status === "verified").length}/${result.requirements.length} requirements`
+			: "no result yet";
+		const errorLine = verification.lastError ? ` · last error: ${verification.lastError}` : "";
+		const skipLine = verification.lastSkipReason ? ` · last skip: ${verification.lastSkipReason}` : "";
+		checks.push({
+			name: "verifier",
+			pass: true,
+			detail: `${verification.enabled ? "enabled" : "disabled"} · auto ${verification.auto} · budget ${verification.contextBudget} · state ${verification.status} · ${verdictLine}${errorLine}${skipLine}`,
+		});
+	}
+
 	return { product: "Aira doctor", home: displayPathUnderHome(home), checks };
 }
 

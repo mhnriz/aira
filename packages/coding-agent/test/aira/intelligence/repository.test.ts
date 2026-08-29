@@ -272,6 +272,31 @@ describe("repository provider", () => {
 		// working tree is dirty again for cleanup; remove fixture root contents
 	});
 
+	it("verificationChanges returns bounded per-file stats for the Phase 8 verifier", async () => {
+		const root = makeRoot("vstats");
+		execFileSync("git", ["init", "-q"], { cwd: root });
+		execFileSync("git", ["config", "user.email", "t@t"], { cwd: root });
+		execFileSync("git", ["config", "user.name", "t"], { cwd: root });
+		write(root, "src/a.ts", "export function a() {}\n");
+		execFileSync("git", ["add", "-A"], { cwd: root });
+		execFileSync("git", ["commit", "-qm", "init"], { cwd: root });
+		// One modified tracked file (1 added / 1 deleted) and one untracked file.
+		write(root, "src/a.ts", "export function a() {}\n// change\n");
+		write(root, "src/new.ts", "export function n() {}\n");
+		const provider = new RepositoryProvider(root);
+		const stats = await provider.verificationChanges();
+		expect(stats).toBeDefined();
+		const byPath = new Map(stats!.map((file) => [file.path, file]));
+		expect(byPath.get("src/a.ts")?.status).toBe("modified");
+		expect(byPath.get("src/a.ts")?.added).toBe(1);
+		expect(byPath.get("src/new.ts")?.status).toBe("untracked");
+		// Non-git roots degrade to undefined (never throw into the verifier).
+		const plainRoot = makeRoot("vstats-plain");
+		write(plainRoot, "src/a.ts", "export function a() {}\n");
+		const plain = new RepositoryProvider(plainRoot);
+		expect(await plain.verificationChanges()).toBeUndefined();
+	});
+
 	it("round-trips the cache file (save then load)", async () => {
 		const root = makeRoot("cache2");
 		write(root, "src/a.ts", "export function cached() {}");

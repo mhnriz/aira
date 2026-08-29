@@ -31,6 +31,8 @@ export interface AiraStatusReport {
 	capabilities?: string;
 	/** Compact browser line from the canonical snapshot (Phase 7). */
 	browser?: string;
+	/** Compact verification line from the canonical snapshot (Phase 8). */
+	verification?: string;
 }
 
 export function buildAiraStatusReport(state: AiraSessionState | undefined): AiraStatusReport {
@@ -50,7 +52,19 @@ export function buildAiraStatusReport(state: AiraSessionState | undefined): Aira
 		project: summarizeAiraProject(state.project),
 		capabilities: state.capabilities.length === 0 ? "none" : state.capabilities.join(", "),
 		browser: summarizeAiraBrowser(state.browser),
+		verification: summarizeAiraVerification(state.verification),
 	};
+}
+
+/** Compact one-line verification summary for /status (restrained). */
+function summarizeAiraVerification(verification: AiraSessionState["verification"]): string | undefined {
+	if (!verification) {
+		return undefined;
+	}
+	const result = verification.currentResult;
+	const verdict = result ? String(result.verdict) : verification.status;
+	const freshness = result?.stale ? " · stale" : "";
+	return `${verdict}${freshness}`;
 }
 
 /** Compact one-line browser summary for /status ("idle", "active (url)"). */
@@ -78,6 +92,9 @@ export function formatAiraStatusReport(report: AiraStatusReport): string {
 	);
 	if (report.browser) {
 		lines.push(`browser: ${report.browser}`);
+	}
+	if (report.verification) {
+		lines.push(`verification: ${report.verification}`);
 	}
 	return lines.join("\n");
 }

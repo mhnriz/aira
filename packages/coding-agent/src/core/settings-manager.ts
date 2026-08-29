@@ -146,6 +146,12 @@ export interface Settings {
 		autoVerify?: boolean;
 		contextBudget?: "compact" | "balanced" | "expanded";
 	};
+	/** Native Aira independent-verification controls (Phase 8; canonical settings owner). */
+	verification?: {
+		enabled?: boolean;
+		auto?: "off" | "smart" | "always";
+		contextBudget?: "compact" | "balanced" | "expanded";
+	};
 }
 
 function isMergeableObject(value: unknown): value is Record<string, unknown> {
@@ -1164,6 +1170,41 @@ export class SettingsManager {
 	}): void {
 		this.globalSettings.browser = settings;
 		this.markModified("browser");
+		this.save();
+	}
+
+	// Native Aira verification settings (Phase 8). Same canonical store;
+	// invalid stored values normalize to defaults.
+	getVerificationSettings(): {
+		enabled: boolean;
+		auto: "off" | "smart" | "always";
+		contextBudget: "compact" | "balanced" | "expanded";
+	} {
+		const verification = this.settings.verification;
+		if (!verification || typeof verification !== "object") {
+			return { enabled: true, auto: "smart", contextBudget: "compact" };
+		}
+		const auto = verification.auto === "off" || verification.auto === "always" ? verification.auto : "smart";
+		const contextBudget =
+			verification.contextBudget === "compact" || verification.contextBudget === "balanced"
+				? verification.contextBudget
+				: verification.contextBudget === "expanded"
+					? "expanded"
+					: "compact";
+		return {
+			enabled: verification.enabled === undefined ? true : verification.enabled === true,
+			auto,
+			contextBudget,
+		};
+	}
+
+	setVerificationSettings(settings: {
+		enabled: boolean;
+		auto: "off" | "smart" | "always";
+		contextBudget: "compact" | "balanced" | "expanded";
+	}): void {
+		this.globalSettings.verification = settings;
+		this.markModified("verification");
 		this.save();
 	}
 

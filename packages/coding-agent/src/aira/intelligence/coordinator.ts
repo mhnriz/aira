@@ -22,6 +22,7 @@ import { buildIntelligenceContext } from "./context.ts";
 import { AiraFindingsStore } from "./findings.ts";
 import { LiveCodeProvider } from "./providers/live-code/index.ts";
 import { RepositoryProvider } from "./providers/repository/index.ts";
+import type { GitChangeFileStats } from "./providers/repository/relationships.ts";
 import type { AiraIntelligenceStatus } from "./status.ts";
 import { initialAiraIntelligenceStatus } from "./status.ts";
 
@@ -47,6 +48,11 @@ export interface AiraIntelligenceHandle {
 	applyAgentEvent(event: AgentEvent): void;
 	/** Wait for the repository provider's initial scan to settle (tests). */
 	waitUntilSettled(): Promise<void>;
+	/**
+	 * Bounded per-file change stats for the Phase 8 verifier; undefined when
+	 * git/repository evidence is unavailable (degrades truthfully).
+	 */
+	verificationChanges(): Promise<GitChangeFileStats[] | undefined>;
 	dispose(): Promise<void>;
 }
 
@@ -168,6 +174,11 @@ export class IntelligenceCoordinator implements AiraIntelligenceHandle {
 	async waitUntilSettled(): Promise<void> {
 		await this.repository?.settled();
 		this.publishStatus();
+	}
+
+	/** Bounded git change stats for the Phase 8 verifier (read-only). */
+	async verificationChanges() {
+		return this.repository?.verificationChanges();
 	}
 
 	private onAgentEvent = (event: AgentEvent): void => {
