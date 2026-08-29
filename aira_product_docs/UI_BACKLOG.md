@@ -188,3 +188,39 @@ VERIFY ✕ 2 · player remains black after second stream switch
 phase; Phase 8 implemented only the underlying snapshot/event seam,
 settings, `/verify` commands, and the restrained `/status`/`/doctor`
 projections.
+
+---
+
+## B-004 — Orchestration state in the native bottom bar and Engineering Context pane
+
+**Status:** backlog (future Aira UI overhaul; NOT part of Phase 9)
+
+**Problem:** orchestration state is currently visible through `/agents`,
+`/doctor`, `/status`, and model-facing tools only. The future Workbench
+should render it from canonical state with zero model tokens and zero child
+process/log inspection.
+
+**Data contract already available (Phase 9):** `AiraSessionState.orchestration`
+(`AiraOrchestrationStatus`) — enabled, status (idle/active), runningCount,
+queuedCount, maxConcurrency, children (≤ 12: taskId, role, task ≤ 100 chars,
+status, phase, model, elapsedMs, dependencies, resultSummary, tokenUsage,
+error{category,message,retryable}), recentResults (≤ 8), failures (≤ 6:
+taskId, role, category, message, timestamp, retryable), aggregateTokenUsage,
+epochStartedAt, summary, updatedAt.
+
+Desired chips (the future UI combines mode + LSP + verification + agents +
+processes + browser + git + context):
+
+```text
+◇ AGENTS 3          (active)
+AGENTS 3 running · 1 queued
+├─ implement  fix streaming seek      running   deepseek-v4-flash  12.3s  1.2k tok
+├─ explore    map player module       completed opencode-go/qwen3.7 … 4.1s
+└─ review     audit seek contract     failed    model-unavailable   1ms   retryable
+```
+
+**Explicitly deferred:** the full Workbench/UI overhaul remains a later
+phase; Phase 9 implemented only the underlying snapshot/event seam,
+settings, the `/agents` inspection/cancel surface, and the restrained
+`/status` (e.g. `orchestration: 2 running · 1 queued`) and `/doctor`
+projections.

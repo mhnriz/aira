@@ -570,3 +570,81 @@ Phase 5 studied `pi-lens` and `pi-codeontime-code-intelligence` as laboratory re
 - `AgentSession` gains four narrow seams: arm at construction, context injection in `prompt()`, agent-event subscription (turns + tool executions), and provider disposal; `airaSessionState` getter added for tests/diagnostics.
 - A later phase can replace either provider behind `providers/index.ts` without touching the coordinator, and can switch persistence to `node:sqlite` behind the cache module.
 - Prompt-time cost is bounded: context building is synchronous over in-memory structures; LSP work happens only in the post-edit pipeline and warm navigation; the repository scan runs in the background at session start.
+
+## ADR-027 — Orchestration is a root-owned native per-session service; children receive bounded explicit envelopes and capability-derived tool sets; PLAN read-only holds through orchestration
+
+**Status:** Accepted
+
+### Decision
+
+- Orchestration is a native harness service (`src/aira/orchestration/`): one
+  `AiraOrchestrationManager` per `AgentSession` instance (ADR-024 ownership
+  pattern), armed at construction, disposed with the session, publishing the
+  canonical `AiraSessionState.orchestration` snapshot (ADR-005). The root
+  session owns scheduling, cancellation, canonical state, result aggregation,
+  and final synthesis; children are run records, never session owners and
+  never holders of competing task state.
+- Children are FRESH-CONTEXT model invocations through the session's stream
+  function (the Phase 8 verifier pattern), NOT subprocesses: an explicit
+  bounded envelope (task, role, project root, ≤ 50 file paths, ≤ 8k chars
+  context, mode, result contract) plus a mode-gated, capability-derived tool
+  set. The parent conversation is never injected; no transcript cloning.
+- Isolation rules: children never receive browser tools, orchestration tools
+  (root-only delegation — children cannot spawn children), or
+  unknown/extension tools; process-class children get only the managed
+  execution tools bound to the root's execution manager (Phase 6 runtime
+  reuse); the semantic capability tables (ADR-022) derive every child tool
+  set — never tool-name string matching.
+- PLAN holds through orchestration: mutation-capable roles (implement/test)
+  are refused per-task at dispatch with a truthful reason, and every PLAN
+  child's tool set collapses to read-only + diagnostic. The delegation tools
+  classify as a new `orchestration` capability class that host-level PLAN
+  policy does not block — the scheduler is the enforcement point.
+- A small DAG scheduler (task ids + same-batch dependencies, DFS cycle
+  rejection, semaphore concurrency from `orchestration.maxParallel`,
+  dependency-failure propagation, per-run and batch AbortSignals) is the
+  whole workflow model; no workflow engine, no persistence in this phase.
+- Model selection is inherit | default | explicit provider/model with
+  truthful degradation: an unavailable or unauthenticated model fails by
+  name (`model-unavailable`), never silently substituted; the resolved model
+  identity is recorded per run. Real provider token usage is recorded when
+  exposed, never invented.
+- The Phase 8 verifier remains independent: orchestration consumes verifier
+  evidence but never controls verdicts; the verifier is not a teammate.
+
+### Rationale
+
+Phase 9 studied pi-maestro-teammate and pi-maestro-flow as laboratory
+specimens. The ideas worth adopting natively: bounded explicit child
+context, structured results, small DAG scheduling with cycle rejection,
+bounded concurrency, truthful model degradation, progress phases, and
+first-class cancellation. The ideas deliberately NOT adopted: parent
+transcript inheritance through fork snapshots (context leakage by design —
+Aira's isolation requirement is the opposite), subprocess-per-child with RPC
+channels and session leases (in-process fresh-context runs provide the same
+isolation property with a fraction of the machinery), model fallback chains
+with circuit breakers (runtime resolver seam exists; routing policy is
+later), worker-to-worker messaging, todo-context injection, and swarm/ACO
+optimization. Children cost real model tokens per run, so delegation is
+bounded, concurrency-limited, and never automatic for trivial work.
+
+### Consequences
+
+- `AiraSessionState.orchestration` is a new canonical snapshot field written
+  only by the manager (ADR-005 preserved): bounded child rows, settled
+  results, failure telemetry (`category`/`message`/`retryable`), concurrency
+  truth, aggregate real token usage, and a one-line summary — token-free and
+  UI-ready. The future Workbench/footer renders it without model tokens or
+  process inspection.
+- `AgentSession` gains: manager creation at construction, disposal with the
+  session (aborts every child/batch), a child model runtime resolver seam,
+  and the three native model tools (`agents_delegate`, `agents_status`,
+  `agents_cancel`) in the default active set (SDK included).
+- `AIRA_READ_ONLY_TOOLS` includes the delegation tools: PLAN keeps
+  read-only exploratory children; the scheduler's mode gate is the
+  read-only enforcement point (per-task refusal + mode-collapsed tool sets).
+- A later phase can add nested delegation behind a strict depth limit (the
+  strongest recursion guard — children cannot spawn at all — is already in
+  place), richer model routing behind the resolver seam, browser-capable
+  children behind an explicit capability flag, and durable audit behind
+  canonical storage (`node:sqlite` upgrade path remains available).

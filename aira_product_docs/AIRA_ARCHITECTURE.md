@@ -324,21 +324,45 @@ bounded verification evidence
 
 ## 13. Agents
 
-Keep the permanent taxonomy deliberately small.
+Keep the permanent taxonomy deliberately small: five lightweight roles that
+influence prompt framing, capability-derived tool access, and expected result
+format — not a large agent catalog (ADR-027).
 
-### Scout
+### Explore
 
-Read-only exploration for unfamiliar or cross-cutting repositories.
+Read-only repository exploration: map unfamiliar code, trace flows, locate
+definitions and usage; strongest output is concrete file/line references.
 
-### Researcher
+### Research
 
-External documentation/research when local information is insufficient.
+Read-only investigation and bounded analysis with evidence references
+(no native web tool exists yet — workspace + provided context only).
+
+### Review
+
+Independent inspection-oriented review: evaluate correctness, robustness,
+fit; findings ordered by severity with remediation suggestions. REVIEW is
+NOT the Phase 8 verifier — orchestration never controls verifier verdicts.
+
+### Test
+
+Test-oriented execution through the managed execution runtime (root-owned
+process lifecycle) plus analysis of results.
+
+### Implement
+
+Bounded workspace changes: smallest coherent change set + change reports.
 
 ### Verifier
 
-Independent fresh-context completion review.
+Independent fresh-context completion review (Phase 8, ADR-026). Not a
+teammate; never an orchestration child.
 
-The root agent can act as Builder initially; a permanent Builder subprocess is not required.
+Children are runs owned by the root session's orchestration manager: they
+receive an explicit bounded envelope (task, role, project, files, context,
+mode, result contract) — never the parent conversation — and a mode-gated,
+capability-derived tool set. Children cannot spawn children (root-only
+delegation), cannot browse, and never receive unknown/extension tools.
 
 Subagents never own competing canonical task state.
 
@@ -408,6 +432,7 @@ Sources include:
 - browser runtime;
 - process failures;
 - verifier;
+- orchestration (bounded child failure telemetry in `state.orchestration`);
 - policy.
 
 Aira decides whether to repair, retry, surface, pause, ask, or fail. Third-party engines should not each dominate the user interface.
@@ -469,6 +494,22 @@ AIRA ◎ REVIEW  stream-web   main   SUP 1
 
 Do not expose every internal engine all the time.
 
+Every subsystem is a UI telemetry PRODUCER into canonical state; the future
+Workbench/footer is a CONSUMER, never another state owner (see
+`UI_BACKLOG.md`). Phase 9 adds orchestration telemetry:
+
+```text
+AIRA ◈ BUILD   ◉ LSP  ✓ VERIFY   ◇ AGENTS 3
+AGENTS 3 running · 1 queued
+├─ implement  fix streaming seek      running   deepseek-v4-flash  12.3s  1.2k tok
+├─ explore    map player module       completed opencode-go/qwen3.7 … 4.1s
+└─ review     audit seek contract     failed    model-unavailable  1ms    retryable
+```
+
+All rows render from `AiraSessionState.orchestration` (bounded, token-free);
+no child process or log inspection is needed. Mode + LSP + verification +
+agents + processes + browser + git + context combine without invasive
+subsystem changes.
 Minimal explicit controls:
 
 ```text
@@ -517,6 +558,11 @@ Canonical Aira paths remain under `~/.aira/` — `~/.aira/agent` for the Pi-comp
     canonical PASS/FAIL/INCONCLUSIVE contract, revision dedupe, freshness
     invalidation, token-free canonical state; INCONCLUSIVE never silently
     becomes PASS; no unbounded repair loop.
+14. Orchestration is a native per-session service (ADR-027): root-owned
+    children with bounded explicit envelopes, capability-derived tool sets,
+    a small DAG scheduler, truthful model degradation, token-free canonical
+    telemetry; children never receive orchestration/browser/unknown tools;
+    PLAN read-only holds through orchestration.
 13. Projects cannot silently grant privileges.
 14. Optional specialist engines degrade gracefully.
 15. Mature machinery is not rewritten without a measured reason.

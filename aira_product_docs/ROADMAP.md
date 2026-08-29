@@ -361,6 +361,19 @@ Support complex tasks without making simple tasks expensive.
 - trivial tasks remain single-agent;
 - child agents cannot create competing canonical task state.
 
+### Status
+
+✅ done 2026-08-31 — [PHASE_9_NATIVE_ORCHESTRATION.md](phases/PHASE_9_NATIVE_ORCHESTRATION.md).
+Native per-session orchestration (ADR-027): five lightweight roles
+(explore/research/review/test/implement — the roadmap's Scout/Researcher
+landed as explore/research), bounded explicit child envelopes with no parent
+transcript, capability-derived mode-gated tool sets, a small DAG scheduler
+with cycle rejection and bounded concurrency, truthful model degradation,
+real token accounting, bounded UI-ready canonical telemetry
+(`state.orchestration`), `/agents` inspection + cancellation, `orchestration.*`
+settings, `/status`/`/doctor` surfaces, and root-only delegation. The native
+taxonomy supersedes the roadmap's placeholder role names (ADR-027).
+
 ---
 
 ## Phase 10 — Durable Autonomous Work
