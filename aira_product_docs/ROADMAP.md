@@ -332,6 +332,10 @@ Completion requires evidence rather than builder confidence.
 - failed verification can re-enter BUILD safely;
 - inconclusive results remain explicit.
 
+### Status
+
+✅ done 2026-08-29 — [PHASE_8_INDEPENDENT_VERIFICATION.md](phases/PHASE_8_INDEPENDENT_VERIFICATION.md)
+
 ---
 
 ## Phase 9 — Task Graph and Delegation

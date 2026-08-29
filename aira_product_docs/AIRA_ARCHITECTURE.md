@@ -358,15 +358,44 @@ Verification combines independent evidence:
  structure       browser      edge cases
 ```
 
-Verifier outcomes:
+Phase 8 ships the native independent verification service
+(`src/aira/verification/`, ADR-026): one per-session manager, a fresh-context
+verifier model call, and the canonical verdict contract.
 
 ```text
-PASS
-FAIL
-INCONCLUSIVE
+implementation believes it is finished
+            ↓
+      independent verification   (fresh context, bounded evidence, read-only tools)
+            ↓
+       ┌─────┼────────────┐
+      PASS  FAIL     INCONCLUSIVE
 ```
 
-`INCONCLUSIVE` must never silently become `PASS`.
+- **Independence**: the verifier receives the user objective, the approved
+  change summary, repository/language/execution/browser evidence snapshots,
+  and explicit missing-evidence markers — NEVER the implementation
+  conversation. Its only tools are read/grep/find/ls (bounded); no shell, no
+  edits, no browser interaction.
+- **Requirement-driven**: a bounded checklist (explicit + necessary inferred)
+  with per-requirement verified/unmet/unverifiable status derived from the
+  objective.
+- **Verdicts**: PASS / FAIL / INCONCLUSIVE. INCONCLUSIVE never silently
+  becomes PASS; a pass with unmet requirements is FAIL, a pass without
+  concrete evidence is INCONCLUSIVE, verifier driver failures are
+  INCONCLUSIVE with an explicit lastError.
+- **Bounded**: evidence envelope budgets (compact/balanced/expanded), capped
+  requirements/findings/evidence, secret redaction, revision-hash dedupe
+  (unchanged implementations are not reverified).
+- **Fresh**: a new relevant edit or a moved change set invalidates a prior
+  PASS immediately; mtime drift of the verified change set stales on
+  refresh. A stale verdict is not completion evidence.
+- **Canonical state**: `state.verification` is a bounded, token-free,
+  UI-ready snapshot (status, currentResult, requirement counts, highest
+  finding, stale, missing evidence, lastError) — the future Workbench/footer
+  render it without model tokens. Verification state is separate from
+  REVIEW-mode state.
+- No repair loop exists in Phase 8: FAIL carries structured findings; a
+  later orchestrator owns repair → BUILD → new revision → verify.
 
 ## 15. Supervision
 
@@ -484,6 +513,10 @@ Canonical Aira paths remain under `~/.aira/` — `~/.aira/agent` for the Pi-comp
 11. Verification is independent from implementation completion claims.
 12. Browser defaults to an isolated profile (ADR-025); browser state is
     token-free and separate from ambient model context.
+13. Verification is a native service (ADR-026): fresh-context verifier,
+    canonical PASS/FAIL/INCONCLUSIVE contract, revision dedupe, freshness
+    invalidation, token-free canonical state; INCONCLUSIVE never silently
+    becomes PASS; no unbounded repair loop.
 13. Projects cannot silently grant privileges.
 14. Optional specialist engines degrade gracefully.
 15. Mature machinery is not rewritten without a measured reason.

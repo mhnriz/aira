@@ -74,8 +74,12 @@ export interface AiraVerificationHandle {
 	status(): AiraVerificationStatus;
 	/** Status listener seam (token-free UI projection). */
 	subscribe(listener: (status: AiraVerificationStatus) => void): () => void;
-	/** Feed host agent events (subscription seam). */
-	applyAgentEvent(event: AgentEvent): void;
+	/**
+	 * Feed host agent events (subscription seam). The agent_end handler is
+	 * AWAITED by the host as part of run settlement, so print/headless sessions
+	 * stay alive until verification settles at the completion boundary.
+	 */
+	applyAgentEvent(event: AgentEvent): void | Promise<void>;
 	dispose(): Promise<void>;
 }
 
@@ -177,7 +181,7 @@ export class AiraVerificationManager implements AiraVerificationHandle {
 		return () => this.listeners.delete(listener);
 	}
 
-	applyAgentEvent(event: AgentEvent): void {
+	applyAgentEvent(event: AgentEvent): void | Promise<void> {
 		if (this.disposed) {
 			return;
 		}
@@ -224,7 +228,7 @@ export class AiraVerificationManager implements AiraVerificationHandle {
 			}
 		}
 		if (event.type === "agent_end") {
-			void this.onAgentEnd(event.messages);
+			return this.onAgentEnd(event.messages);
 		}
 	}
 
