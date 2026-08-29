@@ -71,6 +71,8 @@ export interface LiveCodeProviderOptions {
 	diagnosticWaitMs?: number;
 	/** Launch override per server id (tests, managed runtimes). */
 	launchOverrides?: Readonly<Record<string, LaunchSpec>>;
+	/** LSP request timeout (tests shrink it; default 10s). */
+	requestTimeoutMs?: number;
 }
 
 const DEFAULT_MAX_OPEN_DOCUMENTS = 12;
@@ -93,6 +95,7 @@ export class LiveCodeProvider {
 	private disposed = false;
 
 	private readonly launchOverrides: Readonly<Record<string, LaunchSpec>>;
+	private readonly requestTimeoutMs: number;
 	private readonly projectRoot: string;
 	private readonly findings: AiraFindingsStore;
 	private readonly maxOpenDocuments: number;
@@ -104,6 +107,7 @@ export class LiveCodeProvider {
 		this.projectRoot = projectRoot;
 		this.findings = findings;
 		this.launchOverrides = options.launchOverrides ?? {};
+		this.requestTimeoutMs = options.requestTimeoutMs ?? 10_000;
 		this.maxOpenDocuments = options.maxOpenDocuments ?? DEFAULT_MAX_OPEN_DOCUMENTS;
 		this.idleTimeoutMs = options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
 		this.crashCooldownMs = options.crashCooldownMs ?? DEFAULT_CRASH_COOLDOWN_MS;
@@ -196,26 +200,36 @@ export class LiveCodeProvider {
 			return undefined;
 		}
 
-		const client = new LspClient(spec, this.projectRoot, {
-			onDiagnostics: ({ uri, diagnostics }) => this.ingestDiagnostics(uri, language, diagnostics),
-			onLog: () => undefined,
-			onStatusChange: (status, error) => {
-				const available = status === "running" || status === "starting";
-				this.setServerStatus(key, language, status, available, error);
-				if (status === "crashed") {
-					this.crashCount += 1;
-					this.crashedAt.set(key, Date.now());
-					this.clients.delete(key);
-				}
-				this.scheduleIdleCheck(key);
+		const client = new LspClient(
+			spec,
+			this.projectRoot,
+			{
+				onDiagnostics: ({ uri, diagnostics }) => this.ingestDiagnostics(uri, language, diagnostics),
+				onLog: () => undefined,
+				onStatusChange: (status, error) => {
+					const available = status === "running" || status === "starting";
+					this.setServerStatus(key, language, status, available, error);
+					if (status === "crashed") {
+						this.crashCount += 1;
+						this.crashedAt.set(key, Date.now());
+						this.clients.delete(key);
+					}
+					this.scheduleIdleCheck(key);
+				},
 			},
-		});
+			this.requestTimeoutMs,
+		);
 		this.clients.set(key, client);
 		this.spawnCount += 1;
 		this.setServerStatus(key, language, "starting", true);
 		try {
 			await client.start();
 		} catch {
+			// The handshake failed (e.g. initialize timed out). The client is
+			// abandoned, so the spawned child must be killed — an untracked
+			// server would otherwise hold the session's stdio pipes and orphan
+			// (host process never exits; a server process leaks per failed spawn).
+			client.killChild();
 			this.clients.delete(key);
 			return undefined;
 		}

@@ -104,6 +104,14 @@ function handleNotification(method, params) {
 
 const crashOnInitialize = process.argv.includes("--crash-on-initialize");
 const crashAfterOpen = process.argv.includes("--crash-after-open");
+// Never respond to initialize (the client's handshake request times out).
+const ignoreInitialize = process.argv.includes("--ignore-initialize");
+// Write this process's pid to a file so tests can assert the child was killed.
+const pidFileIndex = process.argv.indexOf("--pid-file");
+const pidFile = pidFileIndex >= 0 ? process.argv[pidFileIndex + 1] : undefined;
+if (pidFile) {
+	import("node:fs").then((fs) => fs.writeFileSync(pidFile, String(process.pid)));
+}
 
 process.stdin.on("data", (chunk) => {
 	buffer = Buffer.concat([buffer, chunk]);
@@ -123,6 +131,9 @@ process.stdin.on("data", (chunk) => {
 		const message = JSON.parse(body.toString("utf8"));
 		if (crashOnInitialize && typeof message.id === "number") {
 			process.exit(3);
+		}
+		if (ignoreInitialize && message.method === "initialize") {
+			continue;
 		}
 		if (typeof message.id === "number") {
 			handleRequest(message.id, message.method, message.params);

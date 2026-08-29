@@ -71,11 +71,18 @@ export class LspClient {
 	private readonly spec: LaunchSpec;
 	private readonly projectRoot: string;
 	private readonly callbacks: LspClientCallbacks;
+	private readonly requestTimeoutMs: number;
 
-	constructor(spec: LaunchSpec, projectRoot: string, callbacks: LspClientCallbacks) {
+	constructor(
+		spec: LaunchSpec,
+		projectRoot: string,
+		callbacks: LspClientCallbacks,
+		requestTimeoutMs = REQUEST_TIMEOUT_MS,
+	) {
 		this.spec = spec;
 		this.projectRoot = projectRoot;
 		this.callbacks = callbacks;
+		this.requestTimeoutMs = requestTimeoutMs;
 		this.rootUri = pathToFileURL(projectRoot).href;
 	}
 
@@ -165,7 +172,7 @@ export class LspClient {
 			const timer = setTimeout(() => {
 				this.pending.delete(id);
 				reject(new Error(`LSP request timed out: ${method}`));
-			}, REQUEST_TIMEOUT_MS);
+			}, this.requestTimeoutMs);
 			this.pending.set(id, { resolve, reject, timer });
 			this.write(payload);
 		});
@@ -341,6 +348,23 @@ export class LspClient {
 		}
 		this.pending.clear();
 		this.callbacks.onStatusChange(this.status, error);
+		// A crashed/abandoned server must never be left holding our stdio pipes
+		// (an untracked child would keep the host process alive after teardown
+		// and orphan on exit). Killing is safe: the server is already broken or
+		// gone (spawn failure / exit), or the handshake failed and it is useless.
+		this.killChild();
+	}
+
+	/** Force-kill the spawned server child if it is still alive. */
+	killChild(): void {
+		const child = this.child;
+		if (child && child.exitCode === null && child.signalCode === null) {
+			try {
+				child.kill("SIGKILL");
+			} catch {
+				// Already gone.
+			}
+		}
 	}
 
 	private fileUri(path: string): string {

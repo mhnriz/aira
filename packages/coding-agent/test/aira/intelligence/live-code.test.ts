@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -218,6 +218,37 @@ describe("live-code provider (mock language server)", () => {
 		const info = provider.statusInfo();
 		const server = info.servers.find((s) => s.id === "typescript");
 		expect(server?.status).toBe("closed");
+		await provider.dispose();
+	});
+
+	it("kills the spawned server when the handshake fails (no orphaned child)", async () => {
+		const root = makeRoot("hang-init");
+		const file = join(root, "src", "tray.ts");
+		mkdirSync(join(root, "src"), { recursive: true });
+		writeFileSync(file, "export function a() {}");
+		const pidFile = join(tmpdir(), `aira-mock-pid-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+
+		const { provider } = providerFor(root, {
+			extra: {
+				requestTimeoutMs: 300,
+				launchOverrides: {
+					typescript: launchSpec(["--ignore-initialize", "--pid-file", pidFile]),
+				},
+			},
+		});
+		await provider.requestDiagnosticsForFile(file);
+		// The handshake never completes: the initialize request times out, the
+		// client is abandoned, and the spawned child is force-killed.
+		await new Promise((resolve) => setTimeout(resolve, 700));
+		const childPid = Number.parseInt(readFileSync(pidFile, "utf8").trim(), 10);
+		expect(Number.isInteger(childPid) && childPid > 0).toBe(true);
+		let alive = true;
+		try {
+			process.kill(childPid, 0);
+		} catch {
+			alive = false;
+		}
+		expect(alive).toBe(false);
 		await provider.dispose();
 	});
 

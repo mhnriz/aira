@@ -37,7 +37,7 @@ import {
 import type { AiraVerificationResult, AiraVerificationVerdict } from "./types.ts";
 
 export const DEFAULT_VERIFIER_TIMEOUT_MS = 180_000;
-export const MAX_VERIFIER_TOOL_ROUNDS = 2;
+export const MAX_VERIFIER_TOOL_ROUNDS = 4;
 export const MAX_VERIFIER_TOOL_CALLS_PER_ROUND = 2;
 export const MAX_VERIFIER_OUTPUT_TOKENS = 1_200;
 export const MAX_VERIFIER_SUMMARY_CHARS = 600;
