@@ -12,6 +12,8 @@
  * INCONCLUSIVE must never silently become PASS: the verdict types make the
  * three outcomes explicit, and the manager never upgrades a verdict.
  */
+
+import type { AiraChildTokenUsage } from "../orchestration/types.ts";
 import type { AiraMode } from "../state.ts";
 import type { AiraVerificationContextBudget } from "./settings.ts";
 
@@ -94,6 +96,11 @@ export interface AiraVerificationResult {
 	missingEvidence: string[];
 	scopeAssessment: AiraVerificationScopeAssessment;
 	confidence: "low" | "medium" | "high";
+	/**
+	 * Real provider token usage of the verifier run when the provider exposed
+	 * it (never invented; aggregate telemetry for the goal runtime).
+	 */
+	tokenUsage?: AiraChildTokenUsage;
 	startedAt: number;
 	completedAt: number;
 	/**

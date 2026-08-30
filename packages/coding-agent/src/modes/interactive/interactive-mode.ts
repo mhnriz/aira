@@ -46,12 +46,14 @@ import {
 import chalk from "chalk";
 import { spawn } from "child_process";
 import {
+	type AiraGoalSnapshot,
 	type AiraMode,
 	airaModeLabel,
 	buildAiraDoctorReport,
 	buildAiraModeReport,
 	buildAiraStatusReport,
 	formatAiraDoctorReport,
+	formatAiraGoalReport,
 	formatAiraModeReport,
 	formatAiraStatusReport,
 	formatProcessLine,
@@ -3075,6 +3077,11 @@ export class InteractiveMode {
 				this.editor.setText("");
 				return;
 			}
+			if (text === "/goal" || text.startsWith("/goal ")) {
+				this.handleGoalCommand(text);
+				this.editor.setText("");
+				return;
+			}
 			if (text === "/agents" || text.startsWith("/agents ")) {
 				this.handleAgentsCommand(text);
 				this.editor.setText("");
@@ -4891,6 +4898,7 @@ export class InteractiveMode {
 			const browserSettings = this.settingsManager.getBrowserSettings();
 			const verificationSettings = this.settingsManager.getVerificationSettings();
 			const orchestrationSettings = this.settingsManager.getOrchestrationSettings();
+			const goalSettings = this.settingsManager.getGoalSettings();
 			selector = new SettingsSelectorComponent(
 				{
 					autoCompact: this.session.autoCompactionEnabled,
@@ -4934,6 +4942,7 @@ export class InteractiveMode {
 					browserSettings,
 					verificationSettings,
 					orchestrationSettings,
+					goalSettings,
 				},
 				{
 					onAutoCompactChange: (enabled) => {
@@ -5122,6 +5131,9 @@ export class InteractiveMode {
 					},
 					onOrchestrationSettingsChange: (settings) => {
 						this.settingsManager.setOrchestrationSettings(settings);
+					},
+					onGoalSettingsChange: (settings) => {
+						this.settingsManager.setGoalSettings(settings);
 					},
 					onCancel: () => {
 						done();
@@ -6585,6 +6597,65 @@ export class InteractiveMode {
 		const report = buildAiraStatusReport(getAiraSessionState(this.session.sessionId));
 		this.chatContainer.addChild(new Spacer(1));
 		this.chatContainer.addChild(new Text(theme.fg("dim", formatAiraStatusReport(report)), 1, 0));
+		this.ui.requestRender();
+	}
+
+	/**
+	 * `/goal` — restrained native goal control (Phase 10). `/goal` and
+	 * `/goal status` render the canonical snapshot (token-free); `stop`
+	 * halts autonomous continuation preserving state; `resume` continues an
+	 * explicitly stopped/waiting goal; `clear` removes terminal/paused state;
+	 * `create <objective>` starts a goal explicitly. Never creates goals just
+	 * by being run.
+	 */
+	private handleGoalCommand(text: string): void {
+		const goal = this.session.airaGoal;
+		if (!goal) {
+			this.showStatus("goal runtime unavailable");
+			return;
+		}
+		const args = text.startsWith("/goal ") ? text.slice(6).trim() : "";
+		if (args === "" || args === "status") {
+			this.renderGoalReport(goal.status());
+			return;
+		}
+		if (args === "stop") {
+			const result = goal.stop();
+			this.showStatus(result.ok ? `goal: ${result.message}` : `goal: ${result.message}`);
+			return;
+		}
+		if (args === "resume") {
+			const result = goal.resume();
+			this.showStatus(`goal: ${result.message}`);
+			return;
+		}
+		if (args === "clear") {
+			const result = goal.clear();
+			this.showStatus(`goal: ${result.message}`);
+			return;
+		}
+		if (args === "cancel") {
+			const result = goal.cancel();
+			this.showStatus(`goal: ${result.message}`);
+			return;
+		}
+		if (args.startsWith("create ")) {
+			const result = goal.create(args.slice(7));
+			this.showStatus(`goal: ${result.message}`);
+			return;
+		}
+		if (args.startsWith("create")) {
+			this.showStatus("goal: /goal create <objective>");
+			return;
+		}
+		this.showStatus(
+			`goal: unknown subcommand "${args}" (use /goal, /goal status, /goal stop, /goal resume, /goal cancel, /goal clear, /goal create <objective>)`,
+		);
+	}
+
+	private renderGoalReport(snapshot: AiraGoalSnapshot): void {
+		this.chatContainer.addChild(new Spacer(1));
+		this.chatContainer.addChild(new Text(theme.fg("dim", formatAiraGoalReport(snapshot)), 1, 0));
 		this.ui.requestRender();
 	}
 

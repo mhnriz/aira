@@ -56,6 +56,9 @@ import { createAiraBrowserToolDefinitions } from "../aira/browser/tools.ts";
 import { type AiraExecutionManagerOptions, createAiraExecutionManager } from "../aira/execution/manager.ts";
 import { createAiraProcessToolDefinitions } from "../aira/execution/tools.ts";
 import type { AiraExecutionHandle } from "../aira/execution/types.ts";
+import type { AiraGoalHandle, AiraGoalManagerOptions } from "../aira/goal/manager.ts";
+import { createAiraGoalManager } from "../aira/goal/manager.ts";
+import { AIRA_GOAL_CONTINUATION_TYPE } from "../aira/goal/prompt.ts";
 import {
 	AIRA_INTELLIGENCE_CONTEXT_TYPE,
 	type AiraIntelligenceHandle,
@@ -266,6 +269,21 @@ export interface AgentSessionConfig {
 		AiraOrchestrationManagerOptions,
 		"cwd" | "settings" | "resolveRuntime" | "executionManager"
 	>;
+	/** Goal-runtime options (Aira phase 10; tests inject seams/persistence). */
+	airaGoalOptions?: Omit<
+		AiraGoalManagerOptions,
+		| "cwd"
+		| "sessionId"
+		| "startReason"
+		| "settings"
+		| "verification"
+		| "execution"
+		| "usageSeam"
+		| "hasPendingMessages"
+		| "sendContinuation"
+		| "abortRun"
+		| "agentEvents"
+	>;
 }
 
 export interface ExtensionBindings {
@@ -403,6 +421,7 @@ export class AgentSession {
 	private _airaBrowser: AiraBrowserHandle | undefined;
 	private _airaVerification: AiraVerificationHandle | undefined;
 	private _airaOrchestration: AiraOrchestrationHandle | undefined;
+	private _airaGoal: AiraGoalHandle | undefined;
 	private _extensionUIContext?: ExtensionUIContext;
 	private _extensionMode: ExtensionMode = "print";
 	private _extensionCommandContextActions?: ExtensionCommandContextActions;
@@ -502,6 +521,51 @@ export class AgentSession {
 			settings: () => this.settingsManager.getOrchestrationSettings(),
 			resolveRuntime: (request) => this.resolveAiraChildRuntime(request),
 			executionManager: this._airaExecution,
+		});
+
+		// Aira goal seam (Phase 10): the session owns the native Goal Runtime.
+		// Created AFTER the verification manager so its completion-boundary
+		// handler observes the verifier's settled snapshot (agent listeners
+		// are awaited in subscription order). Never launches anything at
+		// startup; recovery of a persisted goal for THIS session id happens
+		// lazily inside the manager (running-class goals recover as paused).
+		this._airaGoal = createAiraGoalManager(this._airaSessionState, {
+			...config.airaGoalOptions,
+			cwd: this._cwd,
+			sessionId: this.sessionId,
+			startReason: this._sessionStartEvent.reason,
+			settings: () => this.settingsManager.getGoalSettings(),
+			verification: this._airaVerification,
+			execution: this._airaExecution,
+			// Subscribed AFTER the verification manager so completion-boundary
+			// listeners run in verification-first order; agent_end carries the
+			// host's willRetry truth so the goal never reacts to a retried run.
+			agentEvents: (listener) =>
+				this.agent.subscribe((event) => {
+					if (event.type === "agent_end") {
+						return listener({
+							...(event as Extract<AgentEvent, { type: "agent_end" }>),
+							willRetry: this._willRetryAfterAgentEnd(event),
+						} as Extract<AgentEvent, { type: "agent_end" }> & { willRetry?: boolean });
+					}
+					return listener(event);
+				}),
+			usageSeam: () => {
+				const stats = this.getSessionStats();
+				return {
+					tokens: stats.tokens,
+					cost: stats.cost,
+				};
+			},
+			hasPendingMessages: () => this._steeringMessages.length > 0 || this._followUpMessages.length > 0,
+			sendContinuation: (text) => this.sendAiraGoalContinuation(text),
+			abortRun: () => {
+				try {
+					this.agent.abort();
+				} catch {
+					// best effort — the goal must never break the host
+				}
+			},
 		});
 
 		// Always subscribe to agent events for internal handling
@@ -995,6 +1059,9 @@ export class AgentSession {
 		// Aira orchestration seam: abort every child run (model streams, timers)
 		// and release listeners. No orphan children after session teardown.
 		void this._airaOrchestration?.dispose();
+		// Aira goal seam: persist an active goal as paused (interrupted) and
+		// release listeners. The root session's teardown aborts owned runs.
+		void this._airaGoal?.dispose();
 		// Aira intelligence seam: shut down providers (language servers, timers).
 		void this._airaIntelligence?.dispose();
 		// Aira lifecycle seam: release canonical state, ownership-checked so a
@@ -1052,6 +1119,11 @@ export class AgentSession {
 		return this._airaExecution;
 	}
 
+	/** Canonical goal-runtime handle (Phase 10; tests and host diagnostics). */
+	get airaGoal(): AiraGoalHandle | undefined {
+		return this._airaGoal;
+	}
+
 	/** Aira browser runtime for this session (tests and host). */
 	get airaBrowser(): AiraBrowserHandle | undefined {
 		return this._airaBrowser;
@@ -1066,7 +1138,6 @@ export class AgentSession {
 	get airaOrchestration(): AiraOrchestrationHandle | undefined {
 		return this._airaOrchestration;
 	}
-
 	/** Resolve the fresh-context verifier runtime (current model + auth). */
 	private async resolveAiraVerifierRuntime(): Promise<AiraVerifierRuntime | undefined> {
 		const model = this.model;
@@ -3588,6 +3659,30 @@ export class AgentSession {
 		}
 
 		return result;
+	}
+
+	/**
+	 * Goal continuation seam (Phase 10): start a goal-owned turn as a
+	 * display:false custom message. When the agent is streaming it queues as
+	 * a follow-up (drained by the post-run loop); when idle it triggers a new
+	 * run directly. Returns false when the host could not send it — the goal
+	 * halts truthfully instead of pretending autonomy.
+	 */
+	private async sendAiraGoalContinuation(text: string): Promise<boolean> {
+		try {
+			await this.sendCustomMessage(
+				{
+					customType: AIRA_GOAL_CONTINUATION_TYPE,
+					content: text,
+					display: false,
+					details: { source: "goal" },
+				},
+				{ triggerTurn: true, deliverAs: "followUp" },
+			);
+			return true;
+		} catch {
+			return false;
+		}
 	}
 
 	/**

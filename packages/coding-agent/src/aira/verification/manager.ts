@@ -441,6 +441,7 @@ export class AiraVerificationManager implements AiraVerificationHandle {
 				missingEvidence: verdict.missingEvidence,
 				scopeAssessment: verdict.scopeAssessment,
 				confidence: verdict.confidence,
+				tokenUsage: outcome.tokenUsage,
 				startedAt,
 				completedAt,
 				stale: false,

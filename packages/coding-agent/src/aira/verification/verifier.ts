@@ -26,6 +26,7 @@ import { createFindTool } from "../../core/tools/find.ts";
 import { createGrepTool } from "../../core/tools/grep.ts";
 import { createLsTool } from "../../core/tools/ls.ts";
 import { createReadTool } from "../../core/tools/read.ts";
+import type { AiraChildTokenUsage } from "../orchestration/types.ts";
 import { VERIFIER_SYSTEM_PROMPT } from "./prompt.ts";
 import {
 	normalizeEvidenceItems,
@@ -62,7 +63,9 @@ export interface AiraVerifierModelVerdict {
 	confidence: "low" | "medium" | "high";
 }
 
-export type AiraVerifierOutcome = { ok: true; verdict: AiraVerifierModelVerdict } | { ok: false; driverError: string };
+export type AiraVerifierOutcome =
+	| { ok: true; verdict: AiraVerifierModelVerdict; tokenUsage?: AiraChildTokenUsage }
+	| { ok: false; driverError: string };
 
 export interface AiraVerifierOptions {
 	cwd: string;
@@ -112,12 +115,28 @@ export async function runAiraVerifier(
 		},
 	];
 
+	let totalUsage: AiraChildTokenUsage | undefined;
+	const accumulateUsage = (message: AssistantMessage): void => {
+		const usage = message.usage;
+		if (!usage || typeof usage.totalTokens !== "number") {
+			return;
+		}
+		totalUsage = {
+			input: (totalUsage?.input ?? 0) + (usage.input ?? 0),
+			output: (totalUsage?.output ?? 0) + (usage.output ?? 0),
+			cacheRead: (totalUsage?.cacheRead ?? 0) + (usage.cacheRead ?? 0),
+			cacheWrite: (totalUsage?.cacheWrite ?? 0) + (usage.cacheWrite ?? 0),
+			total: (totalUsage?.total ?? 0) + (usage.totalTokens ?? 0),
+		};
+	};
+
 	try {
 		let assistant = await raceWithTimeout(
 			callStream(streamFn, model, messages, tools, baseOptions, signal),
 			timeout,
 			signal,
 		);
+		accumulateUsage(assistant);
 		let round = 0;
 		while (hasToolCalls(assistant) && round < maxRounds) {
 			round += 1;
@@ -135,6 +154,7 @@ export async function runAiraVerifier(
 				timeout,
 				signal,
 			);
+			accumulateUsage(assistant);
 		}
 		if (hasToolCalls(assistant)) {
 			return { ok: false, driverError: "verifier exceeded its read-only tool budget" };
@@ -146,7 +166,11 @@ export async function runAiraVerifier(
 		if (!parsed) {
 			return { ok: false, driverError: "verifier returned no valid structured verdict" };
 		}
-		return { ok: true, verdict: normalizeVerifierVerdict(parsed) };
+		return {
+			ok: true,
+			verdict: normalizeVerifierVerdict(parsed),
+			...(totalUsage !== undefined ? { tokenUsage: totalUsage } : {}),
+		};
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		return {

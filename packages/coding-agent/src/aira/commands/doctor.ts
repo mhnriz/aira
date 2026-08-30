@@ -273,6 +273,32 @@ export function buildAiraDoctorReport(state: AiraSessionState | undefined): Aira
 		});
 	}
 
+	// 13. Goal runtime: canonical settings + snapshot + persistence health.
+	// Health reporting NEVER promotes a goal (no model tokens) and never
+	// changes goal state; a disabled feature reports truthfully. Goal runtime
+	// failure must not break the host.
+	const goal = state?.goal;
+	if (!goal) {
+		checks.push({
+			name: "goal",
+			pass: false,
+			detail: "no goal snapshot (manager wiring)",
+		});
+	} else {
+		const persistenceLine =
+			goal.persistence.status === "failed"
+				? ` · persistence FAILED${goal.persistence.error ? `: ${goal.persistence.error}` : ""}`
+				: ` · persistence ${goal.persistence.status}`;
+		const usageLine =
+			goal.usage.consumedTokens !== undefined ? ` · ${goal.usage.consumedTokens} tokens consumed` : "";
+		const waitingLine = goal.waiting ? ` · waiting: ${goal.waiting.reason}` : "";
+		checks.push({
+			name: "goal",
+			pass: true,
+			detail: `${goal.enabled ? "enabled" : "disabled"} · auto ${goal.auto} · ${goal.status}${goal.objective ? ` · "${goal.objective}"` : ""} · round ${goal.round}/${goal.maxRounds} · max rounds ${goal.maxRounds}${goal.budget.tokens !== undefined ? ` · token budget ${goal.budget.tokens}` : ""}${goal.budget.maxDurationMs !== undefined ? ` · duration ${Math.round(goal.budget.maxDurationMs / 60000)}m` : ""}${usageLine}${waitingLine}${persistenceLine}`,
+		});
+	}
+
 	return { product: "Aira doctor", home: displayPathUnderHome(home), checks };
 }
 

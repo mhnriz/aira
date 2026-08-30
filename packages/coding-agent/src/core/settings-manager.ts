@@ -159,6 +159,14 @@ export interface Settings {
 		model?: string;
 		timeoutMs?: number;
 	};
+	/** Native Aira durable-goal controls (Phase 10; canonical settings owner). */
+	goals?: {
+		enabled?: boolean;
+		auto?: "off" | "smart" | "always";
+		maxRounds?: number;
+		tokenBudget?: number;
+		maxDurationMs?: number;
+	};
 }
 
 function isMergeableObject(value: unknown): value is Record<string, unknown> {
@@ -1259,6 +1267,59 @@ export class SettingsManager {
 	}): void {
 		this.globalSettings.verification = settings;
 		this.markModified("verification");
+		this.save();
+	}
+
+	// Native Aira goal settings (Phase 10). Same canonical store; invalid
+	// stored values normalize to conservative defaults.
+	getGoalSettings(): {
+		enabled: boolean;
+		auto: "off" | "smart" | "always";
+		maxRounds: number;
+		tokenBudget: number | undefined;
+		maxDurationMs: number | undefined;
+	} {
+		const goals = this.settings.goals;
+		if (!goals || typeof goals !== "object") {
+			return { enabled: true, auto: "smart", maxRounds: 4, tokenBudget: undefined, maxDurationMs: undefined };
+		}
+		const auto = goals.auto === "off" || goals.auto === "always" ? goals.auto : "smart";
+		const rawRounds = goals.maxRounds;
+		const maxRounds =
+			typeof rawRounds === "number" && Number.isInteger(rawRounds) && rawRounds >= 1 && rawRounds <= 20
+				? rawRounds
+				: 4;
+		const rawTokens = goals.tokenBudget;
+		const tokenBudget =
+			typeof rawTokens === "number" && Number.isFinite(rawTokens) && rawTokens >= 1_000 && rawTokens <= 100_000_000
+				? Math.floor(rawTokens)
+				: undefined;
+		const rawDuration = goals.maxDurationMs;
+		const maxDurationMs =
+			typeof rawDuration === "number" &&
+			Number.isFinite(rawDuration) &&
+			rawDuration >= 60_000 &&
+			rawDuration <= 24 * 60 * 60 * 1000
+				? Math.floor(rawDuration)
+				: undefined;
+		return {
+			enabled: goals.enabled === undefined ? true : goals.enabled === true,
+			auto,
+			maxRounds,
+			tokenBudget,
+			maxDurationMs,
+		};
+	}
+
+	setGoalSettings(settings: {
+		enabled: boolean;
+		auto: "off" | "smart" | "always";
+		maxRounds: number;
+		tokenBudget: number | undefined;
+		maxDurationMs: number | undefined;
+	}): void {
+		this.globalSettings.goals = settings;
+		this.markModified("goals");
 		this.save();
 	}
 

@@ -12,6 +12,7 @@ export * from "./commands/import.ts";
 export * from "./commands/mode.ts";
 export * from "./commands/status.ts";
 export * from "./execution/index.ts";
+export * from "./goal/index.ts";
 export * from "./intelligence/index.ts";
 export * from "./lifecycle.ts";
 export * from "./meta.ts";

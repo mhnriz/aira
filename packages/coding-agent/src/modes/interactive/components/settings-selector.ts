@@ -61,6 +61,19 @@ function orchestrationSettingsOf(config: SettingsConfig): SettingsConfig["orches
 	);
 }
 
+/** Older hosts/tests may omit goalSettings; defaults keep the selector stable. */
+function goalSettingsOf(config: SettingsConfig): SettingsConfig["goalSettings"] {
+	return (
+		config.goalSettings ?? {
+			enabled: true,
+			auto: "smart",
+			maxRounds: 4,
+			tokenBudget: undefined,
+			maxDurationMs: undefined,
+		}
+	);
+}
+
 const THINKING_DESCRIPTIONS: Record<ThinkingLevel, string> = {
 	off: "No reasoning",
 	minimal: "Very brief reasoning (~1k tokens)",
@@ -137,6 +150,13 @@ export interface SettingsConfig {
 		model: string;
 		timeoutMs: number;
 	};
+	goalSettings: {
+		enabled: boolean;
+		auto: "off" | "smart" | "always";
+		maxRounds: number;
+		tokenBudget: number | undefined;
+		maxDurationMs: number | undefined;
+	};
 }
 
 export interface SettingsCallbacks {
@@ -189,6 +209,13 @@ export interface SettingsCallbacks {
 		maxParallel: number;
 		model: string;
 		timeoutMs: number;
+	}) => void;
+	onGoalSettingsChange: (settings: {
+		enabled: boolean;
+		auto: "off" | "smart" | "always";
+		maxRounds: number;
+		tokenBudget: number | undefined;
+		maxDurationMs: number | undefined;
 	}) => void;
 	onCancel: () => void;
 }
@@ -795,6 +822,131 @@ class AiraOrchestrationSubmenu extends Container {
 }
 
 /**
+ * Goal settings submenu (Phase 10): enable the durable Goal runtime, choose
+ * automatic promotion (off/smart/always), bound implementation rounds, and
+ * set optional token/duration budgets. Conservative defaults; persisted
+ * through the canonical settings owner (`/settings` → `goals.*`).
+ */
+class AiraGoalSubmenu extends Container {
+	private settingsList: SettingsList;
+	private state: {
+		enabled: boolean;
+		auto: "off" | "smart" | "always";
+		maxRounds: number;
+		tokenBudget: number | undefined;
+		maxDurationMs: number | undefined;
+	};
+
+	constructor(
+		initial: {
+			enabled: boolean;
+			auto: "off" | "smart" | "always";
+			maxRounds: number;
+			tokenBudget: number | undefined;
+			maxDurationMs: number | undefined;
+		},
+		onChange: (settings: {
+			enabled: boolean;
+			auto: "off" | "smart" | "always";
+			maxRounds: number;
+			tokenBudget: number | undefined;
+			maxDurationMs: number | undefined;
+		}) => void,
+		onCancel: () => void,
+	) {
+		super();
+
+		this.state = { ...initial };
+
+		const items: SettingItem[] = [
+			{
+				id: "goal-enabled",
+				label: "Enable goals",
+				description: "Durable goals may run (autonomous continuation consumes model tokens only when it continues)",
+				currentValue: this.state.enabled ? "true" : "false",
+				values: ["true", "false"],
+			},
+			{
+				id: "goal-auto",
+				label: "Automatic goals",
+				description:
+					"off: never create goals automatically (/goal create still works). smart: durable goals for non-trivial objectives, trivial prompts stay plain turns (default). always: every prompt becomes a goal",
+				currentValue: this.state.auto,
+				values: ["off", "smart", "always"],
+			},
+			{
+				id: "goal-max-rounds",
+				label: "Max rounds",
+				description:
+					"Maximum implementation rounds including the initial one (1-20; default 4). Continuation stops rather than thrashes",
+				currentValue: String(this.state.maxRounds),
+				values: ["1", "2", "3", "4", "6", "8", "12", "20"],
+			},
+			{
+				id: "goal-token-budget",
+				label: "Token budget",
+				description:
+					"Optional aggregate token bound (session-attributed + children + verifier). unset: no token bound (default)",
+				currentValue: this.state.tokenBudget === undefined ? "unset" : String(this.state.tokenBudget),
+				values: ["unset", "50000", "100000", "200000", "500000", "1000000"],
+			},
+			{
+				id: "goal-max-duration",
+				label: "Max duration",
+				description: "Optional elapsed-time bound for the goal. unset: no time bound (default)",
+				currentValue: this.state.maxDurationMs === undefined ? "unset" : String(this.state.maxDurationMs),
+				values: ["unset", "600000", "1800000", "3600000", "7200000"],
+			},
+		];
+
+		this.settingsList = new SettingsList(
+			items,
+			Math.min(items.length, 10),
+			getSettingsListTheme(),
+			(id, newValue) => {
+				switch (id) {
+					case "goal-enabled":
+						this.state = { ...this.state, enabled: newValue === "true" };
+						onChange(this.state);
+						break;
+					case "goal-auto":
+						if (newValue === "off" || newValue === "smart" || newValue === "always") {
+							this.state = { ...this.state, auto: newValue };
+							onChange(this.state);
+						}
+						break;
+					case "goal-max-rounds":
+						this.state = { ...this.state, maxRounds: Number.parseInt(newValue, 10) };
+						onChange(this.state);
+						break;
+					case "goal-token-budget":
+						this.state = {
+							...this.state,
+							tokenBudget: newValue === "unset" ? undefined : Number.parseInt(newValue, 10),
+						};
+						onChange(this.state);
+						break;
+					case "goal-max-duration":
+						this.state = {
+							...this.state,
+							maxDurationMs: newValue === "unset" ? undefined : Number.parseInt(newValue, 10),
+						};
+						onChange(this.state);
+						break;
+				}
+			},
+			onCancel,
+		);
+
+		this.addChild(this.settingsList);
+	}
+
+	handleInput(data: string): void {
+		this.settingsList.handleInput(data);
+	}
+}
+
+/**
  * Main settings selector component.
  */
 export class SettingsSelectorComponent extends Container {
@@ -1094,6 +1246,19 @@ export class SettingsSelectorComponent extends Container {
 					new AiraOrchestrationSubmenu(
 						orchestrationSettingsOf(config),
 						(settings) => callbacks.onOrchestrationSettingsChange(settings),
+						() => done(),
+					),
+			},
+			{
+				id: "goals",
+				label: "Aira goals",
+				description:
+					"Native durable goals: enable, automatic promotion, max rounds, optional token/duration budgets",
+				currentValue: `${goalSettingsOf(config).auto} · ${goalSettingsOf(config).enabled ? "on" : "off"}`,
+				submenu: (_currentValue, done) =>
+					new AiraGoalSubmenu(
+						goalSettingsOf(config),
+						(settings) => callbacks.onGoalSettingsChange(settings),
 						() => done(),
 					),
 			},

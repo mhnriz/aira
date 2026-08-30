@@ -9,9 +9,45 @@ import { initialAiraIntelligenceStatus } from "../../../src/aira/intelligence/st
 import { initialAiraOrchestrationStatus } from "../../../src/aira/orchestration/status.ts";
 import { resolveAiraProjectInto } from "../../../src/aira/project/index.ts";
 import { acquireAiraSessionState, disposeAiraSessionState } from "../../../src/aira/state.ts";
+import type { AiraGoalSnapshot } from "../../../src/aira/goal/types.ts";
 import { initialAiraVerificationStatus } from "../../../src/aira/verification/types.ts";
 
 const expectedHome = join(homedir(), ".aira").replace(homedir(), "~");
+
+/** Honest idle goal snapshot (what the armed goal manager publishes at arm time). */
+function idleGoalSnapshot(mode: string = "build"): AiraGoalSnapshot {
+	return {
+		enabled: true,
+		auto: "smart" as const,
+		status: "idle" as const,
+		id: undefined,
+		objective: undefined,
+		round: 0,
+		maxRounds: 4,
+		startedAt: undefined,
+		updatedAt: Date.now(),
+		completedAt: undefined,
+		stopReason: undefined,
+		waiting: undefined,
+		budget: { tokens: undefined, maxDurationMs: undefined },
+		usage: { sources: [] },
+		revision: undefined,
+		tasks: { completed: 0, active: 0 },
+		verification: {
+			verdict: undefined,
+			stale: false,
+			summary: undefined,
+			missingEvidence: [],
+			lastError: undefined,
+		},
+		staleCompletion: false,
+		needsUserInput: false,
+		mode,
+		lastEvent: undefined,
+		persistence: { enabled: true, status: "unavailable", path: undefined, error: undefined },
+		summary: "idle",
+	};
+}
 
 /** Create a throwaway Node+Git project dir so project resolution passes. */
 function makeNodeProject(): string {
@@ -48,10 +84,13 @@ describe("Aira /doctor command (Phase 4 scope)", () => {
 		// A real session arms the orchestration manager which publishes a
 		// snapshot; a bare acquired state has none, so publish the honest idle one.
 		state.orchestration = initialAiraOrchestrationStatus(true, 2);
+		// A real session arms the goal manager which publishes a snapshot; a
+		// bare acquired state has none, so publish the honest idle one.
+		state.goal = idleGoalSnapshot(state.mode);
 		const report = buildAiraDoctorReport(state);
 
 		expect(report.home).toBe(expectedHome);
-		expect(report.checks.length).toBe(12);
+		expect(report.checks.length).toBe(13);
 		for (const check of report.checks) {
 			expect(check.pass, `${check.name} should pass`).toBe(true);
 		}
@@ -207,10 +246,11 @@ describe("Aira /doctor command (Phase 4 scope)", () => {
 		state.browser = initialAiraBrowserStatus();
 		state.verification = initialAiraVerificationStatus({ enabled: true, auto: "smart", contextBudget: "compact" });
 		state.orchestration = initialAiraOrchestrationStatus(true, 2);
+		state.goal = idleGoalSnapshot(state.mode);
 		const text = formatAiraDoctorReport(buildAiraDoctorReport(state));
 
 		expect(text).toContain(`home: ${expectedHome}`);
-		expect(text).toContain("summary: 12/12 checks passed");
+		expect(text).toContain("summary: 13/13 checks passed");
 		expect(text).toContain("ok  home:");
 		expect(text).toContain("ok  browser: availability probe pending");
 		disposeAiraSessionState("doctor-5", state);
