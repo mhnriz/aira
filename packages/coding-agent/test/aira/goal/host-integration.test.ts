@@ -20,11 +20,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai/compat";
 import { afterEach, describe, expect, it } from "vitest";
-import type { AgentSessionEvent } from "../../../src/core/agent-session.ts";
 import { buildAiraDoctorReport } from "../../../src/aira/commands/doctor.ts";
 import { buildAiraStatusReport, formatAiraStatusReport } from "../../../src/aira/commands/status.ts";
 import { formatAiraGoalReport } from "../../../src/aira/goal/status.ts";
 import type { AiraVerifierOutcome } from "../../../src/aira/verification/verifier.ts";
+import type { AgentSessionEvent } from "../../../src/core/agent-session.ts";
 import { createHarness, type Harness } from "../../suite/harness.ts";
 
 const PASS_OUTCOME: AiraVerifierOutcome = {
@@ -223,10 +223,9 @@ describe("Aira goal runtime through the host (Phase 10)", () => {
 				(event.message as { customType?: string }).customType === "aira.goal.continuation",
 		);
 		expect(continuationEvents).toHaveLength(1);
-		const continuationMessage = (continuationEvents[0] as Extract<
-			AgentSessionEvent,
-			{ type: "message_start"; message: unknown }
-		>).message;
+		const continuationMessage = (
+			continuationEvents[0] as Extract<AgentSessionEvent, { type: "message_start"; message: unknown }>
+		).message;
 		const text = JSON.stringify(continuationMessage);
 		expect(text).toContain("AUTONOMOUS GOAL CONTINUATION");
 		expect(text.toLowerCase()).not.toContain("user:");

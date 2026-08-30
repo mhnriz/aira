@@ -5,11 +5,11 @@ import { describe, expect, it } from "vitest";
 import { initialAiraBrowserStatus } from "../../../src/aira/browser/status.ts";
 import { buildAiraDoctorReport, formatAiraDoctorReport } from "../../../src/aira/commands/doctor.ts";
 import { initialAiraExecutionStatus } from "../../../src/aira/execution/status.ts";
+import type { AiraGoalSnapshot } from "../../../src/aira/goal/types.ts";
 import { initialAiraIntelligenceStatus } from "../../../src/aira/intelligence/status.ts";
 import { initialAiraOrchestrationStatus } from "../../../src/aira/orchestration/status.ts";
 import { resolveAiraProjectInto } from "../../../src/aira/project/index.ts";
 import { acquireAiraSessionState, disposeAiraSessionState } from "../../../src/aira/state.ts";
-import type { AiraGoalSnapshot } from "../../../src/aira/goal/types.ts";
 import { initialAiraVerificationStatus } from "../../../src/aira/verification/types.ts";
 
 const expectedHome = join(homedir(), ".aira").replace(homedir(), "~");
