@@ -224,3 +224,63 @@ phase; Phase 9 implemented only the underlying snapshot/event seam,
 settings, the `/agents` inspection/cancel surface, and the restrained
 `/status` (e.g. `orchestration: 2 running · 1 queued`) and `/doctor`
 projections.
+
+---
+
+## B-005 — Goal Runtime state in the native bottom bar and Engineering Context pane
+
+**Status:** backlog (future Aira UI overhaul; NOT part of Phase 10)
+
+**Problem:** durable goal state is currently visible through `/goal`,
+`/doctor`, `/status`, and model-facing tools only. The future Workbench
+should render it from canonical state with zero model tokens and without
+parsing any task logs.
+
+**Data contract already available (Phase 10):** `AiraSessionState.goal`
+(`AiraGoalSnapshot`) — enabled, auto, status (idle/active/verifying/
+repairing/waiting/paused/completed/budget-limited/cancelled/error), round,
+tasksCompleted, tasksTotal, tokensUsed, durationMs, stopReason,
+blockReason, createdAt, updatedAt. Published on state transitions;
+`manager.subscribe()` is the event seam.
+
+**Desired projection — Engineering Context pane:**
+
+```text
+GOAL
+─────────────────────
+Status       ● active
+Round        2
+Tasks        3 / 6
+Verify       waiting
+Tokens       41k / 100k
+Elapsed      8m 14s
+
+Current
+Implement middleware
+
+Blocker
+2 failing integration tests
+```
+
+And eventually for `waiting` states:
+```text
+Goal waiting for input
+Choose authentication strategy
+```
+
+**Desired projection — bottom bar segment (compact):**
+
+```text
+◈ BUILD  │  GOAL 3/6  │  AGENTS 2  │  VERIFY …
+◈ BUILD  │  GOAL R2   │  VERIFY ✕ 1
+◈ BUILD  │  GOAL WAIT │  input needed
+◈ BUILD  │  GOAL ✓
+```
+
+**Projection rules:**
+- The footer/Workbench derive from the canonical goal snapshot only, never by evaluating the model or running child agents.
+- Task completion projections are driven by the Task Graph (Phase 9) via the Goal snapshot; the Goal snapshot does not maintain a parallel task list.
+- A Goal `waiting` state acts as a seam for the future structured Q&A / permission mode pipelines.
+- Showing Goal state must cost zero model tokens.
+
+**Explicitly deferred:** the full Workbench/UI overhaul remains a later phase; Phase 10 implemented only the underlying snapshot/event seam, settings, the `/goal` control surface, and the restrained `/status` and `/doctor` projections.

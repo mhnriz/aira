@@ -3,6 +3,13 @@
 ## [Unreleased]
 
 ### Added
+- **Aira**: Native Durable Goal Runtime layer with bounded autonomous continuation (evaluate -> FAIL -> repair -> evaluate).
+- **Aira**: Goal lifecycle state machine (`idle`, `active`, `verifying`, `repairing`, `waiting`, `paused`, `completed`, `budget-limited`, `cancelled`, `error`).
+- **Aira**: Goal settings (`goals.enabled`, `goals.auto`, `goals.maxRounds`, `goals.tokenBudget`, `goals.maxDurationMs`).
+- **Aira**: Commands `/goal`, `/goal status`, `/goal stop`, `/goal resume`, `/goal cancel`, `/goal clear`.
+
+
+### Added
 
 - Added the native Aira orchestration subsystem (Phase 9): a per-session orchestration manager (`src/aira/orchestration/`, ADR-027) that runs ISOLATED child agents as bounded fresh-context model invocations through the session's stream function — never as subprocesses, never with the parent conversation. Each child receives an explicit context envelope (task ≤ 4000 chars, role framing, project root + profile summary, ≤ 50 file references, ≤ 8k chars parent-selected context, execution mode, structured result contract) and a mode-gated, capability-derived tool set (ADR-022 semantic tables; PLAN collapses every child to read-only + diagnostic tools). Five lightweight roles (explore/research/review are read-only; test adds managed execution; implement adds workspace writes) influence prompt framing, capabilities, and result emphasis — no agent catalog. Children never receive browser, orchestration (root-only delegation — children cannot spawn children), or unknown/extension tools. The child result contract is one bounded JSON object (status/summary/findings/evidence/relevantFiles/changedFiles/tests/errors) parsed and normalized with hard limits; the parent consumes results, not transcripts.
 

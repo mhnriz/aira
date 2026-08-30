@@ -569,3 +569,19 @@ Canonical Aira paths remain under `~/.aira/` — `~/.aira/agent` for the Pi-comp
 16. The existing `engineering-loop` is not part of this architecture.
 17. Development uses frequent local Git commits; publishing/pushing is a separate action.
 18. Intelligence is a native host service: activation comes from the canonical project profile, context is a bounded budget, and degraded providers fall back to plain Pi behavior (ADR-023).
+
+## 1.10. Goal Runtime (Phase 10)
+
+The native Goal Runtime provides bounded autonomous continuation (evaluate -> FAIL -> repair -> evaluate) for long-running engineering objectives. 
+
+### Core Principles
+- **Coordinator, Not Owner**: Goal does not duplicate execution, verification, or task decomposition. It coordinates existing Phase 6 (Execution), Phase 7 (Browser), Phase 8 (Verification), and Phase 9 (Task Graph) services.
+- **Bounded Continuation**: Every goal is constrained by limits on rounds (`maxRounds`), token budget (`tokenBudget`), or execution time (`maxDurationMs`). No-progress loops (identical failures across rounds) are aggressively detected to block infinite thrashing.
+- **State Machine**: Explicit validated lifecycle: `idle`, `active`, `verifying`, `repairing`, `waiting`, `paused`, `completed`, `budget-limited`, `cancelled`, `error`.
+- **Ownership (ADR-024, ADR-028)**: A single canonical Goal Runtime manager per `AgentSession`. It does not bleed across to unrelated or forked sessions. State persists into the canonical machine-readable cache to survive restarts as `paused`.
+- **Read-Only / Token-Free Projection**: Goal state projection (via `AiraSessionState.goal`) must require zero token cost, supporting the future Workbench UI (see B-005).
+
+### Inter-System Seams
+- **Verification Authority**: Phase 8 Verifier dictates the completion boundary. `PASS` marks completion; `FAIL` sparks bounded repair; `INCONCLUSIVE` triggers evidence acquisition or wait states.
+- **Task Graph Dependency**: Goal does not own a secondary todo list. It leverages the Phase 9 task graph to project tasks completed vs. total.
+- **User Steering**: Pending user messages defer continuation. Explicit user steer messages resume paused or waiting goals.

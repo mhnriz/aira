@@ -47,9 +47,8 @@ Stopping point / next phase
 | 6 — Execution Runtime | ✅ done 2026-08-28 | [PHASE_6_EXECUTION_RUNTIME.md](PHASE_6_EXECUTION_RUNTIME.md) | native per-session process runtime: managed processes, bounded log capture, cross-platform termination, project-aware test/build/check/dev primitives, process tools + `/processes` |
 | 7 — Browser Runtime | ✅ done 2026-08-28 | [PHASE_7_BROWSER_RUNTIME.md](PHASE_7_BROWSER_RUNTIME.md) | native browser runtime: isolated Chromium provider, bounded semantic observation + refs, console/network evidence, ambient context off/auto/on with budgets, canonical snapshot, settings, PLAN semantics |
 | 8 — Independent Verification | ✅ done 2026-08-29 | [PHASE_8_INDEPENDENT_VERIFICATION.md](PHASE_8_INDEPENDENT_VERIFICATION.md) | native verifier: fresh-context verification at the completion boundary, requirement-driven PASS/FAIL/INCONCLUSIVE verdicts, bounded evidence from repository/language/execution/browser, revision dedupe + freshness invalidation, canonical token-free snapshot, settings, /verify |
-| 8 — Independent Verification | — | — | — |
-| 9 — Task Graph and Delegation | — | — | — |
-| 10 — Durable Autonomous Work | — | — | — |
+| 9 — Task Graph and Delegation | ✅ done | [PHASE_9_NATIVE_ORCHESTRATION.md](PHASE_9_NATIVE_ORCHESTRATION.md) | root-owned orchestration, strict child isolation, explicit bounded envelopes, delegation tools |
+| 10 — Durable Autonomous Work | ✅ done | [PHASE_10_DURABLE_GOALS.md](PHASE_10_DURABLE_GOALS.md) | durable goals, bounded continuation, lifecycle machine, UI-ready projection |
 | 11 — Compaction and Knowledge | — | — | — |
 | 12 — Policy, Hooks, and Trust | — | — | — |
 | 13 — Pi Compatibility Hardening | — | — | — |

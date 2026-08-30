@@ -648,3 +648,49 @@ bounded, concurrency-limited, and never automatic for trivial work.
   place), richer model routing behind the resolver seam, browser-capable
   children behind an explicit capability flag, and durable audit behind
   canonical storage (`node:sqlite` upgrade path remains available).
+## ADR-028 — The Goal Runtime is a native coordinator of existing bounded services, never an unbounded engineering loop
+
+**Status:** Accepted
+
+### Decision
+
+- The Goal Runtime is a native per-session manager (`src/aira/goal/Manager`): one canonical goal per session (ADR-024 pattern), armed at construction, disposed with the session, projecting the token-free, UI-ready `AiraSessionState.goal` snapshot (ADR-005).
+- Goal lifecycle is explicit and machine-readable: `idle`, `active`, `verifying`, `repairing`, `waiting`, `paused`, `completed`, `budget-limited`, `cancelled`, `error`. A validated state machine (`src/aira/goal/StateMachine`) rejects invalid transitions.
+- The Runtime is a coordinator, not an owner of implementation mechanics. It connects Phase 6 (Execution evidence), Phase 7 (Browser evidence), Phase 8 (Verification contract), and Phase 9 (Task decomposition). It does not create Goal-specific verifiers, test runners, task lists, or intelligence caches.
+- The Phase 8 Verifier owns the completion boundary. `PASS` completes the Goal. `FAIL` initiates a bounded repair continuation (objective, verification contract, blocking findings, change context). `INCONCLUSIVE` triggers a bounded evidence acquisition attempt (e.g. running unrun tests); if evidence cannot safely be acquired, the Goal falls back to `waiting`.
+- The Phase 9 task graph remains the sole decomposition owner. The Goal Runtime merely projects the task graph progression (completed vs total) into the goal snapshot. No duplicate `GoalTodos` array exists.
+- The user retains steering authority. Any user message suspends an autonomous continuation loop. Sending a user message while a goal is `paused` or `waiting` resumes it.
+
+### Rationale
+
+Phase 10 studied `pi-maestro-flow` and `qi-harness` as laboratory references. Ideas adopted: explicit objective tracking, bounded evaluation/repair loops, explicit wait boundaries, and token-free progress projection. Ideas deliberately REJECTED: independent engineering loops, recursive child agents driving the objective, hidden extensions, full transcript inheritance for child agents, hallucinating `PASS` without evidence, and uncontrolled token usage. The Goal Runtime must be a first-class Aira service that coordinates existing native services (Verification, Execution, Browsing, Orchestration) rather than reinventing them.
+
+### Consequences
+
+- `AiraSessionState.goal` is a new canonical snapshot field.
+- The Goal Runtime handles autonomous continuation directly within the `AgentSession` stream without recursive agent instantiation.
+- A future Workbench UI can project Goal state without requiring a model invocation.
+- The `WAITING` state explicitly accommodates future permission-mode blocks or structured Q&A boundaries.
+
+## ADR-029 — Goal Continuation Bounds, Settings, and Persistence
+
+**Status:** Accepted
+
+### Decision
+
+- Autonomous continuation is strictly bounded. Limits: `maxRounds` (default 4), optional `tokenBudget`, optional `maxDurationMs`. Exceeding a limit transitions the goal to `budget-limited`.
+- No-progress and identical-failure loops are explicitly detected: if the task revision is identical across rounds and the blocking findings remain the same, the goal transitions to `error` / `budget-limited` instead of thrashing.
+- Re-verification of a completed goal after project edits marks the verification as stale; `completed` is a truthful representation of fresh verification.
+- Goal state persists across restarts into the canonical cache (keyed by session ID). Running-class goals recover as `paused` (interrupted) and require manual or steered resumption. Stale persisted state is cleared upon explicit `/goal clear`.
+- New or forked sessions do NOT inherit active goals.
+- Bounded manual surface: `/goal` commands (`status`, `stop`, `resume`, `cancel`, `clear`), canonical `/settings` integration (`goals.enabled`, `goals.auto`, `goals.maxRounds`), and `goals.auto = smart` allows the runtime to skip goal creation for trivial tasks.
+
+### Rationale
+
+Goals have the highest potential for runaway costs (tokens, compute time). Strong bounding mechanisms (budgets, no-progress detection) are non-negotiable. Persistence is required for long-running workflows, but only bounded machine-readable state is persisted, not massive child conversation transcripts. The `smart` auto setting respects the reality that single-line typo fixes should not spin up a heavy multi-round goal apparatus.
+
+### Consequences
+
+- Goals require careful state management across the session lifecycle, especially regarding session interruption.
+- Verifier token usage is explicitly tracked and attributed to the goal's token budget for truthful accounting.
+- `AiraSessionEvent` must include goal continuation hooks to allow proper host integration and test harness assertions.
