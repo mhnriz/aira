@@ -129,6 +129,7 @@ export interface WorkbenchFooterSegment {
 /** Stable footer segment ids. */
 export type WorkbenchFooterSegmentId =
 	| "mode"
+	| "usage"
 	| "interaction"
 	| "finding"
 	| "lsp"

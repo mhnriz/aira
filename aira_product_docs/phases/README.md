@@ -50,7 +50,8 @@ Stopping point / next phase
 | 9 — Task Graph and Delegation | ✅ done | [PHASE_9_NATIVE_ORCHESTRATION.md](PHASE_9_NATIVE_ORCHESTRATION.md) | root-owned orchestration, strict child isolation, explicit bounded envelopes, delegation tools |
 | 10 — Durable Autonomous Work | ✅ done | [PHASE_10_DURABLE_GOALS.md](PHASE_10_DURABLE_GOALS.md) | durable goals, bounded continuation, lifecycle machine, UI-ready projection |
 | 11 — Native Interaction and Control Layer | ✅ done 2026-09-05 | [PHASE_11_INTERACTION_CONTROL.md](PHASE_11_INTERACTION_CONTROL.md) | permission modes over the Phase 5 capability contract (PLAN absolute, once grants, exact persistent rules in Aira-owned config), shared structured Q&A (permission ASK + ask_user, one pending interaction), canonical task graph with orchestration projection, Goal waiting kinds + answer-resume, deterministic child gating, /permissions + /tasks + /settings submenus, token-free UI-ready snapshots (B-006) |
-| 12 — Policy, Hooks, and Trust | — | — | — |
-| 13 — Compaction and Knowledge | — | — | — |
-| 14 — Pi Compatibility Hardening | — | — | — |
-| 15 — Distribution and Bootstrap | — | — | — |
+| 12 — Native Workbench & UI Overhaul | ✅ done 2026-08-31 | [PHASE_12_NATIVE_WORKBENCH_UI.md](PHASE_12_NATIVE_WORKBENCH_UI.md) | aira-zhr default theme + optional semantic roles; pure projection layer (panels/footer/finding/visibility); native sidebar (fullscreen split + regular rail); responsive segment footer; Ctrl+O toggle (+tool expansion → Alt+O); /workbench; 4 workbench settings; /doctor checks + chrome-conflict diagnostics; token-free, headless-safe |
+| 13 — Policy, Hooks, and Trust | — | — | — |
+| 14 — Compaction and Knowledge | — | — | — |
+| 15 — Pi Compatibility Hardening | — | — | — |
+| 16 — Distribution and Bootstrap | — | — | — |

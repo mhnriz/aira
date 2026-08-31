@@ -367,3 +367,43 @@ with the pending question when width allows:
 phase; Phase 11 implemented only the underlying snapshot/event seams,
 settings, the `/permissions` and `/tasks` surfaces, the native Q&A dialog
 bridge, and the restrained `/status`/`/doctor` projections.
+
+---
+
+## B-008 — Native Workbench & UI overhaul (Phase 12) — DONE
+
+**Status:** ✅ implemented in Phase 12
+([PHASE_12_NATIVE_WORKBENCH_UI.md](phases/PHASE_12_NATIVE_WORKBENCH_UI.md))
+
+The full Workbench/UI overhaul tracked by the entries above is delivered.
+Summary of what exists now (each projection derives from the canonical
+snapshot named in the entry; token-free by construction):
+
+- **Sidebar** (fullscreen HStack split; regular-mode viewport-fixed overlay
+  rail): dynamic panels P0–P3 — Interaction/Authorization, Current Finding,
+  Verification, Goal, Tasks & Agents, Execution, Browser, Working Set,
+  Relevant Symbols, Changeset, Intelligence, Control — each visible only
+  when its source state is relevant (progressive disclosure).
+- **Footer**: responsive single-line segment rail with drop ranks
+  (required: mode/context/model; P0 interaction/finding; active-work;
+  opportunistic) and the arbitrated highest-priority current finding
+  (severity always from the source).
+- **Visibility policy**: default-on at safe widths, auto-hide below
+  `72 + sidebarWidth`, explicit OFF respected, restore semantics
+  deterministic (ADR-032).
+- **Input**: `Ctrl+O` toggles the sidebar (ADR-032), `/workbench [on|off]`,
+  four settings (`workbench.enabled|showOnStartup|density|width`), `/doctor`
+  workbench/theme/shortcut/chrome-conflict checks.
+- **Theme**: `aira-zhr` default dark theme + eight optional semantic color
+  roles with classic fallbacks (ADR-034).
+- **Tests**: projection, priority, visibility, footer arbitration,
+  finding arbitration, theme mapping, keybindings, headless isolation
+  (`test/aira/ui/*`).
+
+Carried-forward out of scope (later phases): fullscreen live-resize
+rendering on this dev machine is blocked by a PRE-EXISTING pi TUI crash on
+SIGWINCH (baseline-verified; suggested for the Pi compatibility hardening
+phase); live LSP diagnostics on this machine never publish (Phase 5
+environment issue); a compact density mode beyond the shared spacing
+constants, per-panel configurators, and a third-party panel registry stay
+deferred by design.

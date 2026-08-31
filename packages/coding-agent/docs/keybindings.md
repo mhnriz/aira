@@ -156,10 +156,19 @@ This routing remains configurable through the ordinary action bindings. For exam
 
 | Keybinding id | Default | Description |
 |--------|---------|-------------|
-| `app.tools.expand` | `ctrl+o` | Collapse or expand tool output |
+| `app.tools.expand` | `alt+o` | Collapse or expand tool output |
+| `app.workbench.toggle` | `ctrl+o` | Toggle the Aira Workbench sidebar (Phase 12; `Ctrl+O` moved here from tool expansion, see below) |
 | `app.message.copy` | `ctrl+x` | Copy the last assistant message, or the selected message in `/tree` |
 | `app.message.followUp` | `alt+enter` (`ctrl+q` on Windows and WSL) | Queue follow-up message |
 | `app.message.dequeue` | `alt+up` (`alt+q` on Windows and WSL) | Restore queued messages to editor |
+
+> **`Ctrl+O` migration (Aira Phase 12):** `Ctrl+O` now toggles the native
+> Workbench sidebar (`app.workbench.toggle`). Tool-output expansion moved to
+> `Alt+O` (`app.tools.expand`). A user who customized `app.tools.expand`
+> keeps their binding — user keybindings override defaults and are never
+> overwritten. The session-tree filter cycle (`app.tree.filter.cycleForward`
+> / `cycleBackward`) is context-scoped to the tree selector and unchanged.
+> Run `/doctor` for a truthful binding check.
 
 ### Tree Navigation
 

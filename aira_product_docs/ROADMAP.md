@@ -442,7 +442,41 @@ orchestration task graph, and Goal Runtime already built in Phases 3-10.
 
 ---
 
-## Phase 12 — Policy, Hooks, and Trust
+## Phase 12 — Native Workbench & UI Overhaul
+
+### Goal
+
+Turn the canonical state of Phases 3–11 into one cohesive terminal-native
+engineering interface. Subsystems own state; the UI only projects it.
+
+### Work
+
+- `aira-zhr` built-in theme (default on dark terminals) + optional semantic
+  color roles with classic fallbacks;
+- pure projection layer (`src/aira/ui/`): panels, footer segments, current
+  finding arbitration, responsive visibility policy — token-free,
+  headless-safe;
+- native sidebar: fullscreen HStack split with independent scrolling and a
+  regular-mode overlay rail; dynamic panel priority (P0–P3) and progressive
+  disclosure;
+- response segment footer with drop ranks and the highest-priority finding;
+- `Ctrl+O` Workbench toggle (tool expansion moved to `Alt+O`), `/workbench`
+  command, four Workbench settings, `/doctor` workbench/theme/shortcut
+  checks, extension-chrome conflict diagnostics.
+
+### Exit criteria
+
+- sidebar opens by default at safe widths, auto-hides when narrow, respects
+  explicit off; responsive footer drops low-priority segments gracefully;
+- pending Q&A/authorization rises to P0 (panel + footer);
+- every panel projects its canonical snapshot; rendering consumes zero model
+  tokens and stays responsive during streaming;
+- headless/SDK/RPC/print never instantiate the Workbench; Pi Atelier is
+  never loaded; all dogfood cases (default/toggle/narrow/off/LSP/execution/
+  browser/verification/goal/agents/permission/Q&A/performance/headless)
+  pass; tests + repo checks green.
+
+## Phase 13 — Policy, Hooks, and Trust
 
 ### Goal
 
@@ -467,7 +501,7 @@ Harden autonomy for daily use.
 
 ---
 
-## Phase 13 — Compaction and Knowledge
+## Phase 14 — Compaction and Knowledge
 
 ### Goal
 
@@ -489,7 +523,7 @@ Maintain engineering continuity over long sessions.
 
 ---
 
-## Phase 14 — Pi Compatibility Hardening
+## Phase 15 — Pi Compatibility Hardening
 
 ### Goal
 
@@ -513,7 +547,7 @@ Make compatibility an intentional tested contract.
 
 ---
 
-## Phase 15 — Distribution and Bootstrap
+## Phase 16 — Distribution and Bootstrap
 
 ### Goal
 

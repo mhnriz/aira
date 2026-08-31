@@ -814,3 +814,103 @@ BEFORE any rule, which is the only precedence that matters for safety.
   stores fail closed to the mode defaults with truthful health — never a
   crash). No project-config trust mechanism exists yet; Phase 12 owns
   hooks/trust.
+
+## ADR-031 — Aira owns one native Workbench; UI only projects state
+
+**Status:** accepted · Phase 12
+
+**Context.** Aira's canonical state spans modes, project, intelligence,
+execution, browser, verification, orchestration, goal, permissions,
+interaction, and tasks. The product needs one cohesive terminal UI, and the
+subsystems must remain the only state owners.
+
+**Decision.** `InteractiveMode` owns exactly ONE native Workbench UI
+(`WorkbenchController` + renderers under `modes/interactive/workbench/`).
+A pure projection layer (`src/aira/ui/`) derives panels, footer segments,
+and the current finding from `AiraSessionState` and bounded canonical seam
+inputs (`workingSet()`, `relevantSymbols()`); it contains no business logic
+and no mutating surface. Subsystem snapshots stay the only truth; the UI
+never queries subsystem internals, runs git at render time, or spends model
+tokens. Headless/SDK/RPC/print never import the TUI renderer (module-graph
+test enforces the boundary).
+
+**Consequences.** One owner, projection-only UI, token-free rendering;
+`/status`, `/doctor`, `/permissions`, `/processes`, `/browser`, `/verify`
+remain the authoritative plain-text surfaces and stay usable headless.
+
+## ADR-032 — Responsive sidebar policy and the `Ctrl+O` binding
+
+**Status:** accepted · Phase 12
+
+**Context.** The sidebar must be visible by default on wide terminals,
+auto-hide below a safe minimum, stay hidden when the user turned it off, and
+restore when the user asked for it. `Ctrl+O` was Pi's tool-output expansion.
+
+**Decision.** Visibility is a pure policy (`aira/ui/visibility.ts`): width
+below `72 + sidebarWidth` hides the sidebar regardless of user choice; on
+safe widths, explicit OFF wins, else default follows `showOnStartup`, and
+explicit ON wins. `Ctrl+O` becomes `app.workbench.toggle`; tool-output
+expansion moves to `Alt+O` (`app.tools.expand`). User customizations are
+never overwritten (user bindings override defaults); the tree-filter
+bindings (context-scoped) are untouched; `/doctor` and the keybinding docs
+report the resolved truth.
+
+**Consequences.** Deterministic, testable responsiveness (auto-hide,
+explicit-off, restore semantics all unit-tested); one documented shortcut
+migration with a truthful conflict path.
+
+## ADR-033 — Footer priority system and the highest-priority finding
+
+**Status:** accepted · Phase 12
+
+**Context.** The status rail must stay useful at any width and surface one
+actionable finding without inventing severity.
+
+**Decision.** The footer is a single line of segments with explicit drop
+ranks: mode/context/model are required (never dropped, only compacted or
+truncated); pending interaction/permission and the current finding rank
+just below; active-work segments (verification, goal, agents, browser,
+execution) drop before context; opportunistic segments (git Δ, permission
+mode, LSP detail) drop first. `arbitrateCurrentFinding` picks ONE finding
+across canonical sources with severity taken only from the source.
+
+**Consequences.** Responsive dropping and truncation are deterministic and
+unit-tested; a question or authorization is never buried; a stale PASS never
+presented as current truth.
+
+## ADR-034 — Theme semantic contract and `aira-zhr` as the default dark theme
+
+**Status:** accepted · Phase 12
+
+**Context.** Aira's visual baseline is a dark warm-neutral palette; the
+Workbench must render acceptably under user-selected or third-party themes.
+
+**Decision.** Eight optional semantic color roles extend the theme
+contract (`copper`, `copperBright`, `blue`, `cyan`, `green`, `yellow`,
+`red`, `purple`) with classic fallbacks (accent/success/warning/error/
+muted…), so every existing theme stays valid untouched. `aira-zhr` is a
+built-in theme and the default resolution for unset themes on dark
+terminals; `light` stays the light default; explicitly configured themes
+always win. The Workbench consumes roles, never literal colors.
+
+**Consequences.** Semantic-only coloring (no rainbow telemetry), full
+compatibility with third-party themes, one new built-in theme shipped in
+the binary.
+
+## ADR-035 — Extension chrome conflicts are diagnosed, never fought over
+
+**Status:** accepted · Phase 12
+
+**Context.** Pi lets extensions install custom footers/editors. Aira's
+native Workbench owns the footer rail; two components must not fight for
+the same renderer.
+
+**Decision.** The Workbench uses the built-in footer surface. When an
+extension installs a custom footer, Pi's existing replacement semantics
+apply and the Workbench footer is suppressed; `/doctor` reports the
+conflict truthfully (`chrome conflict` check in interactive mode). The
+Workbench overlay is detached around renderer switches so mode toggling
+never breaks.
+
+**Consequences.** No silent fights; truthful diagnostics; extension UX
+contract preserved (extension status line still renders on its own line).

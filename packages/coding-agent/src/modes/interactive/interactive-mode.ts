@@ -617,6 +617,7 @@ export class InteractiveMode {
 		});
 		this.runtimeHost.setRebindSession(async () => {
 			await this.rebindCurrentSession({ renderBeforeBind: true });
+			this.rebindWorkbenchForSession();
 			await this.themeController.applyFromSettings();
 		});
 		this.version = VERSION;
@@ -1149,6 +1150,7 @@ export class InteractiveMode {
 
 		// Initialize extensions first so resources are shown before messages
 		await this.rebindCurrentSession();
+		this.rebindWorkbenchForSession();
 
 		// Render initial messages AFTER showing loaded resources
 		this.renderInitialMessages();
@@ -2149,7 +2151,6 @@ export class InteractiveMode {
 		await this.updateAvailableProviderCount();
 		this.updateEditorBorderColor();
 		this.updateTerminalTitle();
-		this.rebindWorkbenchForSession();
 	}
 
 	private async handleFatalRuntimeError(prefix: string, error: unknown): Promise<never> {

@@ -510,6 +510,35 @@ All rows render from `AiraSessionState.orchestration` (bounded, token-free);
 no child process or log inspection is needed. Mode + LSP + verification +
 agents + processes + browser + git + context combine without invasive
 subsystem changes.
+
+### 18.1 Native Workbench (Phase 12)
+
+Aira now owns one native Workbench UI (ADR-031). The sidebar renders the
+engineering context beside the conversation; the footer is a responsive
+segment rail; `Ctrl+O` toggles the sidebar (`Alt+O` retains tool-output
+expansion, ADR-032). Structure:
+
+```text
+Canonical subsystem snapshots (state.*)
+            ↓
+  WorkbenchProjection   (src/aira/ui — pure, token-free, headless-safe)
+            ↓
+    panels + footer + sidebar (modes/interactive/workbench — TUI only)
+```
+
+- Dynamic panels (P0 urgent → P3 ambient; Working Set, Relevant Symbols,
+  Changeset, Intelligence, Execution, Browser, Verification, Goal, Tasks &
+  Agents, Control, Interaction, Current Finding).
+- Responsive: wide (full adaptive), medium (P3 dropped), narrow (sidebar
+  auto-hidden; footer drops low-priority segments).
+- Fullscreen mode renders an HStack split with independent sidebar
+  scrolling; regular mode uses a viewport-fixed overlay rail with a
+  base-width shrink (`AiraTuiMainScreen`).
+- The Workbench consumes ONLY canonical snapshots + the bounded
+  working-set/symbols seams; rendering spends zero model tokens.
+- Extension chrome conflicts are diagnosed truthfully (`/doctor`); a
+  third-party custom footer replaces the native rail per Pi's contract.
+
 Minimal explicit controls:
 
 ```text

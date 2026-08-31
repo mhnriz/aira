@@ -30,7 +30,8 @@ export interface FindingCandidate {
 }
 
 /** Arbitrate the single highest-priority finding from canonical state. */
-export function arbitrateCurrentFinding(state: AiraSessionState): WorkbenchFinding | undefined {
+export function arbitrateCurrentFinding(state: AiraSessionState | undefined): WorkbenchFinding | undefined {
+	if (!state) return undefined;
 	const candidates: FindingCandidate[] = [];
 
 	// ---- P0 · interaction: a pending question/permission outranks everything.

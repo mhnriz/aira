@@ -32,6 +32,7 @@ export function formatTokens(count: number): string {
 
 /** Drop ranks: lower disappears first. Infinity = never dropped. */
 const DROP = {
+	usage: 1,
 	git: 1,
 	permission: 2,
 	lsp: 4,
@@ -65,9 +66,10 @@ export function lspShortId(providerId: string): string {
 	return short.length === 2 ? short : "LSP";
 }
 
-function modeSegment(state: AiraSessionState): WorkbenchFooterSegment {
-	const glyph = state.mode === "build" ? "◈" : state.mode === "plan" ? "◇" : "◎";
-	const label = state.mode === "build" ? "BUILD" : state.mode === "plan" ? "PLAN" : "REVIEW";
+function modeSegment(state: AiraSessionState | undefined): WorkbenchFooterSegment {
+	const mode = state?.mode ?? "build";
+	const glyph = mode === "build" ? "◈" : mode === "plan" ? "◇" : "◎";
+	const label = mode === "build" ? "BUILD" : mode === "plan" ? "PLAN" : "REVIEW";
 	return {
 		id: "mode",
 		text: `${glyph} ${label}`,
@@ -77,8 +79,8 @@ function modeSegment(state: AiraSessionState): WorkbenchFooterSegment {
 	};
 }
 
-function interactionSegment(state: AiraSessionState): WorkbenchFooterSegment | undefined {
-	const interaction = state.interaction;
+function interactionSegment(state: AiraSessionState | undefined): WorkbenchFooterSegment | undefined {
+	const interaction = state?.interaction;
 	if (!interaction?.pending || !interaction.question) return undefined;
 	const question = interaction.question;
 	const isPermission = question.type === "permission";
@@ -114,8 +116,8 @@ function findingSegment(finding: WorkbenchFinding | undefined): WorkbenchFooterS
 	};
 }
 
-function lspSegment(state: AiraSessionState): WorkbenchFooterSegment | undefined {
-	const intelligence = state.intelligence;
+function lspSegment(state: AiraSessionState | undefined): WorkbenchFooterSegment | undefined {
+	const intelligence = state?.intelligence;
 	if (!intelligence || !intelligence.active) return undefined;
 	const live = intelligence.liveCode;
 	const provider = live.servers[0]?.id;
@@ -133,8 +135,8 @@ function lspSegment(state: AiraSessionState): WorkbenchFooterSegment | undefined
 	};
 }
 
-function verificationSegment(state: AiraSessionState): WorkbenchFooterSegment | undefined {
-	const verification = state.verification;
+function verificationSegment(state: AiraSessionState | undefined): WorkbenchFooterSegment | undefined {
+	const verification = state?.verification;
 	if (!verification || verification.status === "idle") return undefined;
 	const status = verification.status;
 	if (status === "passed") {
@@ -165,8 +167,8 @@ function verificationSegment(state: AiraSessionState): WorkbenchFooterSegment | 
 	return { id: "verification", text: "VERIFY …", role: "yellow", dropRank: DROP.verification, compact: "VERIFY …" };
 }
 
-function browserSegment(state: AiraSessionState): WorkbenchFooterSegment | undefined {
-	const browser = state.browser;
+function browserSegment(state: AiraSessionState | undefined): WorkbenchFooterSegment | undefined {
+	const browser = state?.browser;
 	if (!browser) return undefined;
 	const relevant =
 		browser.status === "active" ||
@@ -185,8 +187,8 @@ function browserSegment(state: AiraSessionState): WorkbenchFooterSegment | undef
 	return { id: "browser", text: "BROWSER", role: "muted", dropRank: DROP.browser };
 }
 
-function agentsSegment(state: AiraSessionState): WorkbenchFooterSegment | undefined {
-	const orchestration = state.orchestration;
+function agentsSegment(state: AiraSessionState | undefined): WorkbenchFooterSegment | undefined {
+	const orchestration = state?.orchestration;
 	if (!orchestration) return undefined;
 	const running = orchestration.runningCount;
 	const queued = orchestration.queuedCount;
@@ -201,8 +203,8 @@ function agentsSegment(state: AiraSessionState): WorkbenchFooterSegment | undefi
 	};
 }
 
-function goalSegment(state: AiraSessionState): WorkbenchFooterSegment | undefined {
-	const goal = state.goal;
+function goalSegment(state: AiraSessionState | undefined): WorkbenchFooterSegment | undefined {
+	const goal = state?.goal;
 	if (!goal || goal.status === "idle") return undefined;
 	if (goal.status === "completed") {
 		return { id: "goal", text: "GOAL ✓", role: "green", dropRank: DROP.goal, compact: "GOAL ✓" };
@@ -226,8 +228,8 @@ function goalSegment(state: AiraSessionState): WorkbenchFooterSegment | undefine
 	};
 }
 
-function executionSegment(state: AiraSessionState): WorkbenchFooterSegment | undefined {
-	const execution = state.execution;
+function executionSegment(state: AiraSessionState | undefined): WorkbenchFooterSegment | undefined {
+	const execution = state?.execution;
 	if (!execution) return undefined;
 	const running = execution.processes.filter((process) => process.status === "running").length;
 	if (running > 0) {
@@ -249,8 +251,13 @@ function executionSegment(state: AiraSessionState): WorkbenchFooterSegment | und
 	return undefined;
 }
 
-function permissionSegment(state: AiraSessionState): WorkbenchFooterSegment | undefined {
-	const permissions = state.permissions;
+function usageSegment(usage: string | undefined): WorkbenchFooterSegment | undefined {
+	if (!usage) return undefined;
+	return { id: "usage", text: usage, role: "dim", dropRank: DROP.usage };
+}
+
+function permissionSegment(state: AiraSessionState | undefined): WorkbenchFooterSegment | undefined {
+	const permissions = state?.permissions;
 	if (!permissions) return undefined;
 	const mode = permissions.enabled ? permissions.mode : "off";
 	return {
@@ -303,7 +310,7 @@ function modelSegment(model: string, thinking: string | undefined): WorkbenchFoo
 
 /** Build footer segments in display order (left groups then right groups). */
 export function buildFooterSegments(input: {
-	state: AiraSessionState;
+	state: AiraSessionState | undefined;
 	finding: WorkbenchFinding | undefined;
 	cwd: string;
 	branch: string | undefined;
@@ -316,6 +323,8 @@ export function buildFooterSegments(input: {
 	};
 	modelId: string;
 	thinkingLevel: string | undefined;
+	/** Opportunistic token/cost telemetry (drops first; set by the footer owner). */
+	usage?: string;
 }): { left: WorkbenchFooterSegment[]; right: WorkbenchFooterSegment[] } {
 	const { state, finding } = input;
 	const left: WorkbenchFooterSegment[] = [
@@ -332,8 +341,9 @@ export function buildFooterSegments(input: {
 	];
 	const right: WorkbenchFooterSegment[] = [
 		cwdSegment(input.cwd, input.branch),
-		...(gitSegment(state.intelligence?.repository.changeCount)
-			? [gitSegment(state.intelligence?.repository.changeCount)!]
+		...(usageSegment(input.usage) ? [usageSegment(input.usage)!] : []),
+		...(gitSegment(state?.intelligence?.repository.changeCount)
+			? [gitSegment(state?.intelligence?.repository.changeCount)!]
 			: []),
 		contextSegment(input.context),
 		modelSegment(input.modelId, input.thinkingLevel),

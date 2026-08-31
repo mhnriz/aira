@@ -1,10 +1,12 @@
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { arbitrateCurrentFinding } from "../../../aira/ui/finding.ts";
-import { buildFooterSegments, FOOTER_SEPARATOR } from "../../../aira/ui/footer.ts";
+import { buildFooterSegments, FOOTER_SEPARATOR, formatTokens } from "../../../aira/ui/footer.ts";
 import type { WorkbenchFooterSegment } from "../../../aira/ui/types.ts";
 import type { AgentSession } from "../../../core/agent-session.ts";
+import { areExperimentalFeaturesEnabled } from "../../../core/experimental.ts";
 import type { ReadonlyFooterDataProvider } from "../../../core/footer-data-provider.ts";
+import { addUsageToTotals, createUsageTotals } from "../../../core/usage-totals.ts";
 import { theme } from "../theme/theme.ts";
 import { roleColor } from "../workbench/workbench-component.ts";
 
@@ -91,10 +93,14 @@ export class FooterComponent implements Component {
 		const model = this.session.state.model;
 		const thinkingLevel = model?.reasoning ? this.session.thinkingLevel : undefined;
 
+		const sessionName = this.session.sessionManager.getSessionName();
+		const cwd = this.footerCwd();
+		const cwdText = sessionName ? `${cwd} • ${sessionName}` : cwd;
+
 		const { left, right } = buildFooterSegments({
 			state,
 			finding,
-			cwd: this.footerCwd(),
+			cwd: cwdText,
 			branch: this.footerData.getGitBranch() ?? undefined,
 			context: {
 				percent: contextPercent,
@@ -105,6 +111,7 @@ export class FooterComponent implements Component {
 			},
 			modelId: model?.id ?? "no-model",
 			thinkingLevel: thinkingLevel === "off" ? undefined : thinkingLevel,
+			usage: this.buildUsageText(),
 		});
 
 		const line = composeFooter(left, right, width);
@@ -121,6 +128,50 @@ export class FooterComponent implements Component {
 			lines.push(truncateToWidth(theme.fg("dim", statusLine), width, theme.fg("dim", "...")));
 		}
 		return lines;
+	}
+
+	/**
+	 * Opportunistic token/cost telemetry (↑in ↓out R W CH% $cost), derived
+	 * from session usage entries — same semantics as the classic footer stats
+	 * line, now a low-priority footer segment that drops first when narrow.
+	 */
+	private buildUsageText(): string {
+		const state = this.session.state;
+		const usageTotals = createUsageTotals();
+		let latestCacheHitRate: number | undefined;
+		for (const entry of this.session.sessionManager.getEntries()) {
+			if (entry.type === "message" && entry.message.role === "assistant") {
+				addUsageToTotals(usageTotals, entry.message.usage);
+				const latestPromptTokens =
+					entry.message.usage.input + entry.message.usage.cacheRead + entry.message.usage.cacheWrite;
+				latestCacheHitRate =
+					latestPromptTokens > 0 ? (entry.message.usage.cacheRead / latestPromptTokens) * 100 : undefined;
+			} else if (entry.type === "message" && entry.message.role === "toolResult" && entry.message.usage) {
+				addUsageToTotals(usageTotals, entry.message.usage);
+			} else if ((entry.type === "branch_summary" || entry.type === "compaction") && entry.usage) {
+				addUsageToTotals(usageTotals, entry.usage);
+			}
+		}
+		const parts: string[] = [];
+		if (usageTotals.input) parts.push(`↑${formatTokens(usageTotals.input)}`);
+		if (usageTotals.output) parts.push(`↓${formatTokens(usageTotals.output)}`);
+		if (usageTotals.cacheRead) parts.push(`R${formatTokens(usageTotals.cacheRead)}`);
+		if (usageTotals.cacheWrite) parts.push(`W${formatTokens(usageTotals.cacheWrite)}`);
+		if ((usageTotals.cacheRead > 0 || usageTotals.cacheWrite > 0) && latestCacheHitRate !== undefined) {
+			parts.push(`CH${latestCacheHitRate.toFixed(1)}%`);
+		}
+		const usingSubscription = state.model
+			? state.model.provider === "kimi-coding" || this.session.modelRuntime.isUsingSubscription(state.model.provider)
+			: false;
+		if (usageTotals.cost || usingSubscription) {
+			const costStr = `$${usageTotals.cost.toFixed(3)}${usingSubscription ? " (sub)" : ""}`;
+			parts.push(costStr);
+		}
+		const text = parts.join(" ");
+		if (areExperimentalFeaturesEnabled() && text) {
+			return `${text} • xp`;
+		}
+		return text;
 	}
 
 	private footerCwd(): string {

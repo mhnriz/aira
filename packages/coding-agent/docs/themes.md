@@ -18,7 +18,7 @@ Themes are JSON files that define colors for the TUI.
 
 Pi loads themes from:
 
-- Built-in: `dark`, `light`
+- Built-in: `dark`, `light`, `aira-zhr` (Aira default dark theme)
 - Global: `~/.pi/agent/themes/*.json`
 - Project: `.pi/themes/*.json` (only after the project is trusted)
 - Packages: `themes/` directories or `pi.themes` entries in `package.json`
@@ -37,7 +37,7 @@ Select a theme via `/settings` or in `settings.json`:
 }
 ```
 
-On first run, pi detects your terminal background and defaults to `dark` or `light`.
+On first run, Aira detects your terminal background and defaults to `aira-zhr` (dark) or `light`; Pi-compatible behavior keeps `dark` available as a classic theme.
 
 ### Initial Theme
 
@@ -161,12 +161,28 @@ vim ~/.pi/agent/themes/my-theme.json
 - `name` is required, must be unique, and must not contain `/`.
 - `vars` is optional. Define reusable colors here, then reference them in `colors`.
 - `colors` must define all 51 required tokens. `thinkingMax`, `scrollbarThumb`, and the two search highlight tokens are optional and use the fallbacks listed below.
+- The eight **Aira semantic roles** (`copper`, `copperBright`, `blue`, `cyan`, `green`, `yellow`, `red`, `purple`) are OPTIONAL. Every Aira Workbench surface falls back to a classic equivalent when a theme does not define them, so existing/third-party themes keep working untouched and render the Workbench acceptably.
 
 The `$schema` field enables editor auto-completion and validation.
 
 ## Color Tokens
 
 Every theme must define all 51 required color tokens. The optional tokens preserve compatibility with existing themes: `thinkingMax` falls back to `thinkingXhigh`, `scrollbarThumb` and `searchMatchBg` fall back to `selectedBg`, and `searchMatchText` falls back to `text`. Other search matches use `searchMatchText` on `searchMatchBg` with an underline; the current match reverses that foreground/background pair and uses bold text.
+
+### Aira semantic roles (8 optional; Phase 12)
+
+Aira ships `aira-zhr` as its default dark theme (built-in; the default light theme stays `light`). Unset/detected dark terminals resolve to `aira-zhr`; an explicitly configured theme always wins. The semantic roles color ONLY meaning: healthy state, failure, waiting, permission metadata, active agents, language intelligence, and Aira identity — the Workbench is otherwise neutral.
+
+| Token | Aira meaning | Fallback when absent |
+|-------|--------------|----------------------|
+| `copper` | Aira identity / active mode / primary focus | `accent` |
+| `copperBright` | Focused border / active selection | `copper` then `borderAccent` |
+| `blue` | Language intelligence / navigation | `mdLink` then `accent` |
+| `cyan` | Active agents / runtime informational | `borderAccent` then `accent` |
+| `green` | Healthy / completed / pass | `success` |
+| `yellow` | Waiting / warning / idle / blocked | `warning` |
+| `red` | Failure / blocking finding / denied | `error` |
+| `purple` | Model / thinking / permission metadata | `customMessageLabel` then `muted` |
 
 ### Core UI (11 colors)
 
