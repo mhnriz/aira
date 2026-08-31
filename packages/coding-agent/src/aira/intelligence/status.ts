@@ -16,6 +16,20 @@ export interface AiraLiveCodeServerStatus {
 	error?: string;
 }
 
+export interface AiraIntelligenceTopFinding {
+	severity: "error" | "warning" | "information" | "hint" | "other";
+	/** LSP/diagnostic code when the source provided one (e.g. "TS2339"). */
+	code?: string | number;
+	/** One-line message. */
+	message: string;
+	/** Path relative to the project root when derivable. */
+	path?: string;
+	/** 1-based line in the file, when known. */
+	line?: number;
+	/** Freshness verdict (stale findings never present as current truth). */
+	freshness: "fresh" | "stale" | "indeterminate";
+}
+
 export interface AiraIntelligenceStatus {
 	/** Activation decision for this session. */
 	active: boolean;
@@ -41,6 +55,8 @@ export interface AiraIntelligenceStatus {
 		errors: number;
 		warnings: number;
 		stale: number;
+		/** Bounded top findings for UI projections (Workbench/footer); empty when none. */
+		top: AiraIntelligenceTopFinding[];
 	};
 	degraded: boolean;
 }
@@ -60,7 +76,7 @@ export function initialAiraIntelligenceStatus(): AiraIntelligenceStatus {
 			changesAvailable: false,
 			changeCount: undefined,
 		},
-		findings: { total: 0, errors: 0, warnings: 0, stale: 0 },
+		findings: { total: 0, errors: 0, warnings: 0, stale: 0, top: [] },
 		degraded: false,
 	};
 }

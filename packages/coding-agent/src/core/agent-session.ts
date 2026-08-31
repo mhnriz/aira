@@ -1211,6 +1211,11 @@ export class AgentSession {
 		return this._airaSessionState;
 	}
 
+	/** Aira intelligence coordinator (Phase 5; tests and host diagnostics). */
+	get airaIntelligence(): AiraIntelligenceHandle | undefined {
+		return this._airaIntelligence;
+	}
+
 	/** Aira execution runtime for this session (process manager; tests and host). */
 	get airaExecution(): AiraExecutionHandle | undefined {
 		return this._airaExecution;

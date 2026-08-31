@@ -96,6 +96,16 @@ const ThemeJsonSchema = Type.Object({
 		thinkingMax: Type.Optional(ColorValueSchema),
 		// Bash Mode (1 color)
 		bashMode: ColorValueSchema,
+		// Aira semantic roles (Phase 12; OPTIONAL — third-party themes stay
+		// valid without them and fall back to the classic equivalents below).
+		copper: Type.Optional(ColorValueSchema),
+		copperBright: Type.Optional(ColorValueSchema),
+		blue: Type.Optional(ColorValueSchema),
+		cyan: Type.Optional(ColorValueSchema),
+		green: Type.Optional(ColorValueSchema),
+		yellow: Type.Optional(ColorValueSchema),
+		red: Type.Optional(ColorValueSchema),
+		purple: Type.Optional(ColorValueSchema),
 	}),
 	export: Type.Optional(
 		Type.Object({
@@ -157,7 +167,18 @@ export type ThemeColor =
 	| "thinkingHigh"
 	| "thinkingXhigh"
 	| "thinkingMax"
-	| "bashMode";
+	| "bashMode"
+	// Aira semantic roles (Phase 12). Optional in themes; every consumer falls
+	// back to classic semantics when a theme does not define them, so the
+	// Workbench renders acceptably under any compatible theme.
+	| "copper"
+	| "copperBright"
+	| "blue"
+	| "cyan"
+	| "green"
+	| "yellow"
+	| "red"
+	| "purple";
 
 export type ThemeBg =
 	| "selectedBg"
@@ -169,7 +190,17 @@ export type ThemeBg =
 	| "toolSuccessBg"
 	| "toolErrorBg";
 
-type OptionalThemeColor = "thinkingMax" | "searchMatchText";
+type OptionalThemeColor =
+	| "thinkingMax"
+	| "searchMatchText"
+	| "copper"
+	| "copperBright"
+	| "blue"
+	| "cyan"
+	| "green"
+	| "yellow"
+	| "red"
+	| "purple";
 type OptionalThemeBg = "scrollbarThumb" | "searchMatchBg";
 
 type ColorMode = "truecolor" | "256color";
@@ -334,13 +365,32 @@ function withThemeColorFallbacks(colors: ThemeJson["colors"]): ThemeJson["colors
 	scrollbarThumb: ColorValue;
 	searchMatchBg: ColorValue;
 	searchMatchText: ColorValue;
+	copper: ColorValue;
+	copperBright: ColorValue;
+	blue: ColorValue;
+	cyan: ColorValue;
+	green: ColorValue;
+	yellow: ColorValue;
+	red: ColorValue;
+	purple: ColorValue;
 } {
+	// Classic semantic mapping for the Phase 12 Aira roles when a theme does
+	// not define them (third-party or older themes stay valid untouched).
+	const copper = colors.copper ?? colors.accent;
 	return {
 		...colors,
 		thinkingMax: colors.thinkingMax ?? colors.thinkingXhigh,
 		scrollbarThumb: colors.scrollbarThumb ?? colors.selectedBg,
 		searchMatchBg: colors.searchMatchBg ?? colors.selectedBg,
 		searchMatchText: colors.searchMatchText ?? colors.text,
+		copper,
+		copperBright: colors.copperBright ?? copper ?? colors.borderAccent,
+		blue: colors.blue ?? colors.mdLink ?? colors.accent,
+		cyan: colors.cyan ?? colors.borderAccent ?? colors.accent,
+		green: colors.green ?? colors.success,
+		yellow: colors.yellow ?? colors.warning,
+		red: colors.red ?? colors.error,
+		purple: colors.purple ?? colors.customMessageLabel ?? colors.muted,
 	};
 }
 
@@ -474,9 +524,14 @@ function getBuiltinThemes(): Record<string, ThemeJson> {
 		const themesDir = getThemesDir();
 		const darkPath = path.join(themesDir, "dark.json");
 		const lightPath = path.join(themesDir, "light.json");
+		const airaZhrPath = path.join(themesDir, "aira-zhr.json");
 		BUILTIN_THEMES = {
 			dark: JSON.parse(stripBom(fs.readFileSync(darkPath, "utf-8"))) as ThemeJson,
 			light: JSON.parse(stripBom(fs.readFileSync(lightPath, "utf-8"))) as ThemeJson,
+			// Aira default visual theme (Phase 12): dark warm-neutral terminal
+			// palette built on the Hariz dark base. Loaded by default on dark
+			// terminals; explicitly configured themes keep winning.
+			"aira-zhr": JSON.parse(stripBom(fs.readFileSync(airaZhrPath, "utf-8"))) as ThemeJson,
 		};
 	}
 	return BUILTIN_THEMES;
@@ -830,8 +885,13 @@ export async function detectTerminalThemeForAuto({
 	return (await backgroundThemePromise).theme;
 }
 
+/**
+ * Aira default theme: `aira-zhr` on dark terminals, `light` on light ones.
+ * Explicitly configured themes (settings/CLI) keep winning; this only decides
+ * the unset case. `aira-zhr` is a built-in theme (see `getBuiltinThemes`).
+ */
 export function getDefaultTheme(): string {
-	return detectTerminalBackgroundFromEnv().theme;
+	return detectTerminalBackgroundFromEnv().theme === "light" ? "light" : "aira-zhr";
 }
 
 // ============================================================================
@@ -929,7 +989,12 @@ function startThemeWatcher(): void {
 	stopThemeWatcher();
 
 	// Only watch if it's a custom theme (not built-in)
-	if (!currentThemeName || currentThemeName === "dark" || currentThemeName === "light") {
+	if (
+		!currentThemeName ||
+		currentThemeName === "dark" ||
+		currentThemeName === "light" ||
+		currentThemeName === "aira-zhr"
+	) {
 		return;
 	}
 

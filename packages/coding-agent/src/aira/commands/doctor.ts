@@ -22,6 +22,7 @@
  */
 import { CONFIG_DIR_NAME } from "../../config.ts";
 import { KEYBINDINGS } from "../../core/keybindings.ts";
+import { getThemeByName } from "../../modes/interactive/theme/theme.ts";
 import { classifyAiraBrowserOperation, classifyAiraCapability, isAiraCapabilityReadOnly } from "../capabilities.ts";
 import { AIRA_MODE_CYCLE, AIRA_MUTATING_TOOLS, AIRA_READ_ONLY_TOOLS, isAiraMutatingTool } from "../modes.ts";
 import { displayPathUnderHome, getAiraHome } from "../paths.ts";
@@ -43,6 +44,7 @@ export interface AiraDoctorReport {
 
 const MODE_CYCLE_KEY = "app.mode.cycle";
 const THINKING_CYCLE_KEY = "app.thinking.cycle";
+const WORKBENCH_TOGGLE_KEY = "app.workbench.toggle";
 
 function defaultKeysOf(action: string): string[] {
 	const def = (KEYBINDINGS as Record<string, { defaultKeys?: string | string[] }>)[action];
@@ -92,6 +94,26 @@ export function buildAiraDoctorReport(state: AiraSessionState | undefined): Aira
 		name: "thinking shortcut",
 		pass: thinkingKeys.includes("ctrl+shift+e") && !thinkingKeys.includes("shift+tab"),
 		detail: `${THINKING_CYCLE_KEY}: ${thinkingKeys.join(", ") || "unbound"}`,
+	});
+
+	// 4b. Phase 12 Workbench toggle on Ctrl+O, tool expansion moved off it
+	// (truthful conflict resolution: the toggle owns Ctrl+O by default).
+	const workbenchKeys = defaultKeysOf(WORKBENCH_TOGGLE_KEY);
+	const expandKeys = defaultKeysOf("app.tools.expand");
+	checks.push({
+		name: "workbench shortcut",
+		pass: workbenchKeys.includes("ctrl+o") && !expandKeys.includes("ctrl+o"),
+		detail: `${WORKBENCH_TOGGLE_KEY}: ${workbenchKeys.join(", ") || "unbound"} | app.tools.expand: ${expandKeys.join(", ") || "unbound"}`,
+	});
+
+	// 4c. Aira default theme resolves (schema-valid built-in).
+	const airaTheme = getThemeByName("aira-zhr");
+	checks.push({
+		name: "aira-zhr theme",
+		pass: airaTheme !== undefined,
+		detail: airaTheme
+			? `resolved (${getThemeByName("dark")?.name ?? "dark"} classic fallback intact)`
+			: "not resolvable (theme wiring bug)",
 	});
 
 	// 5. PLAN read-only boundary: mutating/process/browser-interaction tools

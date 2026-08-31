@@ -19,11 +19,11 @@ import type { Agent, AgentEvent } from "@earendil-works/pi-agent-core";
 import type { AiraSessionState } from "../state.ts";
 import { decideIntelligenceActivation, type IntelligenceActivation, isConservativeActivation } from "./activation.ts";
 import { buildIntelligenceContext } from "./context.ts";
-import { AiraFindingsStore } from "./findings.ts";
+import { type AiraFindingSeverity, AiraFindingsStore, type AiraFreshnessVerdict } from "./findings.ts";
 import { LiveCodeProvider } from "./providers/live-code/index.ts";
 import { RepositoryProvider } from "./providers/repository/index.ts";
 import type { GitChangeFileStats } from "./providers/repository/relationships.ts";
-import type { AiraIntelligenceStatus } from "./status.ts";
+import type { AiraIntelligenceStatus, AiraIntelligenceTopFinding } from "./status.ts";
 import { initialAiraIntelligenceStatus } from "./status.ts";
 
 export const AIRA_INTELLIGENCE_CONTEXT_TYPE = "aira.intelligence";
@@ -53,6 +53,21 @@ export interface AiraIntelligenceHandle {
 	 * git/repository evidence is unavailable (degrades truthfully).
 	 */
 	verificationChanges(): Promise<GitChangeFileStats[] | undefined>;
+	/**
+	 * Bounded working-set stats (path, status, +/- lines) for UI projections
+	 * (Phase 12 Workbench). Same canonical git seam as `verificationChanges`;
+	 * UI callers coalesce through the Workbench controller so git processes
+	 * never run at render frequency. Undefined when git is unavailable.
+	 */
+	workingSet(): Promise<GitChangeFileStats[] | undefined>;
+	/**
+	 * Bounded symbols from the working set (changed/edited paths) for the
+	 * Phase 12 Workbench "Relevant Symbols" panel. Derived from the cached
+	 * repository index — token-free and free of extra git/scan processes.
+	 */
+	relevantSymbols(limit?: number): Array<{ path: string; name: string; kind: string; line: number }>;
+	/** Subscribe to intelligence snapshot changes (Phase 12 UI seam). */
+	subscribe(listener: (status: AiraIntelligenceStatus) => void): () => void;
 	dispose(): Promise<void>;
 }
 
@@ -73,6 +88,7 @@ export class IntelligenceCoordinator implements AiraIntelligenceHandle {
 	private lastInjectedHash: string | undefined;
 	private readonly postEditTimers = new Map<string, NodeJS.Timeout>();
 	private readonly pendingEdits = new Map<string, string>();
+	private readonly listeners = new Set<(status: AiraIntelligenceStatus) => void>();
 	private status: AiraIntelligenceStatus = initialAiraIntelligenceStatus();
 	private degraded = false;
 	private disposed = false;
@@ -181,6 +197,26 @@ export class IntelligenceCoordinator implements AiraIntelligenceHandle {
 		return this.repository?.verificationChanges();
 	}
 
+	/** Bounded working-set stats for UI projections (Phase 12; read-only). */
+	async workingSet(): Promise<GitChangeFileStats[] | undefined> {
+		return this.repository?.workingSet();
+	}
+
+	/** Subscribe to snapshot changes (Phase 12 UI seam; token-free). */
+	subscribe(listener: (status: AiraIntelligenceStatus) => void): () => void {
+		this.listeners.add(listener);
+		return () => this.listeners.delete(listener);
+	}
+
+	/**
+	 * Bounded symbols from the working set (changed/edited paths) for the
+	 * Phase 12 Workbench "Relevant Symbols" panel. Derived from the cached
+	 * repository index — token-free and free of extra git/scan processes.
+	 */
+	relevantSymbols(limit = 12): Array<{ path: string; name: string; kind: string; line: number }> {
+		return this.repository?.relevantSymbols(limit) ?? [];
+	}
+
 	private onAgentEvent = (event: AgentEvent): void => {
 		if (this.disposed || !this.activation.active) {
 			return;
@@ -252,6 +288,7 @@ export class IntelligenceCoordinator implements AiraIntelligenceHandle {
 		const live = this.liveCode?.statusInfo();
 		const counts = this.findings.counts();
 		const stale = this.findings.refreshAll((path) => fileMtimeMs(path)).stale;
+		const top = topAiraFindings(this.findings.all());
 		this.status = {
 			active: this.activation.active,
 			activationReason: this.activation.reason,
@@ -281,10 +318,14 @@ export class IntelligenceCoordinator implements AiraIntelligenceHandle {
 				errors: counts.errors,
 				warnings: counts.warnings,
 				stale,
+				top,
 			},
 			degraded: this.degraded,
 		};
 		this.state.intelligence = this.status;
+		for (const listener of this.listeners) {
+			listener(this.status);
+		}
 	}
 }
 
@@ -296,6 +337,42 @@ export function createAiraIntelligence(
 ): AiraIntelligenceHandle {
 	return new IntelligenceCoordinator(state, agent, options);
 }
+
+const AIRA_TOP_FINDINGS_LIMIT = 3;
+
+/**
+ * Bounded UI-ready top findings (errors first, then warnings, fresh first).
+ * Purely a projection of the canonical findings store — no new truth.
+ */
+export function topAiraFindings(findings: AiraIntelligenceTopFindingSource[]): AiraIntelligenceTopFinding[] {
+	const ranked = [...findings].sort((a, b) => {
+		const severityRank = (severity: string): number => (severity === "error" ? 0 : severity === "warning" ? 1 : 2);
+		const bySeverity = severityRank(a.severity) - severityRank(b.severity);
+		if (bySeverity !== 0) return bySeverity;
+		const freshnessRank = (freshness: string): number => (freshness === "fresh" ? 0 : freshness === "stale" ? 2 : 1);
+		const byFreshness = freshnessRank(a.freshness) - freshnessRank(b.freshness);
+		if (byFreshness !== 0) return byFreshness;
+		return a.at - b.at;
+	});
+	return ranked.slice(0, AIRA_TOP_FINDINGS_LIMIT).map((f) => ({
+		severity: f.severity,
+		...(f.code !== undefined && f.code !== null ? { code: f.code } : {}),
+		message: f.message,
+		path: f.path,
+		...(f.range ? { line: f.range.start.line + 1 } : {}),
+		freshness: f.freshness,
+	}));
+}
+
+type AiraIntelligenceTopFindingSource = {
+	severity: AiraFindingSeverity;
+	code?: string | number;
+	message: string;
+	path: string;
+	at: number;
+	freshness: AiraFreshnessVerdict;
+	range?: { start: { line: number } };
+};
 
 function contentHash(content: string): string {
 	return createHash("sha1").update(content).digest("base64url").slice(0, 16);

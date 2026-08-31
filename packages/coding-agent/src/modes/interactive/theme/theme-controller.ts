@@ -73,9 +73,11 @@ export class InteractiveThemeController {
 
 		const detection = await detectTerminalBackgroundTheme({ ui: this.ui, timeoutMs: 100 });
 		this.terminalTheme = detection.theme;
-		if (!this.applyThemeName(detection.theme).success) return;
+		// Aira default dark theme is `aira-zhr` (built-in), not the classic `dark`.
+		const themeName = detection.theme === "light" ? "light" : "aira-zhr";
+		if (!this.applyThemeName(themeName).success) return;
 		if (detection.confidence === "high") {
-			settingsManager.setTheme(detection.theme);
+			settingsManager.setTheme(themeName);
 			await settingsManager.flush();
 		}
 	}

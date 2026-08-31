@@ -167,6 +167,15 @@ export class RepositoryProvider {
 		}
 	}
 
+	/**
+	 * Bounded working-set stats for UI projections (Phase 12 Workbench). Same
+	 * canonical git seam as `verificationChanges`; UI callers coalesce through
+	 * the Workbench controller so git processes never run at render frequency.
+	 */
+	async workingSet(): Promise<GitChangeFileStats[] | undefined> {
+		return this.verificationChanges();
+	}
+
 	/** Mark an edited absolute path so change awareness works without git churn. */
 	noteEdit(absolutePath: string): void {
 		const rel = this.toRelative(absolutePath);
@@ -211,6 +220,26 @@ export class RepositoryProvider {
 	/** Ranked likely-file discovery for a free-text objective. */
 	discover(query: string, options?: { limit?: number }) {
 		return this.relationships.discover(query, options);
+	}
+
+	/**
+	 * Bounded symbols from the working set (changed/edited paths) for UI
+	 * projections (Phase 12 Workbench "Relevant Symbols"). Derived from the
+	 * cached repository index — zero extra scans, zero git processes.
+	 */
+	relevantSymbols(limit = 12): Array<{ path: string; name: string; kind: string; line: number }> {
+		const files = new Map(this.relationships.files().map((f) => [f.path, f]));
+		const paths = this.changeInfo.changed ?? [...this.sessionEdited];
+		const rows: Array<{ path: string; name: string; kind: string; line: number }> = [];
+		for (const rel of paths) {
+			const file = files.get(rel);
+			if (!file) continue;
+			for (const symbol of file.symbols) {
+				rows.push({ path: file.path, name: symbol.name, kind: symbol.kind, line: symbol.line });
+				if (rows.length >= limit) return rows;
+			}
+		}
+		return rows;
 	}
 
 	/** Absolute paths that import the given absolute path. */

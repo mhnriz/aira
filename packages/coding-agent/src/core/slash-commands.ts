@@ -41,6 +41,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{ name: "agents", description: "Show Aira agent orchestration state" },
 	{ name: "goal", description: "Show Aira goal state (status | stop | resume | clear | create)" },
 	{ name: "changelog", description: "Show changelog entries" },
+	{ name: "workbench", description: "Toggle the Workbench sidebar (on | off)", argumentHint: "[on|off]" },
 	{ name: "hotkeys", description: "Show all keyboard shortcuts" },
 	{ name: "fork", description: "Create a new fork from a previous user message" },
 	{ name: "clone", description: "Duplicate the current session at the current position" },

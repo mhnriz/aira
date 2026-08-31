@@ -22,6 +22,7 @@ export interface AppKeybindings {
 	"app.model.cycleBackward": true;
 	"app.model.select": true;
 	"app.tools.expand": true;
+	"app.workbench.toggle": true;
 	"app.thinking.toggle": true;
 	"app.session.toggleNamedFilter": true;
 	"app.editor.external": true;
@@ -117,7 +118,15 @@ export const KEYBINDINGS = {
 		description: "Cycle to previous model",
 	},
 	"app.model.select": { defaultKeys: "ctrl+l", description: "Open model selector" },
-	"app.tools.expand": { defaultKeys: "ctrl+o", description: "Toggle tool output" },
+	"app.tools.expand": { defaultKeys: "alt+o", description: "Toggle tool output" },
+	"app.workbench.toggle": {
+		// Phase 12: Ctrl+O toggles the native Workbench sidebar. Tool-output
+		// expansion (previously Ctrl+O) moved to Alt+O; a user who customized
+		// `app.tools.expand` keeps their binding (user bindings override
+		// defaults in KeybindingsManager, never overwritten).
+		defaultKeys: "ctrl+o",
+		description: "Toggle Workbench sidebar",
+	},
 	"app.thinking.toggle": {
 		defaultKeys: "ctrl+t",
 		description: "Toggle thinking blocks",

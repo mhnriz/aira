@@ -39,7 +39,7 @@ const intelligence: AiraIntelligenceStatus = {
 		crashCount: 0,
 	},
 	repository: { status: "ready", filesIndexed: 12, cacheLoaded: true, changesAvailable: true, changeCount: 1 },
-	findings: { total: 0, errors: 0, warnings: 0, stale: 0 },
+	findings: { total: 0, errors: 0, warnings: 0, stale: 0, top: [] },
 	degraded: false,
 };
 

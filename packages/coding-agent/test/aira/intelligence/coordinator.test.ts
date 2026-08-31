@@ -270,7 +270,7 @@ describe("intelligence coordinator", () => {
 		const first = handle.providePromptContext("where is entry implemented?");
 		expect(first).toBeDefined();
 		// Rerun after the first injection: orientation delivered, no new signal.
-		state.intelligence!.findings = { total: 0, errors: 0, warnings: 0, stale: 0 };
+		state.intelligence!.findings = { total: 0, errors: 0, warnings: 0, stale: 0, top: [] };
 		const second = handle.providePromptContext("continue");
 		expect(second).toBeUndefined();
 	});

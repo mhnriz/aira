@@ -79,7 +79,16 @@
 		"thinkingXhigh": "#8b008b",
 		"thinkingMax": "#af005f",
 
-		"bashMode": "green"
+		"bashMode": "green",
+
+		"copper": "#8a6a4a",
+		"copperBright": "#A98057",
+		"blue": "blue",
+		"cyan": "#4A7F7A",
+		"green": "green",
+		"yellow": "yellow",
+		"red": "red",
+		"purple": "#7e57c2"
 	},
 	"export": {
 		"pageBg": "#f8f8f8",

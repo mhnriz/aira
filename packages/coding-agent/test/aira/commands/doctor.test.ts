@@ -126,7 +126,7 @@ describe("Aira /doctor command (Phase 4 scope)", () => {
 		const report = buildAiraDoctorReport(state);
 
 		expect(report.home).toBe(expectedHome);
-		expect(report.checks.length).toBe(16);
+		expect(report.checks.length).toBe(18);
 		for (const check of report.checks) {
 			expect(check.pass, `${check.name} should pass`).toBe(true);
 		}
@@ -232,7 +232,7 @@ describe("Aira /doctor command (Phase 4 scope)", () => {
 			changeCount: 2,
 		};
 		status.liveCode = { status: "degraded", servers: [], spawnCount: 1, crashCount: 1 };
-		status.findings = { total: 3, errors: 1, warnings: 2, stale: 0 };
+		status.findings = { total: 3, errors: 1, warnings: 2, stale: 0, top: [] };
 		status.degraded = true;
 		state.intelligence = status;
 		const report = buildAiraDoctorReport(state);
@@ -262,7 +262,7 @@ describe("Aira /doctor command (Phase 4 scope)", () => {
 			spawnCount: 0,
 			crashCount: 0,
 		};
-		status.findings = { total: 0, errors: 0, warnings: 0, stale: 0 };
+		status.findings = { total: 0, errors: 0, warnings: 0, stale: 0, top: [] };
 		state.intelligence = status;
 		const report = buildAiraDoctorReport(state);
 		const check = report.checks.find((c) => c.name === "intelligence");
@@ -320,7 +320,7 @@ describe("Aira /doctor command (Phase 4 scope)", () => {
 		const text = formatAiraDoctorReport(buildAiraDoctorReport(state));
 
 		expect(text).toContain(`home: ${expectedHome}`);
-		expect(text).toContain("summary: 16/16 checks passed");
+		expect(text).toContain("summary: 18/18 checks passed");
 		expect(text).toContain("ok  home:");
 		expect(text).toContain("ok  browser: availability probe pending");
 		disposeAiraSessionState("doctor-5", state);

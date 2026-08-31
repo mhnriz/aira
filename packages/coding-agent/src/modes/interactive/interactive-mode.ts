@@ -47,6 +47,7 @@ import chalk from "chalk";
 import { spawn } from "child_process";
 import {
 	AIRA_PERMISSION_MODES,
+	type AiraDoctorCheck,
 	type AiraGoalSnapshot,
 	type AiraInteractionHandle,
 	type AiraInteractionPendingProjection,
@@ -195,6 +196,8 @@ import {
 	theme,
 } from "./theme/theme.ts";
 import { InteractiveThemeController } from "./theme/theme-controller.ts";
+import { WorkbenchController } from "./workbench/controller.ts";
+import { AiraTuiMainScreen } from "./workbench/tui-rail.ts";
 
 /** Interface for components that can be expanded/collapsed */
 interface Expandable {
@@ -414,7 +417,10 @@ export function createInteractiveTui(options: InteractiveTuiOptions): TuiMainScr
 			},
 		});
 	}
-	return new TuiMainScreen(terminal, options.showHardwareCursor, options.logDirectory);
+	// Aira Workbench rail (Phase 12): terminal-native mode renders a right
+	// sidebar via the native overlay surface + a base-width shrink owned by
+	// this subclass. `TuiMainScreen` remains untouched (Pi-derived core).
+	return new AiraTuiMainScreen(terminal, options.showHardwareCursor, options.logDirectory);
 }
 
 /** Stable reference for components while InteractiveMode replaces the active renderer. */
@@ -472,6 +478,11 @@ export class InteractiveMode {
 	private footer: FooterComponent;
 	private footerContainer: Container;
 	private footerDataProvider: FooterDataProvider;
+	// Phase 12 native Workbench (sidebar + rail + footer projection owner).
+	private workbench: WorkbenchController | undefined;
+	private mainLayoutRoot: Component | undefined;
+	private dockContainer: Component | undefined;
+	private workbenchRoot: Component | undefined;
 	// Stored so the same manager can be injected into custom editors, selectors, and extension UI.
 	private keybindings: KeybindingsManager;
 	private version: string;
@@ -601,6 +612,8 @@ export class InteractiveMode {
 		this.autoTrustOnReloadCwd = options.autoTrustOnReloadCwd;
 		this.runtimeHost.setBeforeSessionInvalidate(() => {
 			this.resetExtensionUI();
+			this.workbench?.dispose();
+			this.workbench = undefined;
 		});
 		this.runtimeHost.setRebindSession(async () => {
 			await this.rebindCurrentSession({ renderBeforeBind: true });
@@ -861,6 +874,66 @@ export class InteractiveMode {
 		}
 	}
 
+	/** Recreate the controller after a session rebind (new session owner). */
+	private rebindWorkbenchForSession(): void {
+		this.setupWorkbench();
+		this.workbench?.bindTui(this.renderer);
+	}
+
+	/**
+	 * Phase 12 — native Workbench setup. Creates the session controller once
+	 * and subscribes to the canonical snapshot seams. Headless modes never
+	 * reach this path (interactive only by construction).
+	 */
+	private setupWorkbench(): void {
+		this.workbench?.dispose();
+		this.workbench = new WorkbenchController({
+			session: this.session,
+			footerComponent: this.footerContainer,
+			getBranch: () => this.footerDataProvider.getGitBranch() ?? undefined,
+			getFooterLineCount: () => this.footerRenderedLineCount(),
+			requestRender: () => this.ui.requestRender(),
+			invalidate: () => this.ui.invalidate(),
+			layoutChanged: () => this.rebuildWorkbenchLayout(),
+			showStatus: (message) => this.showStatus(message),
+		});
+		this.workbench.attach();
+	}
+
+	/** Footer line count (1 + optional extension-status line). */
+	private footerRenderedLineCount(): number {
+		return this.footerDataProvider.getExtensionStatuses().size > 0 ? 2 : 1;
+	}
+
+	/** Main layout: transcript + dock; the sidebar split wraps it in fullscreen. */
+	private rebuildWorkbenchLayout(): void {
+		if (!this.mainLayoutRoot) return;
+		this.workbenchRoot = this.workbench?.wrapLayout(this.mainLayoutRoot) ?? this.mainLayoutRoot;
+		this.fullscreenLayoutRoot = new TuiLayouts.VStack([
+			{ component: this.workbenchRoot, basis: 0, grow: 1, shrink: 1, minSize: 1 },
+			{ component: this.footerContainer, basis: "auto", grow: 0, shrink: 1, minSize: 1 },
+		]);
+		if (TuiLayouts.isViewportTUI(this.renderer)) {
+			this.renderer.setLayoutRoot(this.fullscreenLayoutRoot);
+		}
+	}
+
+	/** Ctrl+O / app.workbench.toggle: flip the sidebar (stateful, session-scoped). */
+	private toggleWorkbench(): void {
+		this.workbench?.toggle();
+	}
+
+	/** /workbench [on|off] — restrained native command. */
+	private handleWorkbenchCommand(): void {
+		const workbench = this.workbench;
+		if (!workbench) {
+			this.showStatus("Workbench unavailable");
+			return;
+		}
+		workbench.toggle();
+		this.showStatus(`Workbench ${workbench.isVisibleNow() ? "visible" : "hidden"}`);
+	}
+
 	private stopInteractiveTui(fullscreenExitOutput: FullscreenExitOutput): void {
 		if (this.renderer.mode === "fullscreen" && fullscreenExitOutput === "transcript") {
 			while (this.renderer.hasOverlayEntries) this.renderer.hideOverlay();
@@ -873,7 +946,14 @@ export class InteractiveMode {
 	private switchTuiMode(mode: TuiMode, restoreProgress = true, startRenderer = true): boolean {
 		const previousUi = this.renderer;
 		if (mode === previousUi.mode) return true;
-		if (previousUi.hasOverlayEntries) return false;
+
+		// The Workbench rail overlay must not block renderer switching; detach
+		// it before the overlay guard, re-attach when a foreign overlay blocks.
+		this.workbench?.detachTui();
+		if (previousUi.hasOverlayEntries) {
+			this.workbench?.bindTui(this.renderer);
+			return false;
+		}
 
 		const components = [...previousUi.children];
 		const focus = previousUi.getFocusedComponent();
@@ -904,7 +984,9 @@ export class InteractiveMode {
 		}
 		this.renderer = nextUi;
 		this.options.tuiMode = mode;
+		this.rebuildWorkbenchLayout();
 		this.mountInteractiveTui(nextUi, components);
+		this.workbench?.bindTui(nextUi);
 		nextUi.invalidate();
 		nextUi.setFocus(focus);
 		if (!startRenderer) return true;
@@ -953,18 +1035,19 @@ export class InteractiveMode {
 			scrollbar: this.settingsManager.getFullscreenScrollbar(),
 			scrollbarStyle: (text) => theme.bg("scrollbarThumb", text),
 		});
-		const dock = new TuiLayouts.VStack([
+		this.dockContainer = new TuiLayouts.VStack([
 			{ component: this.pendingMessagesContainer, shrink: 1, minSize: 0 },
 			{ component: this.statusContainer, shrink: 1, minSize: 0 },
 			{ component: this.widgetContainerAbove, shrink: 1, minSize: 0 },
 			{ component: this.editorContainer, shrink: 1, minSize: 3 },
 			{ component: this.widgetContainerBelow, shrink: 1, minSize: 0 },
-			{ component: this.footerContainer, shrink: 1, minSize: 1 },
 		]);
-		this.fullscreenLayoutRoot = new TuiLayouts.VStack([
+		this.mainLayoutRoot = new TuiLayouts.VStack([
 			{ component: this.transcriptScrollView, basis: 0, grow: 1, shrink: 1, minSize: 1 },
-			{ component: dock, basis: "auto", grow: 0, shrink: 1, minSize: 1 },
+			{ component: this.dockContainer, basis: "auto", grow: 0, shrink: 1, minSize: 1 },
 		]);
+		this.setupWorkbench();
+		this.rebuildWorkbenchLayout();
 		this.mountInteractiveTui(this.renderer, [
 			this.documentContainer,
 			this.pendingMessagesContainer,
@@ -974,6 +1057,7 @@ export class InteractiveMode {
 			this.widgetContainerBelow,
 			this.footerContainer,
 		]);
+		this.workbench?.bindTui(this.renderer);
 		// Accept text while startup completes, but only enable interrupt, exit, and submission feedback.
 		this.defaultEditor.onAction("app.clear", () => this.handleCtrlC());
 		this.defaultEditor.onCtrlD = () => this.handleCtrlD();
@@ -1005,6 +1089,7 @@ export class InteractiveMode {
 				rawKeyHint(`${keyText("app.model.cycleForward")}/${keyText("app.model.cycleBackward")}`, "to cycle models"),
 				hint("app.model.select", "to select model"),
 				hint("app.tools.expand", "to expand tools"),
+				hint("app.workbench.toggle", "to toggle Workbench"),
 				hint("app.thinking.toggle", "to expand thinking"),
 				hint("app.editor.external", "for external editor"),
 				rawKeyHint("/", "for commands"),
@@ -2021,6 +2106,7 @@ export class InteractiveMode {
 		this.footer.setSession(this.session);
 		this.footer.setAutoCompactEnabled(this.session.autoCompactionEnabled);
 		this.footerDataProvider.setCwd(this.sessionManager.getCwd());
+		this.workbench?.syncSettings();
 		this.hideThinkingBlock = this.settingsManager.getHideThinkingBlock();
 		this.outputPad = this.settingsManager.getOutputPad();
 		this.ui.setShowHardwareCursor(this.settingsManager.getShowHardwareCursor());
@@ -2064,6 +2150,7 @@ export class InteractiveMode {
 		await this.updateAvailableProviderCount();
 		this.updateEditorBorderColor();
 		this.updateTerminalTitle();
+		this.rebindWorkbenchForSession();
 	}
 
 	private async handleFatalRuntimeError(prefix: string, error: unknown): Promise<never> {
@@ -2924,6 +3011,7 @@ export class InteractiveMode {
 		this.ui.onDebug = () => this.handleDebugCommand();
 		this.defaultEditor.onAction("app.model.select", () => this.showModelSelector());
 		this.defaultEditor.onAction("app.tools.expand", () => this.toggleToolOutputExpansion());
+		this.defaultEditor.onAction("app.workbench.toggle", () => this.toggleWorkbench());
 		this.defaultEditor.onAction("app.thinking.toggle", () => this.toggleThinkingBlockVisibility());
 		this.defaultEditor.onAction("app.editor.external", () => void this.handleOpenExternalEditor());
 		this.defaultEditor.onAction("app.message.copy", () => void this.handleCopyCommand({ flashConfirmation: true }));
@@ -3109,6 +3197,18 @@ export class InteractiveMode {
 			}
 			if (text === "/changelog") {
 				this.handleChangelogCommand();
+				this.editor.setText("");
+				return;
+			}
+			if (text === "/workbench" || text.startsWith("/workbench ")) {
+				const arg = text.slice("/workbench".length).trim();
+				if (arg === "on") {
+					this.workbench?.setVisible(true);
+				} else if (arg === "off") {
+					this.workbench?.setVisible(false);
+				} else {
+					this.handleWorkbenchCommand();
+				}
 				this.editor.setText("");
 				return;
 			}
@@ -4447,7 +4547,54 @@ export class InteractiveMode {
 		const report = buildAiraDoctorReport(getAiraSessionState(this.session.sessionId));
 		this.chatContainer.addChild(new Spacer(1));
 		this.chatContainer.addChild(new Text(theme.fg("dim", formatAiraDoctorReport(report)), 1, 0));
+		const uiChecks = this.buildWorkbenchUiDoctorChecks();
+		if (uiChecks.length > 0) {
+			this.chatContainer.addChild(
+				new Text(
+					theme.fg(
+						"dim",
+						uiChecks.map((check) => `${check.pass ? "ok" : "FAIL"}  ${check.name}: ${check.detail}`).join("\n"),
+					),
+					1,
+					0,
+				),
+			);
+		}
 		this.ui.requestRender();
+	}
+
+	/** TUI-mode workbench checks (surface health; /doctor stays usable headless). */
+	private buildWorkbenchUiDoctorChecks(): AiraDoctorCheck[] {
+		const checks: AiraDoctorCheck[] = [];
+		const workbench = this.workbench;
+		if (!workbench) {
+			checks.push({
+				name: "workbench",
+				pass: true,
+				detail: "not attached (headless/print mode — expected)",
+			});
+			return checks;
+		}
+		const visible = workbench.isVisibleNow();
+		const explicit = workbench.getExplicitVisible();
+		checks.push({
+			name: "workbench",
+			pass: true,
+			detail: `attached · ${visible ? "visible" : "hidden"} · ${this.renderer.mode} · explicit ${explicit === undefined ? "unset" : explicit ? "on" : "off"} · subscriptions ${this.workbenchSubscriptionCount()}`,
+		});
+		const customFooter = this.customFooter !== undefined;
+		checks.push({
+			name: "chrome conflict",
+			pass: !customFooter,
+			detail: customFooter
+				? "extension custom footer installed — Workbench footer suppressed (extension chrome owns the rail)"
+				: "no extension custom footer — native Workbench footer active",
+		});
+		return checks;
+	}
+
+	private workbenchSubscriptionCount(): number {
+		return this.workbench?.subscriptionCount() ?? 0;
 	}
 
 	/**
@@ -7344,6 +7491,8 @@ export class InteractiveMode {
 	stop(fullscreenExitOutput = this.settingsManager.getFullscreenExitOutput()): void {
 		this.disposeActiveSelector();
 		this.detachAiraInteractionBridge();
+		this.workbench?.dispose();
+		this.workbench = undefined;
 		if (this.settingsManager.getShowTerminalProgress()) {
 			this.ui.terminal.setProgress(false);
 		}

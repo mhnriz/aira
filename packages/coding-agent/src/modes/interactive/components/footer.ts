@@ -1,11 +1,12 @@
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { airaModeGlyph, airaModeLabel } from "../../../aira/index.ts";
+import { arbitrateCurrentFinding } from "../../../aira/ui/finding.ts";
+import { buildFooterSegments, FOOTER_SEPARATOR } from "../../../aira/ui/footer.ts";
+import type { WorkbenchFooterSegment } from "../../../aira/ui/types.ts";
 import type { AgentSession } from "../../../core/agent-session.ts";
-import { areExperimentalFeaturesEnabled } from "../../../core/experimental.ts";
 import type { ReadonlyFooterDataProvider } from "../../../core/footer-data-provider.ts";
-import { addUsageToTotals, createUsageTotals } from "../../../core/usage-totals.ts";
 import { theme } from "../theme/theme.ts";
+import { roleColor } from "../workbench/workbench-component.ts";
 
 /**
  * Sanitize text for display in a single-line status.
@@ -19,34 +20,28 @@ function sanitizeStatusText(text: string): string {
 		.trim();
 }
 
-/**
- * Format token counts for compact footer display.
- */
-export function formatTokens(count: number): string {
-	if (count < 1000) return count.toString();
-	if (count < 10000) return `${(count / 1000).toFixed(1)}k`;
-	if (count < 1000000) return `${Math.round(count / 1000)}k`;
-	if (count < 10000000) return `${(count / 1000000).toFixed(1)}M`;
-	return `${Math.round(count / 1000000)}M`;
-}
+export { formatTokens } from "../../../aira/ui/footer.ts";
 
+/** Format a cwd under the user's home for footer display. */
 export function formatCwdForFooter(cwd: string, home: string | undefined): string {
 	if (!home) return cwd;
-
 	const resolvedCwd = resolve(cwd);
 	const resolvedHome = resolve(home);
 	const relativeToHome = relative(resolvedHome, resolvedCwd);
 	const isInsideHome =
 		relativeToHome === "" ||
 		(relativeToHome !== ".." && !relativeToHome.startsWith(`..${sep}`) && !isAbsolute(relativeToHome));
-
 	if (!isInsideHome) return cwd;
 	return relativeToHome === "" ? "~" : `~${sep}${relativeToHome}`;
 }
 
 /**
- * Footer component that shows pwd, token stats, and context usage.
- * Computes token/context stats from session, gets git branch and extension statuses from provider.
+ * Aira Workbench footer — segment-based status rail (Phase 12).
+ *
+ * One line of responsive segments (mode first, model last); lower-priority
+ * segments drop first as width runs out (see aira/ui/footer.ts for the
+ * priority model). The single most useful current finding is arbitrated from
+ * canonical state and rendered as a compact segment.
  */
 export class FooterComponent implements Component {
 	private autoCompactEnabled = true;
@@ -83,169 +78,75 @@ export class FooterComponent implements Component {
 	}
 
 	render(width: number): string[] {
-		const state = this.session.state;
+		const state = this.session.airaSessionState;
 
-		// Calculate cumulative usage from ALL session entries (not just post-compaction messages)
-		const usageTotals = createUsageTotals();
-		let latestCacheHitRate: number | undefined;
-
-		for (const entry of this.session.sessionManager.getEntries()) {
-			if (entry.type === "message" && entry.message.role === "assistant") {
-				addUsageToTotals(usageTotals, entry.message.usage);
-
-				const latestPromptTokens =
-					entry.message.usage.input + entry.message.usage.cacheRead + entry.message.usage.cacheWrite;
-				latestCacheHitRate =
-					latestPromptTokens > 0 ? (entry.message.usage.cacheRead / latestPromptTokens) * 100 : undefined;
-			} else if (entry.type === "message" && entry.message.role === "toolResult" && entry.message.usage) {
-				addUsageToTotals(usageTotals, entry.message.usage);
-			} else if ((entry.type === "branch_summary" || entry.type === "compaction") && entry.usage) {
-				addUsageToTotals(usageTotals, entry.usage);
-			}
-		}
-
-		// Calculate context usage from session (handles compaction correctly).
-		// After compaction, tokens are unknown until the next LLM response.
+		// Context usage from the session (handles compaction correctly).
 		const contextUsage = this.session.getContextUsage();
-		const contextWindow = contextUsage?.contextWindow ?? state.model?.contextWindow ?? 0;
+		const contextWindow = contextUsage?.contextWindow ?? this.session.state.model?.contextWindow ?? 0;
 		const contextPercentValue = contextUsage?.percent ?? 0;
 		const contextPercent = contextUsage?.percent !== null ? contextPercentValue.toFixed(1) : "?";
 
-		// Replace home directory with ~
-		let pwd = formatCwdForFooter(this.session.sessionManager.getCwd(), process.env.HOME || process.env.USERPROFILE);
+		const finding = arbitrateCurrentFinding(state);
 
-		// Add git branch if available
-		const branch = this.footerData.getGitBranch();
-		if (branch) {
-			pwd = `${pwd} (${branch})`;
-		}
+		const model = this.session.state.model;
+		const thinkingLevel = model?.reasoning ? this.session.thinkingLevel : undefined;
 
-		// Add session name if set
-		const sessionName = this.session.sessionManager.getSessionName();
-		if (sessionName) {
-			pwd = `${pwd} • ${sessionName}`;
-		}
+		const { left, right } = buildFooterSegments({
+			state,
+			finding,
+			cwd: this.footerCwd(),
+			branch: this.footerData.getGitBranch() ?? undefined,
+			context: {
+				percent: contextPercent,
+				window: contextWindow,
+				autoCompact: this.autoCompactEnabled,
+				over90: contextPercentValue > 90,
+				over70: contextPercentValue > 70,
+			},
+			modelId: model?.id ?? "no-model",
+			thinkingLevel: thinkingLevel === "off" ? undefined : thinkingLevel,
+		});
 
-		// Build stats line
-		const statsParts = [];
-		if (usageTotals.input) statsParts.push(`↑${formatTokens(usageTotals.input)}`);
-		if (usageTotals.output) statsParts.push(`↓${formatTokens(usageTotals.output)}`);
-		if (usageTotals.cacheRead) statsParts.push(`R${formatTokens(usageTotals.cacheRead)}`);
-		if (usageTotals.cacheWrite) statsParts.push(`W${formatTokens(usageTotals.cacheWrite)}`);
-		if ((usageTotals.cacheRead > 0 || usageTotals.cacheWrite > 0) && latestCacheHitRate !== undefined) {
-			statsParts.push(`CH${latestCacheHitRate.toFixed(1)}%`);
-		}
+		const line = composeFooter(left, right, width);
 
-		// Kimi Coding is subscription-backed despite using API-key authentication.
-		const usingSubscription = state.model
-			? state.model.provider === "kimi-coding" || this.session.modelRuntime.isUsingSubscription(state.model.provider)
-			: false;
-		if (usageTotals.cost || usingSubscription) {
-			const costStr = `$${usageTotals.cost.toFixed(3)}${usingSubscription ? " (sub)" : ""}`;
-			statsParts.push(costStr);
-		}
-
-		// Colorize context percentage based on usage
-		let contextPercentStr: string;
-		const autoIndicator = this.autoCompactEnabled ? " (auto)" : "";
-		const contextPercentDisplay =
-			contextPercent === "?"
-				? `?/${formatTokens(contextWindow)}${autoIndicator}`
-				: `${contextPercent}%/${formatTokens(contextWindow)}${autoIndicator}`;
-		if (contextPercentValue > 90) {
-			contextPercentStr = theme.fg("error", contextPercentDisplay);
-		} else if (contextPercentValue > 70) {
-			contextPercentStr = theme.fg("warning", contextPercentDisplay);
-		} else {
-			contextPercentStr = contextPercentDisplay;
-		}
-		statsParts.push(contextPercentStr);
-		if (areExperimentalFeaturesEnabled()) {
-			statsParts.push(`${theme.fg("dim", "•")} ${theme.bold(theme.fg("warning", "xp"))}`);
-		}
-
-		let statsLeft = statsParts.join(" ");
-
-		// Add model name on the right side, plus thinking level if model supports it
-		const modelName = state.model?.id || "no-model";
-
-		let statsLeftWidth = visibleWidth(statsLeft);
-
-		// If statsLeft is too wide, truncate it
-		if (statsLeftWidth > width) {
-			statsLeft = truncateToWidth(statsLeft, width, "...");
-			statsLeftWidth = visibleWidth(statsLeft);
-		}
-
-		// Calculate available space for padding (minimum 2 spaces between stats and model)
-		const minPadding = 2;
-
-		// Add thinking level indicator if model supports reasoning
-		let rightSideWithoutProvider = modelName;
-		if (state.model?.reasoning) {
-			const thinkingLevel = state.thinkingLevel || "off";
-			rightSideWithoutProvider =
-				thinkingLevel === "off" ? `${modelName} • thinking off` : `${modelName} • ${thinkingLevel}`;
-		}
-
-		// Prepend the provider in parentheses if there are multiple providers and there's enough room
-		let rightSide = rightSideWithoutProvider;
-		if (this.footerData.getAvailableProviderCount() > 1 && state.model) {
-			rightSide = `(${state.model!.provider}) ${rightSideWithoutProvider}`;
-			if (statsLeftWidth + minPadding + visibleWidth(rightSide) > width) {
-				// Too wide, fall back
-				rightSide = rightSideWithoutProvider;
-			}
-		}
-
-		const rightSideWidth = visibleWidth(rightSide);
-		const totalNeeded = statsLeftWidth + minPadding + rightSideWidth;
-
-		let statsLine: string;
-		if (totalNeeded <= width) {
-			// Both fit - add padding to right-align model
-			const padding = " ".repeat(width - statsLeftWidth - rightSideWidth);
-			statsLine = statsLeft + padding + rightSide;
-		} else {
-			// Need to truncate right side
-			const availableForRight = width - statsLeftWidth - minPadding;
-			if (availableForRight > 0) {
-				const truncatedRight = truncateToWidth(rightSide, availableForRight, "");
-				const truncatedRightWidth = visibleWidth(truncatedRight);
-				const padding = " ".repeat(Math.max(0, width - statsLeftWidth - truncatedRightWidth));
-				statsLine = statsLeft + padding + truncatedRight;
-			} else {
-				// Not enough space for right side at all
-				statsLine = statsLeft;
-			}
-		}
-
-		// Apply dim to each part separately. statsLeft may contain color codes (for context %)
-		// that end with a reset, which would clear an outer dim wrapper. So we dim the parts
-		// before and after the colored section independently.
-		const dimStatsLeft = theme.fg("dim", statsLeft);
-		const remainder = statsLine.slice(statsLeft.length); // padding + rightSide
-		const dimRemainder = theme.fg("dim", remainder);
-
-		// Aira mode badge: immediately visible, restrained (one colored token).
-		const mode = this.session.airaMode;
-		const modeColor = mode === "plan" ? "warning" : mode === "review" ? "accent" : "text";
-		const modeBadge = theme.fg(modeColor, `${airaModeGlyph(mode)} ${airaModeLabel(mode)}`);
-
-		const pwdLine = truncateToWidth(`${modeBadge} ${theme.fg("dim", pwd)}`, width, theme.fg("dim", "..."));
-		const lines = [pwdLine, dimStatsLeft + dimRemainder];
-
-		// Add extension statuses on a single line, sorted by key alphabetically
+		// Extension statuses stay on their own line when present (extension
+		// compatibility contract; never mixed into the priority rail).
 		const extensionStatuses = this.footerData.getExtensionStatuses();
+		const lines = [line];
 		if (extensionStatuses.size > 0) {
-			const sortedStatuses = Array.from(extensionStatuses.entries())
+			const statusLine = Array.from(extensionStatuses.entries())
 				.sort(([a], [b]) => a.localeCompare(b))
-				.map(([, text]) => sanitizeStatusText(text));
-			const statusLine = sortedStatuses.join(" ");
-			// Truncate to terminal width with dim ellipsis for consistency with footer style
-			lines.push(truncateToWidth(statusLine, width, theme.fg("dim", "...")));
+				.map(([, text]) => sanitizeStatusText(text))
+				.join(" ");
+			lines.push(truncateToWidth(theme.fg("dim", statusLine), width, theme.fg("dim", "...")));
 		}
-
 		return lines;
 	}
+
+	private footerCwd(): string {
+		return formatCwdForFooter(this.session.sessionManager.getCwd(), process.env.HOME || process.env.USERPROFILE);
+	}
+}
+
+function segmentText(segment: WorkbenchFooterSegment): string {
+	return roleColor(segment.role, segment.text);
+}
+
+/** Compose footer segments into one line with left/right balancing. */
+export function composeFooter(
+	left: readonly WorkbenchFooterSegment[],
+	right: readonly WorkbenchFooterSegment[],
+	width: number,
+): string {
+	const separator = ` ${theme.fg("dim", FOOTER_SEPARATOR)} `;
+	const leftText = left.map(segmentText).join(separator);
+	const rightText = right.map(segmentText).join(separator);
+	const leftWidth = visibleWidth(leftText);
+	const rightWidth = visibleWidth(rightText);
+	const gap = width - leftWidth - rightWidth;
+	if (leftText && rightText && gap >= 2) {
+		return `${leftText}${" ".repeat(gap)}${rightText}`;
+	}
+	const joined = [leftText, rightText].filter(Boolean).join(" · ");
+	return truncateToWidth(joined, width, "");
 }

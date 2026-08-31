@@ -37,6 +37,14 @@ export interface RetrySettings {
 export type TuiMode = RendererTuiMode;
 export type FullscreenExitOutput = "transcript" | "resume-hint";
 
+/** Workbench sidebar width bounds (Phase 12; shared by settings + renderer). */
+export const MIN_WORKBENCH_WIDTH = 34;
+export const DEFAULT_WORKBENCH_WIDTH = 42;
+export const MAX_WORKBENCH_WIDTH = 60;
+
+/** Safe conversation width: below this the sidebar auto-hides (narrow layout). */
+export const MIN_WORKBENCH_MAIN_WIDTH = 72;
+
 export interface TerminalSettings {
 	showImages?: boolean; // default: true (only relevant if terminal supports images)
 	imageWidthCells?: number; // default: 60 (preferred inline image width in terminal cells)
@@ -180,6 +188,13 @@ export interface Settings {
 	/** Native Aira task-graph controls (Phase 11; canonical settings owner). */
 	tasks?: {
 		enabled?: boolean;
+	};
+	/** Native Aira Workbench controls (Phase 12; canonical settings owner). */
+	workbench?: {
+		enabled?: boolean;
+		showOnStartup?: boolean;
+		density?: "comfortable" | "compact";
+		width?: number;
 	};
 }
 
@@ -1393,6 +1408,48 @@ export class SettingsManager {
 	setTasksSettings(settings: { enabled: boolean }): void {
 		this.globalSettings.tasks = settings;
 		this.markModified("tasks");
+		this.save();
+	}
+
+	// Native Aira Workbench settings (Phase 12). Same canonical store; invalid
+	// stored values normalize to defaults. The dynamic priority system needs no
+	// per-panel toggles — good defaults matter more than configurability.
+	getWorkbenchSettings(): {
+		enabled: boolean;
+		showOnStartup: boolean;
+		density: "comfortable" | "compact";
+		width: number;
+	} {
+		const workbench = this.settings.workbench;
+		if (!workbench || typeof workbench !== "object") {
+			return { enabled: true, showOnStartup: true, density: "comfortable", width: DEFAULT_WORKBENCH_WIDTH };
+		}
+		const density = workbench.density === "compact" ? "compact" : "comfortable";
+		const width = Number.isFinite(workbench.width)
+			? Math.max(MIN_WORKBENCH_WIDTH, Math.min(MAX_WORKBENCH_WIDTH, Math.trunc(workbench.width!)))
+			: DEFAULT_WORKBENCH_WIDTH;
+		return {
+			enabled: workbench.enabled === undefined ? true : workbench.enabled === true,
+			showOnStartup: workbench.showOnStartup === undefined ? true : workbench.showOnStartup === true,
+			density,
+			width,
+		};
+	}
+
+	setWorkbenchSettings(settings: {
+		enabled?: boolean;
+		showOnStartup?: boolean;
+		density?: "comfortable" | "compact";
+		width?: number;
+	}): void {
+		const current = this.globalSettings.workbench;
+		this.globalSettings.workbench = {
+			enabled: settings.enabled ?? current?.enabled ?? true,
+			showOnStartup: settings.showOnStartup ?? current?.showOnStartup ?? true,
+			density: settings.density ?? current?.density ?? "comfortable",
+			width: settings.width ?? current?.width ?? DEFAULT_WORKBENCH_WIDTH,
+		};
+		this.markModified("workbench");
 		this.save();
 	}
 
