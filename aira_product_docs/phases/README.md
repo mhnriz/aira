@@ -49,7 +49,8 @@ Stopping point / next phase
 | 8 — Independent Verification | ✅ done 2026-08-29 | [PHASE_8_INDEPENDENT_VERIFICATION.md](PHASE_8_INDEPENDENT_VERIFICATION.md) | native verifier: fresh-context verification at the completion boundary, requirement-driven PASS/FAIL/INCONCLUSIVE verdicts, bounded evidence from repository/language/execution/browser, revision dedupe + freshness invalidation, canonical token-free snapshot, settings, /verify |
 | 9 — Task Graph and Delegation | ✅ done | [PHASE_9_NATIVE_ORCHESTRATION.md](PHASE_9_NATIVE_ORCHESTRATION.md) | root-owned orchestration, strict child isolation, explicit bounded envelopes, delegation tools |
 | 10 — Durable Autonomous Work | ✅ done | [PHASE_10_DURABLE_GOALS.md](PHASE_10_DURABLE_GOALS.md) | durable goals, bounded continuation, lifecycle machine, UI-ready projection |
-| 11 — Compaction and Knowledge | — | — | — |
+| 11 — Native Interaction and Control Layer | ✅ done 2026-09-05 | [PHASE_11_INTERACTION_CONTROL.md](PHASE_11_INTERACTION_CONTROL.md) | permission modes over the Phase 5 capability contract (PLAN absolute, once grants, exact persistent rules in Aira-owned config), shared structured Q&A (permission ASK + ask_user, one pending interaction), canonical task graph with orchestration projection, Goal waiting kinds + answer-resume, deterministic child gating, /permissions + /tasks + /settings submenus, token-free UI-ready snapshots (B-006) |
 | 12 — Policy, Hooks, and Trust | — | — | — |
-| 13 — Pi Compatibility Hardening | — | — | — |
-| 14 — Distribution and Bootstrap | — | — | — |
+| 13 — Compaction and Knowledge | — | — | — |
+| 14 — Pi Compatibility Hardening | — | — | — |
+| 15 — Distribution and Bootstrap | — | — | — |

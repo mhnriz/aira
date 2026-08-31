@@ -694,3 +694,123 @@ Goals have the highest potential for runaway costs (tokens, compute time). Stron
 - Goals require careful state management across the session lifecycle, especially regarding session interruption.
 - Verifier token usage is explicitly tracked and attributed to the goal's token budget for truthful accounting.
 - `AiraSessionEvent` must include goal continuation hooks to allow proper host integration and test harness assertions.
+
+## ADR-030 — Native interaction & control: one permission owner, one interaction owner, one task graph; PLAN stays absolute
+
+**Status:** Accepted
+
+### Decision
+
+Phase 11 builds Aira's human-control layer as three tightly coupled NATIVE
+services with strict single-owner state (ADR-005), layered on the Phase 5
+capability contract — never a competing classification — and the existing
+Phase 3-10 services:
+
+1. **Canonical permission owner.** One `AiraPermissionController` per
+   session (`src/aira/permissions/`) owns authorization. It hooks the host
+   tool boundary (`AgentSession.beforeToolCall`) AFTER the PLAN read-only
+   check; explicit user rules live in Aira-owned config
+   (`~/.aira/agent/permissions.json`), never Pi-owned config and never
+   project-local config (a repository cannot self-grant privileges —
+   project permission files are not read at all in Phase 11).
+
+2. **Permission precedence (deterministic).** (a) PLAN read-only is
+   ABSOLUTE: mutating/process/network/browser-interact requests are denied
+   in PLAN regardless of permission mode or explicit rules — no mode
+   (including yolo) and no rule can weaken it; (b) "allow once" grants are
+   consumed by the very request they approved (never stored for the next
+   request, never broadened); (c) explicit rules: most specific match wins
+   (exact subject beats wildcard), ties by most-recent rule, and a matched
+   rule overrides mode defaults (in yolo, explicit ask rules auto-approve;
+   explicit deny rules stay absolute in every mode); (d) mode defaults by
+   capability class. Four small modes: `normal` (default — routine
+   engineering allowed; risky/destructive process commands, out-of-workspace
+   writes, network and unknown tools ask), `permissive` (normal asks
+   auto-approve; explicit ask rules still prompt), `strict`
+   (deny-unapproved), `yolo` (bypass; deny rules + PLAN remain absolute).
+   The risk-marker table is a bounded deterministic substring list over the
+   normalized command, reviewed in the Phase 11 report.
+
+3. **Canonical interaction owner.** One `AiraInteractionManager` per
+   session (`src/aira/interaction/`) owns ALL structured user questions: at
+   most ONE pending interaction per session. Permission ASK (type
+   "permission") and the model-facing `ask_user` tool (type "semantic")
+   share this infrastructure — there is no second permission-dialog
+   architecture and no duplicate Q&A state store. Outcomes are truthful
+   (`answered` / `cancelled` / `timed-out` / `unavailable` / `superseded`);
+   a cancelled/unavailable question is NEVER an answer. Headless sessions
+   resolve as `unavailable` without hanging; session shutdown resolves
+   pending questions (never a wedged session); the interactive TUI renders
+   questions through the existing selector/input dialogs (attachUI bridge).
+
+4. **Task Graph vs Todo ownership.** The Phase 9 orchestration manager
+   remains the sole owner of child RUN records. A new `AiraTaskManager`
+   (`src/aira/tasks/`) owns the ONE canonical session task graph: manual and
+   model-created rows plus orchestration children PROJECTED as read-only
+   rows through the orchestration subscribe seam (patching a child row is
+   refused; `/agents cancel` is the lifecycle surface). No second mutable
+   task universe exists. `blocked` is DERIVED from unfinished dependencies
+   (never settable; activation of a dependency-blocked task is rejected
+   truthfully). Single-task patching only — never full-list replacement.
+
+5. **Goal waiting integration.** The Phase 10 Goal Runtime consumes the
+   interaction seam: an open question moves a running-class goal to
+   `waiting` with a structured kind (`user-question` / `permission` /
+   `evidence` — never inferred from strings). A real answer resumes the goal
+   (waiting → active); a cancelled semantic question leaves the goal
+   waiting truthfully (only a real user message resumes it); a permission
+   denial resumes the round with the truthful denial. Waiting state persists
+   bounded and machine-readable (kind included); recovery keeps the goal
+   waiting.
+
+6. **Children never bypass root authorization and never prompt.**
+   Deterministic child tool gating (`gateForChild`) evaluates the SAME
+   policy with ask→deny: no prompting, no permission forwarding, no nested
+   interactive storms — production-safe by construction.
+
+### Rationale
+
+The Phase 11 reference study (pi-ask-user, d3ara1n-pi-ask-user,
+pi-permission-system, pi-agent-permissions, inobit-pi-todo,
+touchtechclub-pi-oc-todo) showed proven shapes worth ADOPTING natively
+(bounded structured questions with truthful cancellation; deterministic
+allow/once/session/always/deny decisions with exact-match non-broadening;
+session approval stores; wildcard rule matching; small task-state machines
+with forward-only transitions; token-light projections). What was
+deliberately NOT adopted: extension-bound hosts with per-agent YAML policies
+(Aira IS the host — one canonical owner), persistent UI stores with replay
+hacks (the canonical session owns task state), ask-everything default
+postures that make routine engineering unusable (Aira's normal mode follows
+AIRA_ARCHITECTURE.md §16), separate todo databases (the Phase 9 task graph
+is the decomposition owner), and permission forwarding channels (children
+cannot prompt — determinism over convenience). "Most specific match wins"
+over "deny > allow > ask" precedence was chosen because it is deterministic,
+documented, lets users override their own broad rules, and still keeps deny
+rules absolute within a scope — while PLAN's absolute boundary is enforced
+BEFORE any rule, which is the only precedence that matters for safety.
+
+### Consequences
+
+- `AiraSessionState` gains three bounded token-free snapshots:
+  `state.permissions` (mode, rule counts, store health, last decision),
+  `state.interaction` (pending question projection with choices, closed
+  history), `state.tasks` (counts, current, bounded rows, summary) — all
+  UI-ready with subscribe seams (UI_BACKLOG B-006).
+- New model tools `ask_user` and `tasks` (capability class `interaction`:
+  never workspace-mutating, available in PLAN, never granted to children);
+  new plain surfaces `/permissions` (status/mode/rule add|list|remove) and
+  `/tasks` (list/add/done/cancel/get/remove); `/settings` gains "Aira
+  permissions" / "Aira interaction" / "Aira tasks" submenus; `/status` and
+  `/doctor` gain restrained appendices (the doctor includes a PLAN-absolute
+  proof across every permission mode).
+- Default permission mode is `normal`: existing sessions gain ASK prompts
+  for consequential requests (risky commands, out-of-workspace writes,
+  unknown tools) while routine engineering stays frictionless; strict/yolo
+  are explicit opt-ins. Permission enforcement can be disabled
+  (`permissions.enabled=false`) without touching PLAN enforcement.
+- Session rules and allow-once grants are session-scoped by design;
+  persistent rules require explicit user action and are bounded
+  (≤ 128 rules, length-bounded fields, validated on load; corrupt/oversized
+  stores fail closed to the mode defaults with truthful health — never a
+  crash). No project-config trust mechanism exists yet; Phase 12 owns
+  hooks/trust.

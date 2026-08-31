@@ -57,6 +57,7 @@ describe("regression #5109: exclude tools", () => {
 				"agents_cancel",
 				"agents_delegate",
 				"agents_status",
+				"ask_user",
 				"bash",
 				"browser_click",
 				"browser_close",
@@ -79,6 +80,7 @@ describe("regression #5109: exclude tools", () => {
 				"process_start",
 				"process_status",
 				"process_stop",
+				"tasks",
 				"write",
 			]);
 			expect(harness.session.systemPrompt).not.toContain("- read:");

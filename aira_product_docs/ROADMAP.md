@@ -27,9 +27,11 @@ delegation
   ↓
 durable autonomy
   ↓
-compaction/knowledge
+interaction & control
   ↓
 policy hardening
+  ↓
+compaction/knowledge
   ↓
 distribution
 ```
@@ -401,25 +403,42 @@ Support long-running engineering objectives.
 
 ---
 
-## Phase 11 — Compaction and Knowledge
+## Phase 11 — Native Interaction and Control Layer
 
 ### Goal
 
-Maintain engineering continuity over long sessions.
+Build Aira's native human-control layer: deterministic tool authorization,
+structured agent → user Q&A, and the native Todo/Task UX — integrated with
+the modes, capability contract, execution/browser/verification services,
+orchestration task graph, and Goal Runtime already built in Phases 3-10.
 
 ### Work
 
-- Aira compaction checkpoint;
-- restore objective/plan/task/process/finding state;
-- preserve working/reference files;
-- introduce minimal project knowledge;
-- define integration strategy for durable repo learnings.
+- permission modes over the Phase 5 capability contract (ADR-030);
+- deterministic precedence: PLAN absolute → once grants → explicit rules →
+  mode defaults; Aira-owned persistent rule store; no project self-grant;
+- structured Q&A: one pending interaction per session; permission ASK and
+  semantic ask_user share the same infrastructure; truthful cancellation;
+- Task Graph → Todo projection: canonical task manager, read-only child
+  rows, derived blocked states, single-task patching;
+- Goal waiting kinds (user-question / permission / evidence) + answer
+  resume semantics; deterministic child gating (no nested storms);
+- surfaces: /permissions, /tasks, /settings (permissions/interaction/
+  tasks), /status + /doctor appendices; token-free UI-ready snapshots.
 
 ### Exit criteria
 
-- compaction does not lose engineering state;
-- repository code is re-retrieved rather than bloating checkpoints;
-- knowledge injection remains bounded.
+- PLAN cannot be weakened by any permission mode or rule;
+- ASK → allow-once/session/always (exact-match, never broadening), deny,
+  and cancellation are truthful in real sessions;
+- an answered question resumes a waiting Goal; a cancelled one never
+  invents an answer;
+- /tasks, /status, /doctor, /permissions agree with canonical state;
+- zero ambient prompt bloat; all new state token-free.
+
+### Status
+
+✅ done 2026-09-05 — [PHASE_11_INTERACTION_CONTROL.md](phases/PHASE_11_INTERACTION_CONTROL.md)
 
 ---
 
@@ -448,7 +467,29 @@ Harden autonomy for daily use.
 
 ---
 
-## Phase 13 — Pi Compatibility Hardening
+## Phase 13 — Compaction and Knowledge
+
+### Goal
+
+Maintain engineering continuity over long sessions.
+
+### Work
+
+- Aira compaction checkpoint;
+- restore objective/plan/task/process/finding state;
+- preserve working/reference files;
+- introduce minimal project knowledge;
+- define integration strategy for durable repo learnings.
+
+### Exit criteria
+
+- compaction does not lose engineering state;
+- repository code is re-retrieved rather than bloating checkpoints;
+- knowledge injection remains bounded.
+
+---
+
+## Phase 14 — Pi Compatibility Hardening
 
 ### Goal
 
@@ -472,7 +513,7 @@ Make compatibility an intentional tested contract.
 
 ---
 
-## Phase 14 — Distribution and Bootstrap
+## Phase 15 — Distribution and Bootstrap
 
 ### Goal
 

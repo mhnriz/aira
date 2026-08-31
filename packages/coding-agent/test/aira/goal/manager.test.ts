@@ -114,9 +114,12 @@ class FakeVerification implements AiraVerificationHandle {
 		};
 	}
 
-	async verify(options?: {
-		force?: boolean;
-	}): Promise<{ ok: boolean; outcome: AiraVerifyOutcome; result?: AiraVerificationResult; reason?: string }> {
+	async verify(): Promise<{
+		ok: boolean;
+		outcome: AiraVerifyOutcome;
+		result?: AiraVerificationResult;
+		reason?: string;
+	}> {
 		this.calls += 1;
 		if (this.explicit) {
 			// explicit path (verification.auto=off): only a manually published
@@ -1120,7 +1123,3 @@ describe("Aira goal manager (Phase 10) — budgets, usage, freshness", () => {
 		}
 	});
 });
-
-function awaitSettle(rig: Rig): void {
-	void rig.settle();
-}

@@ -67,6 +67,7 @@ describe("defaultTools setting", () => {
 			"agents_cancel",
 			"agents_delegate",
 			"agents_status",
+			"ask_user",
 			"bash",
 			"browser_click",
 			"browser_close",
@@ -93,6 +94,7 @@ describe("defaultTools setting", () => {
 			"process_status",
 			"process_stop",
 			"read",
+			"tasks",
 			"write",
 		]);
 		expect(session.getActiveToolNames()).toEqual(["grep", "find"]);
@@ -187,6 +189,7 @@ describe("defaultTools setting", () => {
 			"agents_cancel",
 			"agents_delegate",
 			"agents_status",
+			"ask_user",
 			"bash",
 			"browser_click",
 			"browser_close",
@@ -213,6 +216,7 @@ describe("defaultTools setting", () => {
 			"process_status",
 			"process_stop",
 			"read",
+			"tasks",
 			"write",
 		]);
 		expect(session.getActiveToolNames()).toEqual(["ls"]);

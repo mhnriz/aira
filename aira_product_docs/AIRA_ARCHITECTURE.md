@@ -585,3 +585,59 @@ The native Goal Runtime provides bounded autonomous continuation (evaluate -> FA
 - **Verification Authority**: Phase 8 Verifier dictates the completion boundary. `PASS` marks completion; `FAIL` sparks bounded repair; `INCONCLUSIVE` triggers evidence acquisition or wait states.
 - **Task Graph Dependency**: Goal does not own a secondary todo list. It leverages the Phase 9 task graph to project tasks completed vs. total.
 - **User Steering**: Pending user messages defer continuation. Explicit user steer messages resume paused or waiting goals.
+
+## 1.11. Interaction & Control Layer (Phase 11)
+
+The native human-control layer (ADR-030): deterministic tool authorization,
+structured Q&A, and the canonical task graph — three tightly coupled
+services with ONE canonical owner each, integrated with the Phase 3-10
+systems rather than becoming extension-like subsystems.
+
+```text
+Agent / Goal / Orchestration
+        │
+        ├── wants an action
+        │       ↓
+        │   Permission Controller          (src/aira/permissions/)
+        │       ├── allow → execute
+        │       ├── deny  → truthful tool denial
+        │       └── ask   → Native Interaction   (src/aira/interaction/)
+        │                                ↓
+        │                    TUI dialog / answer / cancel
+        ├── needs user decision
+        │       ↓
+        │   Structured Q&A (ask_user) → waiting → answer → resume
+        └── has work
+                ↓
+           Phase 9 Task Graph (orchestration children)
+                ↓
+           Task Manager projection        (src/aira/tasks/, state.tasks)
+```
+
+- **Permission pipeline** (host-side, deterministic, token-free): PLAN
+  read-only is ABSOLUTE (no mode, no rule can weaken it) → allow-once
+  grants (consumed by the request they approved) → explicit rules (most
+  specific match wins; persistent rules in Aira-owned
+  `~/.aira/agent/permissions.json`; project config is NEVER read) →
+  mode defaults by the Phase 5 capability class. Modes: `normal`
+  (default), `permissive`, `strict` (deny-unapproved), `yolo` (bypass —
+  explicit denies + PLAN remain).
+- **Structured Q&A**: one pending interaction per session; permission ASK
+  and the `ask_user` model tool share the same manager (types
+  "permission" | "semantic" in canonical state). Outcomes are truthful
+  (answered / cancelled / timed-out / unavailable / superseded); a
+  cancelled question is never an answer. Headless = unavailable, never a
+  hang; the interactive TUI renders the dialog.
+- **Task graph**: the Phase 9 orchestration manager stays the owner of
+  child run records; the Task Manager owns manual/model rows and projects
+  child runs as read-only rows (patching refused). `blocked` is derived;
+  transitions are forward-only; single-task patching only.
+- **Goal waiting**: structured kinds `user-question` / `permission` /
+  `evidence` (never inferred from strings); answer resumes, semantic
+  cancel keeps the goal waiting, permission denial resumes the round.
+- **Children never prompt**: deterministic child gating evaluates the
+  ROOT policy with ask→deny — no permission forwarding, no nested
+  interactive storms.
+- **Token discipline**: all policy evaluation is host-side; snapshots
+  (`state.permissions`, `state.interaction`, `state.tasks`) are bounded,
+  token-free, UI-ready with subscribe seams (UI_BACKLOG B-006).

@@ -284,3 +284,86 @@ Choose authentication strategy
 - Showing Goal state must cost zero model tokens.
 
 **Explicitly deferred:** the full Workbench/UI overhaul remains a later phase; Phase 10 implemented only the underlying snapshot/event seam, settings, the `/goal` control surface, and the restrained `/status` and `/doctor` projections.
+
+## B-006 — Interaction & control state in the native bottom bar and Engineering Context pane
+
+**Status:** backlog (future Aira UI overhaul; NOT part of Phase 11)
+
+**Problem:** permission/interaction/task state is currently visible through
+`/permissions`, `/tasks`, `/doctor`, `/status`, and model-facing tools only.
+The future Workbench should render it from canonical state with zero model
+tokens and zero policy evaluation.
+
+**Data contracts already available (Phase 11):**
+
+- `AiraSessionState.permissions` (`AiraPermissionStatus`) — enabled, mode
+  (normal|permissive|strict|yolo), persistentRules, sessionRules,
+  onceApprovals, store {status, path, error}, lastDecision {tool, action,
+  at, subject}, updatedAt, summary. Published on every evaluation/rule
+  change; `manager.subscribe()` is the event seam. The future footer chip
+  maps mode directly (`PERM normal` / `PERM permissive` / `PERM strict` /
+  `PERM yolo`) without parsing strings.
+- `AiraSessionState.interaction` (`AiraInteractionStatus`) — pending
+  (bool), question {interactionId, type (permission|semantic), prompt
+  (≤200 chars), context (≤400), choices (≤12, id+label+description),
+  choicesCount, multiSelect, freeform, owner, waitingSince, durationMs},
+  recentClosed (≤4: type, prompt, resolution, closedAt), uiAttached,
+  updatedAt, summary.
+- `AiraSessionState.tasks` (`AiraTasksStatus`) — enabled, total, pending,
+  active, blocked, completed, cancelled, failed, current (active title),
+  rows (≤24: id, title, status, source (user|model|child), dependsOn,
+  childRunId, childRole, detail), childRows, updatedAt, summary.
+
+**Desired projection — Engineering Context pane:**
+
+```text
+Permissions
+─────────────────────
+Mode         normal
+Rules        2 persistent · 1 session
+Store        ok · ~/.aira/agent/permissions.json
+
+Interaction
+─────────────────────
+Question     ● pending (semantic)
+Prompt       Should this API preserve backward compatibility with v1?
+Choices      2    Owner agent    Waiting 12s
+
+Tasks
+─────────────────────
+Status       3/8 · 1 active · 1 blocked
+Current      Implement middleware
+```
+
+**Desired projection — bottom bar segment (compact):**
+
+```text
+◈ BUILD │ PERM default │ TASK 3/8 │ ASK ●
+◈ BUILD │ PERM strict  │ TASK 3/8 ▼ blocked 1
+◈ BUILD │ PERM yolo    │ TASK ✓
+```
+
+with the pending question when width allows:
+
+```text
+◈ BUILD │ PERM default │ ○ Ask pending: Keep v1 compatibility? (2 choices)
+```
+
+**Projection rules:**
+
+- The footer/Workbench derive from the canonical snapshots only; rendering
+  must never evaluate a permission request, open a question, or touch the
+  task store.
+- `permissions.enabled=false` renders `PERM off`, never a fake mode.
+- A pending interaction renders as a question chip; `type` distinguishes
+  authorization (permission) from product (semantic) without parsing.
+- Task chip renders counts and the derived `blocked` truth (never inferred
+  from titles); child-derived rows are visually distinct (`child` source).
+- Mode state, permission state, interaction state, and task state stay
+  separate: a strict permission mode is not a PLAN mode, and a pending
+  question is not a failed subsystem.
+
+**Explicitly deferred:** the full Workbench/UI overhaul remains a later
+phase; Phase 11 implemented only the underlying snapshot/event seams,
+settings, the `/permissions` and `/tasks` surfaces, the native Q&A dialog
+bridge, and the restrained `/status`/`/doctor` projections.

@@ -284,6 +284,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		"agents_delegate",
 		"agents_status",
 		"agents_cancel",
+		"ask_user",
+		"tasks",
 	];
 	const configuredDefaultToolNames = settingsManager.getDefaultTools();
 	const allowedToolNames = options.tools ?? (options.noTools === "all" ? [] : undefined);
