@@ -918,7 +918,7 @@ export class InteractiveMode {
 		}
 	}
 
-	/** Ctrl+O / app.workbench.toggle: flip the sidebar (stateful, session-scoped). */
+	/** Ctrl+Shift+O / app.workbench.toggle: flip the sidebar (session-scoped). */
 	private toggleWorkbench(): void {
 		this.workbench?.toggle();
 	}

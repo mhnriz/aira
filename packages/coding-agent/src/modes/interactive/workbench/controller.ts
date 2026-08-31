@@ -91,6 +91,7 @@ export class WorkbenchController {
 		this.component = createWorkbenchComponent({
 			getHeight: () => (this.tui?.mode === "fullscreen" ? SIDEBAR_UNBOUNDED_HEIGHT : this.railHeight()),
 			showTitle: true,
+			fillHeight: () => this.tui?.mode !== "fullscreen",
 		});
 		this.container.addChild(this.component as Component);
 		this.sidebarScroll = new ScrollView(this.container, {

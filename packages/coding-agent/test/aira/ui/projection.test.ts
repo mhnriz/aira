@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { initialAiraBrowserStatus } from "../../../src/aira/browser/status.ts";
+import type { AiraGoalSnapshot } from "../../../src/aira/goal/types.ts";
 import { initialAiraIntelligenceStatus } from "../../../src/aira/intelligence/status.ts";
+import { initialAiraOrchestrationStatus } from "../../../src/aira/orchestration/status.ts";
 import { type AiraSessionState, acquireAiraSessionState, disposeAiraSessionState } from "../../../src/aira/state.ts";
 import { arbitrateCurrentFinding } from "../../../src/aira/ui/finding.ts";
-import { arbitrateFooterSegments, projectWorkbench } from "../../../src/aira/ui/projection.ts";
+import { arbitrateFooterSegments } from "../../../src/aira/ui/footer.ts";
+import { projectWorkbench } from "../../../src/aira/ui/projection.ts";
 import type { WorkbenchProjectionInput } from "../../../src/aira/ui/types.ts";
 import {
 	isWorkbenchNarrow,
@@ -34,6 +38,40 @@ function defaultInput(state: AiraSessionState, width = 160): WorkbenchProjection
 		context: { percent: "12.5", window: 1_000_000, autoCompact: true, over90: false, over70: false },
 		modelId: "deepseek-v4-flash",
 		thinkingLevel: "max",
+	};
+}
+
+function goalFixture(): AiraGoalSnapshot {
+	return {
+		enabled: true,
+		auto: "smart",
+		status: "repairing",
+		id: "goal-1",
+		objective: "repair the Workbench layout",
+		round: 2,
+		maxRounds: 4,
+		startedAt: Date.now() - 10_000,
+		updatedAt: Date.now(),
+		completedAt: undefined,
+		stopReason: undefined,
+		waiting: undefined,
+		budget: { tokens: 100_000, maxDurationMs: undefined },
+		usage: { consumedTokens: 41_000, remainingTokens: 59_000, sources: ["session"] },
+		revision: undefined,
+		tasks: { completed: 4, active: 3 },
+		verification: {
+			verdict: "fail",
+			stale: false,
+			summary: "one requirement remains",
+			missingEvidence: [],
+			lastError: undefined,
+		},
+		staleCompletion: false,
+		needsUserInput: false,
+		mode: "build",
+		lastEvent: "repair started",
+		persistence: { enabled: true, status: "ok", path: undefined, error: undefined },
+		summary: "repairing · round 2",
 	};
 }
 
@@ -336,6 +374,26 @@ describe("Workbench finding arbitration", () => {
 		disposeFixture(state);
 	});
 
+	it("reports stale and indeterminate LSP findings as freshness warnings", () => {
+		for (const freshness of ["stale", "indeterminate"] as const) {
+			const state = sessionFixture();
+			state.intelligence = {
+				...initialAiraIntelligenceStatus(),
+				findings: {
+					total: 1,
+					errors: 1,
+					warnings: 0,
+					stale: freshness === "stale" ? 1 : 0,
+					top: [{ severity: "error", message: "old error", path: "src/x.ts", freshness }],
+				},
+			};
+			const finding = arbitrateCurrentFinding(state);
+			expect(finding?.severity).toBe("warning");
+			expect(finding?.label).toContain(freshness);
+			disposeFixture(state);
+		}
+	});
+
 	it("a permission ASK outranks a semantic question via source tag", () => {
 		const state = sessionFixture();
 		state.interaction = {
@@ -365,6 +423,141 @@ describe("Workbench finding arbitration", () => {
 });
 
 describe("Workbench panel projection", () => {
+	it("keeps the idle Workbench sparse", () => {
+		const state = sessionFixture();
+		state.intelligence = {
+			...initialAiraIntelligenceStatus(),
+			active: true,
+			repository: { status: "ready", filesIndexed: 1612, cacheLoaded: true, changesAvailable: true, changeCount: 0 },
+			liveCode: {
+				status: "idle",
+				servers: [
+					{ id: "typescript", status: "idle", available: true },
+					{ id: "pyright", status: "idle", available: true },
+					{ id: "gopls", status: "idle", available: true },
+				],
+				spawnCount: 0,
+				crashCount: 0,
+			},
+		};
+		state.permissions = {
+			enabled: true,
+			mode: "normal",
+			persistentRules: 6,
+			sessionRules: 0,
+			onceApprovals: 0,
+			store: { status: "ok", path: undefined, error: undefined },
+			lastDecision: undefined,
+			updatedAt: Date.now(),
+			summary: "normal",
+		};
+		const projection = projectWorkbench(defaultInput(state));
+		expect(projection.panels.map((panel) => panel.id)).toEqual(["intelligence", "control"]);
+		expect(projection.panels[0]?.rows.map((row) => row.value)).toEqual([
+			"ready · 1612 files · clean",
+			"idle · 3 available",
+		]);
+		disposeFixture(state);
+	});
+
+	it("projects running and queued agents with distinct lifecycle truth", () => {
+		const state = sessionFixture();
+		state.orchestration = {
+			...initialAiraOrchestrationStatus(true, 2),
+			status: "active",
+			runningCount: 1,
+			queuedCount: 1,
+			children: [
+				{
+					id: "run-1",
+					taskId: "explore",
+					role: "explore",
+					task: "inspect renderer",
+					status: "running",
+					phase: "running",
+					model: undefined,
+					elapsedMs: 18_000,
+					dependencies: [],
+				},
+				{
+					id: "run-2",
+					taskId: "review",
+					role: "review",
+					task: "review layout",
+					status: "pending",
+					phase: "waiting-capacity",
+					model: undefined,
+					dependencies: [],
+				},
+			],
+			summary: "1 running · 1 queued",
+		};
+		const projection = projectWorkbench(defaultInput(state));
+		const agents = projection.panels.find((panel) => panel.id === "agents");
+		expect(agents?.hint).toBe("1 running · 1 queued");
+		expect(agents?.rows[0]).toMatchObject({ value: "● explore", trailing: "18s" });
+		expect(agents?.rows[1]).toMatchObject({ value: "○ review", trailing: "queued" });
+		expect(projection.footer.find((segment) => segment.id === "agents")?.text).toBe("AGENTS 1+1");
+		disposeFixture(state);
+	});
+
+	it("projects an active goal with round and task progress", () => {
+		const state = sessionFixture();
+		state.goal = goalFixture();
+		const goal = projectWorkbench(defaultInput(state)).panels.find((panel) => panel.id === "goal");
+		expect(goal?.rows[0]).toMatchObject({ label: "State", value: "R2/4 · repairing" });
+		expect(goal?.rows.find((row) => row.label === "Tasks")?.value).toBe("4 / 7 · 3 active");
+		expect(goal?.progress?.value).toBe(0.5);
+		disposeFixture(state);
+	});
+
+	it("shows browser and verifier panels only when their canonical state is relevant", () => {
+		const state = sessionFixture();
+		state.browser = {
+			...initialAiraBrowserStatus(),
+			availability: "available",
+			status: "active",
+			console: { errors: 0, warnings: 1, total: 1 },
+		};
+		state.verification = {
+			...initialAiraVerificationStatus({ enabled: true, auto: "smart", contextBudget: "balanced" }),
+			status: "running",
+			updatedAt: Date.now(),
+		};
+		const ids = projectWorkbench(defaultInput(state)).panels.map((panel) => panel.id);
+		expect(ids).toContain("browser");
+		expect(ids).toContain("verification");
+		disposeFixture(state);
+	});
+
+	it("projects pending interaction as secondary readiness telemetry", () => {
+		const state = sessionFixture();
+		state.interaction = {
+			pending: true,
+			question: {
+				interactionId: "q1",
+				type: "permission",
+				prompt: "git push origin main",
+				choices: [],
+				choicesCount: 0,
+				multiSelect: false,
+				freeform: false,
+				owner: "permission:bash",
+				waitingSince: Date.now() - 12_000,
+				durationMs: 12_000,
+			},
+			recentClosed: [],
+			uiAttached: true,
+			updatedAt: Date.now(),
+			summary: "pending",
+		};
+		const interaction = projectWorkbench(defaultInput(state)).panels.find((panel) => panel.id === "interaction");
+		expect(interaction?.title).toBe("Permission");
+		expect(interaction?.rows[0]?.value).toBe("? git push origin main");
+		expect(interaction?.hint).toContain("waiting 12s");
+		disposeFixture(state);
+	});
+
 	it("orders urgent panels before context panels deterministically", () => {
 		const state = sessionFixture();
 		state.tasks = {
@@ -385,7 +578,12 @@ describe("Workbench panel projection", () => {
 			updatedAt: Date.now(),
 			summary: "1/2 · 1 active",
 		};
-		state.intelligence = initialAiraIntelligenceStatus();
+		state.intelligence = {
+			...initialAiraIntelligenceStatus(),
+			active: true,
+			repository: { status: "ready", filesIndexed: 100, cacheLoaded: true, changesAvailable: true, changeCount: 0 },
+			liveCode: { status: "idle", servers: [], spawnCount: 0, crashCount: 0 },
+		};
 		const input = defaultInput(state);
 		const projection = projectWorkbench(input);
 		const ids = projection.panels.map((panel) => panel.id);

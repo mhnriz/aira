@@ -111,7 +111,7 @@ export function arbitrateCurrentFinding(state: AiraSessionState | undefined): Wo
 	const intelligence = state.intelligence;
 	if (intelligence?.findings.top) {
 		const top = intelligence.findings.top[0];
-		if (top && top.severity === "error" && top.freshness !== "stale") {
+		if (top && top.freshness === "fresh" && top.severity === "error") {
 			const code = top.code !== undefined ? String(top.code) : undefined;
 			candidates.push({
 				severity: "error",
@@ -121,7 +121,7 @@ export function arbitrateCurrentFinding(state: AiraSessionState | undefined): Wo
 				detail: `${top.path ?? "unknown path"}${top.line ? `:${top.line}` : ""} · ${top.freshness}`,
 				...(code ? { code } : {}),
 			});
-		} else if (top && top.severity !== "error") {
+		} else if (top && top.freshness === "fresh" && top.severity !== "error") {
 			candidates.push({
 				severity: "warning",
 				source: "lsp",
@@ -129,6 +129,15 @@ export function arbitrateCurrentFinding(state: AiraSessionState | undefined): Wo
 				label: bound(top.message, 60),
 				detail: `${top.path ?? "unknown path"}${top.line ? `:${top.line}` : ""} · ${top.freshness}`,
 				...(top.code !== undefined ? { code: String(top.code) } : {}),
+			});
+		} else if (top) {
+			candidates.push({
+				severity: "warning",
+				source: "lsp",
+				priority: 2,
+				label: `diagnostics are ${top.freshness}`,
+				detail: `${top.path ?? "unknown path"}${top.line ? `:${top.line}` : ""}`,
+				code: "LSP",
 			});
 		}
 	}

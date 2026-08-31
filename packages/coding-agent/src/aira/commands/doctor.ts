@@ -96,13 +96,13 @@ export function buildAiraDoctorReport(state: AiraSessionState | undefined): Aira
 		detail: `${THINKING_CYCLE_KEY}: ${thinkingKeys.join(", ") || "unbound"}`,
 	});
 
-	// 4b. Phase 12 Workbench toggle on Ctrl+O, tool expansion moved off it
-	// (truthful conflict resolution: the toggle owns Ctrl+O by default).
+	// 4b. Phase 12 Workbench uses its own semantic shortcut; established
+	// Ctrl+O tool-output expansion remains intact.
 	const workbenchKeys = defaultKeysOf(WORKBENCH_TOGGLE_KEY);
 	const expandKeys = defaultKeysOf("app.tools.expand");
 	checks.push({
 		name: "workbench shortcut",
-		pass: workbenchKeys.includes("ctrl+o") && !expandKeys.includes("ctrl+o"),
+		pass: workbenchKeys.includes("ctrl+shift+o") && expandKeys.includes("ctrl+o"),
 		detail: `${WORKBENCH_TOGGLE_KEY}: ${workbenchKeys.join(", ") || "unbound"} | app.tools.expand: ${expandKeys.join(", ") || "unbound"}`,
 	});
 

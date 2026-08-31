@@ -1,7 +1,12 @@
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { arbitrateCurrentFinding } from "../../../aira/ui/finding.ts";
-import { buildFooterSegments, FOOTER_SEPARATOR, formatTokens } from "../../../aira/ui/footer.ts";
+import {
+	arbitrateFooterSegments,
+	buildFooterSegments,
+	FOOTER_SEPARATOR,
+	formatTokens,
+} from "../../../aira/ui/footer.ts";
 import type { WorkbenchFooterSegment } from "../../../aira/ui/types.ts";
 import type { AgentSession } from "../../../core/agent-session.ts";
 import { areExperimentalFeaturesEnabled } from "../../../core/experimental.ts";
@@ -114,7 +119,12 @@ export class FooterComponent implements Component {
 			usage: this.buildUsageText(),
 		});
 
-		const line = composeFooter(left, right, width);
+		const active = new Set(arbitrateFooterSegments(left, right, width));
+		const line = composeFooter(
+			left.filter((segment) => active.has(segment)),
+			right.filter((segment) => active.has(segment)),
+			width,
+		);
 
 		// Extension statuses stay on their own line when present (extension
 		// compatibility contract; never mixed into the priority rail).

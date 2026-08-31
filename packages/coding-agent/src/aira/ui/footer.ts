@@ -21,6 +21,66 @@ import type { WorkbenchFinding, WorkbenchFooterSegment, WorkbenchRole } from "./
 
 export const FOOTER_SEPARATOR = "│";
 
+/** Compose footer rows from left/right groups with responsive dropping. */
+export function arbitrateFooterSegments(
+	left: readonly WorkbenchFooterSegment[],
+	right: readonly WorkbenchFooterSegment[],
+	width: number,
+	separatorWidth = 1,
+): WorkbenchFooterSegment[] {
+	const activeLeft = [...left];
+	const activeRight = [...right];
+	const measure = () => {
+		const leftWidth = sumWidths(activeLeft, separatorWidth);
+		const rightWidth = sumWidths(activeRight, separatorWidth);
+		const join = activeLeft.length > 0 && activeRight.length > 0 ? separatorWidth * 2 : 0;
+		return leftWidth + rightWidth + join;
+	};
+
+	const droppable = [...activeLeft, ...activeRight]
+		.filter((segment) => !segment.required && Number.isFinite(segment.dropRank))
+		.sort((a, b) => a.dropRank - b.dropRank);
+	for (const segment of droppable) {
+		if (measure() <= width) break;
+		removeSegment(activeLeft, segment);
+		removeSegment(activeRight, segment);
+	}
+
+	const compactable = [...activeLeft, ...activeRight].filter((segment) => segment.required && segment.compact);
+	for (const segment of compactable) {
+		if (measure() <= width) break;
+		segment.text = segment.compact!;
+		segment.compact = undefined;
+	}
+
+	const remaining = [...activeLeft, ...activeRight].filter((segment) => !segment.required);
+	let guard = 0;
+	while (measure() > width && guard < 16) {
+		guard += 1;
+		const widest = remaining
+			.map((segment) => ({ segment, width: segment.text.length }))
+			.sort((a, b) => b.width - a.width)[0];
+		if (!widest || widest.width <= 3) break;
+		widest.segment.text = `${widest.segment.text.slice(0, widest.width - 2)}…`;
+	}
+
+	return [...activeLeft, ...activeRight];
+}
+
+function removeSegment(list: WorkbenchFooterSegment[], segment: WorkbenchFooterSegment): void {
+	const index = list.indexOf(segment);
+	if (index !== -1) list.splice(index, 1);
+}
+
+function sumWidths(segments: readonly WorkbenchFooterSegment[], separatorWidth: number): number {
+	let total = 0;
+	for (const segment of segments) {
+		if (total > 0) total += separatorWidth + 2;
+		total += segment.text.length;
+	}
+	return total;
+}
+
 /** Compact token-count formatting (pure; shared by footer + context segment). */
 export function formatTokens(count: number): string {
 	if (count < 1000) return count.toString();
@@ -192,13 +252,13 @@ function agentsSegment(state: AiraSessionState | undefined): WorkbenchFooterSegm
 	if (!orchestration) return undefined;
 	const running = orchestration.runningCount;
 	const queued = orchestration.queuedCount;
-	const total = running + queued;
-	if (total === 0 && orchestration.children.length === 0) return undefined;
+	if (running === 0 && queued === 0) return undefined;
+	const count = `${running}${queued > 0 ? `+${queued}` : ""}`;
 	return {
 		id: "agents",
-		text: `AGENTS ${total}`,
-		compact: `A${total}`,
-		role: running > 0 ? "cyan" : "muted",
+		text: `AGENTS ${count}`,
+		compact: `A ${count}`,
+		role: running > 0 ? "cyan" : "yellow",
 		dropRank: DROP.agents,
 	};
 }

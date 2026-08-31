@@ -118,13 +118,11 @@ export const KEYBINDINGS = {
 		description: "Cycle to previous model",
 	},
 	"app.model.select": { defaultKeys: "ctrl+l", description: "Open model selector" },
-	"app.tools.expand": { defaultKeys: "alt+o", description: "Toggle tool output" },
+	"app.tools.expand": { defaultKeys: "ctrl+o", description: "Toggle tool output" },
 	"app.workbench.toggle": {
-		// Phase 12: Ctrl+O toggles the native Workbench sidebar. Tool-output
-		// expansion (previously Ctrl+O) moved to Alt+O; a user who customized
-		// `app.tools.expand` keeps their binding (user bindings override
-		// defaults in KeybindingsManager, never overwritten).
-		defaultKeys: "ctrl+o",
+		// The Workbench has its own semantic binding. Ctrl+O remains the
+		// established tool-output expansion action.
+		defaultKeys: "ctrl+shift+o",
 		description: "Toggle Workbench sidebar",
 	},
 	"app.thinking.toggle": {

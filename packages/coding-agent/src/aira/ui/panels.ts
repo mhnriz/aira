@@ -56,13 +56,7 @@ export function interactionPanel(state: AiraSessionState): WorkbenchPanel | unde
 	if (!interaction?.pending || !interaction.question) return undefined;
 	const question = interaction.question;
 	const isPermission = question.type === "permission";
-	const rows: WorkbenchRow[] = [
-		{
-			label: "Prompt",
-			value: question.prompt,
-			role: isPermission ? "purple" : "yellow",
-		},
-	];
+	const rows: WorkbenchRow[] = [{ value: `? ${question.prompt}`, role: isPermission ? "purple" : "yellow" }];
 	if (question.choicesCount > 0) {
 		rows.push({ label: "Choices", value: `${question.choicesCount}`, role: "muted" });
 	} else if (question.freeform) {
@@ -70,7 +64,7 @@ export function interactionPanel(state: AiraSessionState): WorkbenchPanel | unde
 	}
 	return {
 		id: "interaction",
-		title: isPermission ? "Authorization" : "Question",
+		title: isPermission ? "Permission" : "Interaction",
 		priority: 0,
 		rows,
 		hint: `waiting ${Math.max(1, Math.round(question.durationMs / 1000))}s · ${isPermission ? "permission" : "semantic"}`,
@@ -174,10 +168,11 @@ export function goalPanel(state: AiraSessionState): WorkbenchPanel | undefined {
 					: goal.status === "error" || goal.status === "budget-limited"
 						? "red"
 						: "muted";
+	const round = goal.round > 0 ? `R${goal.round}/${goal.maxRounds} · ` : "";
 	const rows: WorkbenchRow[] = [
 		{
 			label: "State",
-			value: goal.status === "budget-limited" ? "budget-limited" : goal.status,
+			value: `${round}${goal.status === "budget-limited" ? "budget-limited" : goal.status}`,
 			role: stateRole,
 		},
 	];
@@ -224,17 +219,14 @@ export function goalPanel(state: AiraSessionState): WorkbenchPanel | undefined {
 }
 
 // ---------------------------------------------------------------------------
-// P1/P2 — tasks & agents
+// P1/P2 — tasks
 // ---------------------------------------------------------------------------
 
 export function tasksPanel(state: AiraSessionState): WorkbenchPanel | undefined {
 	const tasks = state.tasks;
-	const orchestration = state.orchestration;
 	const hasTasks = (tasks?.total ?? 0) > 0;
-	const running = (orchestration?.runningCount ?? 0) > 0;
-	const queued = (orchestration?.queuedCount ?? 0) > 0;
-	const active = running || queued || (tasks?.active ?? 0) > 0;
-	if (!hasTasks && !active) return undefined;
+	const active = (tasks?.active ?? 0) > 0 || (tasks?.blocked ?? 0) > 0;
+	if (!hasTasks) return undefined;
 	const priority: WorkbenchPriority = active ? 1 : 2;
 	const rows: WorkbenchRow[] = [];
 
@@ -271,26 +263,52 @@ export function tasksPanel(state: AiraSessionState): WorkbenchPanel | undefined 
 		});
 	}
 
-	// Agent rows (bounded; never transcripts).
-	for (const child of (orchestration?.children ?? []).slice(0, 4)) {
-		if (child.status !== "running" && child.status !== "pending") continue;
-		const glyph = child.status === "running" ? "●" : "○";
-		rows.push({
-			key: child.id,
-			value: `${glyph} ${child.role} · ${child.task}`,
-			role: "cyan",
-			trailing: elapsed(child.elapsedMs),
-			trailingRole: "muted",
-		});
-	}
-
-	const activeAgents = (running ? 1 : 0) + (queued ? 1 : 0);
 	return {
 		id: "tasks",
-		title: "Tasks & Agents",
+		title: "Tasks",
 		priority,
 		rows: rows.slice(0, WORKBENCH_PANEL_ROW_LIMIT),
-		hint: activeAgents > 0 ? `${activeAgents} active` : `${tasks?.completed ?? 0} done`,
+		hint: `${tasks?.completed ?? 0}/${tasks?.total ?? 0} complete`,
+	};
+}
+
+// ---------------------------------------------------------------------------
+// P1 — orchestration agents (canonical child lifecycle, no task ownership)
+// ---------------------------------------------------------------------------
+
+export function agentsPanel(state: AiraSessionState): WorkbenchPanel | undefined {
+	const orchestration = state.orchestration;
+	if (!orchestration) return undefined;
+	const active = orchestration.children.filter((child) => child.status === "running" || child.status === "pending");
+	if (active.length === 0 && orchestration.failures.length === 0) return undefined;
+	const rows: WorkbenchRow[] = active.slice(0, 6).map((child) => {
+		const running = child.status === "running";
+		const waiting = child.phase === "waiting-dependency" ? "dependency" : "capacity";
+		return {
+			key: child.id,
+			value: `${running ? "●" : "○"} ${child.role}`,
+			role: running ? "cyan" : "yellow",
+			trailing: running ? elapsed(child.elapsedMs) : "queued",
+			trailingRole: running ? "muted" : "yellow",
+			detail: `${child.task}${running ? "" : ` · waiting ${waiting}`}`,
+		};
+	});
+	for (const failure of orchestration.failures.slice(0, Math.max(0, 6 - rows.length))) {
+		rows.push({
+			key: failure.id,
+			value: `✕ ${failure.role}`,
+			role: "red",
+			trailing: failure.retryable ? "retryable" : "failed",
+			trailingRole: "muted",
+			detail: failure.message,
+		});
+	}
+	return {
+		id: "agents",
+		title: "Agents",
+		priority: 1,
+		rows,
+		hint: `${orchestration.runningCount} running · ${orchestration.queuedCount} queued`,
 	};
 }
 
@@ -501,24 +519,29 @@ export function changesetPanel(files: readonly WorkbenchFileRow[]): WorkbenchPan
 export function intelligencePanel(state: AiraSessionState): WorkbenchPanel | undefined {
 	const intelligence = state.intelligence;
 	if (!intelligence) return undefined;
+	if (
+		intelligence.repository.status === "uninitialized" &&
+		intelligence.liveCode.status === "unavailable" &&
+		intelligence.findings.total === 0
+	) {
+		return undefined;
+	}
 	const rows: WorkbenchRow[] = [];
 	const repo = intelligence.repository;
 	const live = intelligence.liveCode;
 	rows.push({
 		label: "Repo",
-		value:
+		value: `${repo.status} · ${repo.filesIndexed} files${
 			repo.changeCount !== undefined && repo.changesAvailable
-				? `${repo.status} · ${repo.filesIndexed} files · ${repo.changeCount} changed`
-				: `${repo.status} · ${repo.filesIndexed} files`,
-		role: intelligence.degraded ? "red" : "green",
+				? ` · ${repo.changeCount === 0 ? "clean" : `${repo.changeCount} changed`}`
+				: ""
+		}`,
+		role: intelligence.degraded || repo.error ? "red" : repo.status === "ready" ? "green" : "yellow",
 	});
 	const serverCount = live.servers.filter((server) => server.available).length;
 	rows.push({
 		label: "LSP",
-		value:
-			live.status === "unavailable"
-				? "unavailable"
-				: `${live.status}${serverCount > 0 ? ` · ${serverCount} server(s)` : ""}`,
+		value: `${live.status}${serverCount > 0 ? ` · ${serverCount} available` : ""}`,
 		role:
 			live.status === "ready"
 				? "green"
@@ -535,6 +558,16 @@ export function intelligencePanel(state: AiraSessionState): WorkbenchPanel | und
 			value: `${findings.errors}E ${findings.warnings}W${findings.stale > 0 ? ` · ${findings.stale} stale` : ""}`,
 			role: findings.errors > 0 ? "red" : findings.warnings > 0 ? "yellow" : "muted",
 		});
+		for (const finding of findings.top.slice(0, 3)) {
+			const location = `${finding.path ?? "unknown"}${finding.line ? `:${finding.line}` : ""}`;
+			const freshness = finding.freshness === "fresh" ? "" : ` · ${finding.freshness}`;
+			rows.push({
+				label: finding.severity === "error" ? "error" : "warning",
+				value: location,
+				role: finding.freshness !== "fresh" ? "yellow" : finding.severity === "error" ? "red" : "yellow",
+				detail: `${finding.code !== undefined ? `${finding.code} · ` : ""}${finding.message}${freshness}`,
+			});
+		}
 	}
 	return {
 		id: "intelligence",
@@ -589,6 +622,7 @@ const PANEL_ORDER: readonly string[] = [
 	"verification",
 	"goal",
 	"tasks",
+	"agents",
 	"execution",
 	"browser",
 	"working-set",
@@ -611,6 +645,7 @@ export function buildPanels(input: {
 		verificationPanel(input.state),
 		goalPanel(input.state),
 		tasksPanel(input.state),
+		agentsPanel(input.state),
 		executionPanel(input.state),
 		browserPanel(input.state),
 		workingSetPanel(input.workingSet),

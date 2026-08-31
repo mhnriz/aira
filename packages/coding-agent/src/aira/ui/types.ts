@@ -77,6 +77,7 @@ export type WorkbenchPanelId =
 	| "verification"
 	| "goal"
 	| "tasks"
+	| "agents"
 	| "execution"
 	| "browser"
 	| "working-set"

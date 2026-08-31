@@ -25,6 +25,7 @@ function createSession(options: {
 	compactionUsage?: AssistantUsage;
 	toolUsage?: AssistantUsage;
 	usingSubscription?: boolean;
+	permissions?: boolean;
 }): AgentSession {
 	const usage = options.usage;
 	const entries: Array<Record<string, unknown>> = [];
@@ -64,6 +65,19 @@ function createSession(options: {
 	}
 
 	const session = {
+		airaSessionState: options.permissions
+			? {
+					mode: "build",
+					permissions: {
+						enabled: true,
+						mode: "normal",
+						persistentRules: 0,
+						sessionRules: 0,
+						onceApprovals: 0,
+						store: { status: "ok" },
+					},
+				}
+			: undefined,
 		state: {
 			model: {
 				id: options.modelId ?? "test-model",
@@ -150,6 +164,17 @@ describe("FooterComponent width handling", () => {
 		for (const line of lines) {
 			expect(visibleWidth(line)).toBeLessThanOrEqual(width);
 		}
+	});
+
+	it("drops low-priority permission telemetry before required narrow segments", () => {
+		const session = createSession({ sessionName: "", permissions: true });
+		const footer = new FooterComponent(session, createFooterData(1));
+		const line = stripAnsi(footer.render(60)[0]);
+
+		expect(line).toContain("BUILD");
+		expect(line).toContain("12.3%");
+		expect(line).toContain("test-model");
+		expect(line).not.toContain("PERM normal");
 	});
 
 	it("includes summary and tool result usage in the total cost", () => {
