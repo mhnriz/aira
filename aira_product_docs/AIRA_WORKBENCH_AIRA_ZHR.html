@@ -6,18 +6,23 @@
 <title>Aira Workbench UI Mockup</title>
 <style>
 :root{
-  --bg:#141619;
-  --panel:#191c20;
-  --panel2:#1f2328;
-  --line:#2c3137;
-  --text:#e7eaee;
-  --muted:#838a93;
-  --green:#79e2a8;
-  --cyan:#75d7ff;
-  --purple:#cb9cff;
-  --amber:#f2c66d;
-  --red:#ff7d8a;
-  --accent:#dc5ad3;
+  --bg:#171717;
+  --panel:#202020;
+  --panel2:#262626;
+  --border:#363432;
+  --border2:#2E2C29;
+  --text:#E8E6E3;
+  --muted:#716E6A;
+  --secondary:#AAA6A1;
+  --accent:#D69E72;
+  --accent2:#E0AC82;
+  --cyan:#78B8B3;
+  --green:#8DB58B;
+  --yellow:#D3B37E;
+  --red:#D47F7F;
+  --purple:#AA99CF;
+  --blue:#7FA6D8;
+  --code:#D4D1CC;
 }
 *{box-sizing:border-box}
 html,body{
@@ -168,10 +173,10 @@ button{font:inherit}
 .del{background:rgba(255,102,115,.08);color:#f0a0a9}
 .diag{
   padding:7px 8px;
-  border:1px solid #493137;
-  background:#21171a;
+  border:1px solid #363432;
+  background:#202020;
   border-radius:6px;
-  color:#f0b3b9;
+  color:#D47F7F;
   margin-top:6px;
 }
 .input{
@@ -211,8 +216,8 @@ button{font:inherit}
   text-overflow:ellipsis;
 }
 .badge{
-  border:1px solid #343a42;
-  background:#1b1f24;
+  border:1px solid #363432;
+  background:#202020;
   border-radius:5px;
   padding:2px 6px;
 }
@@ -221,6 +226,23 @@ button{font:inherit}
   .main{grid-template-columns:1fr 330px}
   .key{width:74px}
 }
+
+/* Aira Workbench responsive projection */
+.brand-accent{color:var(--accent)}
+.focus-accent{color:var(--accent2)}
+.footer .finding{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media (max-width: 1180px){
+  .right .card:nth-of-type(3),
+  .right .card:nth-of-type(10){display:none}
+  .footer > span:nth-child(8),
+  .footer > span:nth-child(10){display:none}
+}
+@media (max-width: 920px){
+  .layout{grid-template-columns:1fr}
+  .right{display:none}
+  .footer .finding{display:none}
+}
+
 </style>
 </head>
 <body>
@@ -293,12 +315,13 @@ button{font:inherit}
     </section>
 
     <aside class="right">
-      <div class="pane-title">ENGINEERING CONTEXT</div>
+      <div class="pane-title">AIRA WORKBENCH</div>
 
       <div class="card">
         <div class="label">Working Set</div>
         <div class="row"><span class="change">M</span><span class="val">providers/live-code/index.ts</span></div>
         <div class="row"><span class="change">M</span><span class="val">commands/doctor.ts</span></div>
+        <div class="row"><span class="change">M</span><span class="val">src/aira/goal/manager.ts</span></div>
       </div>
 
       <div class="card">
@@ -306,50 +329,96 @@ button{font:inherit}
         <div class="row"><span class="key">symbol</span><span class="symbol">statusInfo()</span></div>
         <div class="row"><span class="key">symbol</span><span class="symbol">resolveLaunchSpec()</span></div>
         <div class="row"><span class="key">symbol</span><span class="symbol">liveCodeLine()</span></div>
+        <div class="row"><span class="key">symbol</span><span class="symbol">GoalManager.resume()</span></div>
       </div>
 
       <div class="card">
-        <div class="label">Changeset <span class="muted">· 2 files</span></div>
-        <div class="row">
-          <span class="key">Summary</span>
-          <span class="val"><span class="ok">+22</span> <span class="err">-5</span> · 2 modified</span>
-        </div>
-
+        <div class="label">Changeset <span class="muted">· 3 files</span></div>
+        <div class="row"><span class="key">Summary</span><span class="val"><span class="ok">+31</span> <span class="err">-12</span> · 3 modified</span></div>
         <div class="diffblock">
           <div class="diffline muted">providers/live-code/index.ts</div>
           <div class="diffline del">- status: "unavailable"</div>
           <div class="diffline add">+ status: probe.resolvableCount ? "idle" : "unavailable"</div>
           <div class="diffline add">+ servers: probe.servers</div>
-          <div class="diffline muted">commands/doctor.ts</div>
-          <div class="diffline add">+ live-code: idle (3 server(s) available)</div>
+          <div class="diffline muted">goal/manager.ts</div>
+          <div class="diffline add">+ waiting.kind = "user-question"</div>
         </div>
-
-        <div class="row" style="margin-top:6px">
-          <span class="key">Commit</span>
-          <span class="val muted">not committed yet</span>
-        </div>
+        <div class="row" style="margin-top:6px"><span class="key">Commit</span><span class="val muted">not committed yet</span></div>
       </div>
 
       <div class="card">
         <div class="label">Intelligence</div>
         <div class="row"><span class="key">Repo</span><span class="ok">ready · 1471 files</span></div>
-        <div class="row"><span class="key">LSP</span><span class="warn">TS idle</span></div>
-        <div class="row"><span class="key">Diagnostics</span><span class="ok">0E 0W</span></div>
+        <div class="row"><span class="key">LSP</span><span class="ok">TS ready</span></div>
+        <div class="row"><span class="key">Diagnostics</span><span><span class="err">1E</span> <span class="muted">0W</span></span></div>
+      </div>
+
+      <div class="card">
+        <div class="label">Execution</div>
+        <div class="row"><span class="key">Dev</span><span class="ok">npm run dev · 4m12s</span></div>
+        <div class="row"><span class="key">Tests</span><span class="ok">18 / 18 passed</span></div>
+        <div class="row"><span class="key">Build</span><span class="muted">not run this revision</span></div>
+      </div>
+
+      <div class="card">
+        <div class="label">Browser</div>
+        <div class="row"><span class="key">Page</span><span class="val">localhost:5173/player</span></div>
+        <div class="row"><span class="key">Console</span><span class="err">1E 0W</span></div>
+        <div class="row"><span class="key">Network</span><span class="ok">clean</span></div>
+        <div class="row"><span class="key">Check</span><span class="err">failed · switch A → B → C</span></div>
       </div>
 
       <div class="card">
         <div class="label">Verification</div>
-        <div class="row"><span class="key">Focused</span><span class="ok">45 / 45</span></div>
-        <div class="row"><span class="key">Check</span><span class="ok">passed</span></div>
-        <div class="progress"><span></span></div>
+        <div class="row"><span class="key">Verdict</span><span class="err">FAIL · fresh</span></div>
+        <div class="row"><span class="key">Requirements</span><span>3 / 4 satisfied</span></div>
+        <div class="row"><span class="key">Tests</span><span class="ok">✓ clean</span></div>
+        <div class="row"><span class="key">Browser</span><span class="err">✕ second switch</span></div>
+        <div class="progress"><span style="width:75%"></span></div>
+      </div>
+
+      <div class="card">
+        <div class="label">Goal</div>
+        <div class="row"><span class="key">State</span><span class="warn">repairing · round 2</span></div>
+        <div class="row"><span class="key">Objective</span><span class="val">Fix black flash on rapid stream switch</span></div>
+        <div class="row"><span class="key">Tasks</span><span>4 / 6 · 1 blocked</span></div>
+        <div class="row"><span class="key">Budget</span><span>41k / 100k · 6m14s</span></div>
+        <div class="progress"><span style="width:58%"></span></div>
+      </div>
+
+      <div class="card">
+        <div class="label">Tasks & Agents <span class="muted">· 2 active</span></div>
+        <div class="task"><span class="ok">✓</span><span>Inspect switch lifecycle<div class="meta">explore · complete</div></span><span></span></div>
+        <div class="task"><span class="cyan">●</span><span>Repair surface replacement<div class="meta">root · active</div></span><span class="muted">32s</span></div>
+        <div class="task"><span class="cyan">●</span><span>Check regression coverage<div class="meta">review · active</div></span><span class="muted">11s</span></div>
+        <div class="task"><span class="muted">○</span><span>Re-run browser verification<div class="meta">blocked by repair</div></span><span></span></div>
+        <div style="height:5px"></div>
+        <div class="agent"><span class="role">root</span><span class="state">editing controller.ts</span><span class="time">32s</span></div>
+        <div class="agent"><span class="role">review</span><span class="state">checking test impact</span><span class="time">11s</span></div>
+      </div>
+
+      <div class="card">
+        <div class="label">Control</div>
+        <div class="row"><span class="key">Permission</span><span class="controlchip purple">normal</span></div>
+        <div class="row"><span class="key">Approvals</span><span>2 session · 1 persistent</span></div>
+        <div class="row"><span class="key">Browser ctx</span><span>auto · compact</span></div>
+        <div class="row"><span class="key">Verify</span><span>smart · balanced</span></div>
+        <div class="row"><span class="key">Agents</span><span>smart · max 2</span></div>
+      </div>
+
+      <div class="card">
+        <div class="label">Interaction <span class="muted">· waiting 18s</span></div>
+        <div class="question">
+          <div><span class="purple">?</span> Preserve legacy Surface compatibility or migrate to the new API?</div>
+          <div class="choice">1 · Preserve compatibility</div>
+          <div class="choice">2 · Migrate</div>
+          <div class="choice">3 · Let Aira choose</div>
+        </div>
       </div>
 
       <div class="card">
         <div class="label">Current Finding</div>
-        <div class="diag">
-          <b>TS2304</b> · Cannot find name 'handle'<br/>
-          <span class="muted">coordinator.test.ts:1128 · stale</span>
-        </div>
+        <div class="diag"><b>TS2339</b> · Property 'replaceWith' does not exist on type 'Surface'<br/><span class="muted">src/player/controller.ts:184 · fresh · browser + LSP</span></div>
       </div>
 
     </aside>
@@ -358,11 +427,16 @@ button{font:inherit}
   <div class="footer">
     <span class="mode">◈ BUILD</span><span class="sep">│</span>
     <span>LSP TS <span class="err">1E</span></span><span class="sep">│</span>
-    <span class="finding">TS2304: Cannot find name 'handle'</span>
+    <span class="err">VERIFY ✕1</span><span class="sep">│</span>
+    <span class="cyan">BROWSER ●</span><span class="sep">│</span>
+    <span class="cyan">AGENTS 2</span><span class="sep">│</span>
+    <span class="warn">GOAL R2 4/6</span><span class="sep">│</span>
+    <span class="purple">PERM normal</span><span class="sep">│</span>
+    <span class="finding">TS2339: Surface.replaceWith missing</span>
     <span class="grow">~/proj/aira <span class="muted">(main)</span></span>
-    <span>Δ2</span>
-    <span>8.2%/262k</span>
-    <span class="purple">kimi-k2.6 · high</span>
+    <span>Δ3</span>
+    <span>53%/1.0M</span>
+    <span class="purple">deepseek-v4-flash · max</span>
   </div>
 
 </div>
