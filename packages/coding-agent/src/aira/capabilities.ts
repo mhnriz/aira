@@ -23,6 +23,12 @@
  *              (children in PLAN only receive read-only/diagnostic tool sets,
  *              and mutation-capable roles are refused at dispatch) — see
  *              orchestration/scheduler.ts.
+ * interaction  manages human-interaction state (Phase 11: ask_user, tasks).
+ *              Never touches the workspace or processes; the permission
+ *              pipeline always allows this class. Available in PLAN
+ *              (questions and planning tasks are read-only-mode activities);
+ *              children never receive interaction tools (no nested
+ *              interactive storms).
  * unknown      a capability the host does not classify (extension tools)
  * ```
  *
@@ -53,7 +59,8 @@ export type AiraCapabilityClass =
 	| "process"
 	| "network"
 	| "browser"
-	| "orchestration";
+	| "orchestration"
+	| "interaction";
 
 /** The built-in capability class of a tool name, or "unknown" when unclassified. */
 export type AiraClassifiedCapability = AiraCapabilityClass | "unknown";
@@ -78,6 +85,8 @@ const BUILTIN_AIRA_CAPABILITY_CLASSES = {
 	agents_delegate: "orchestration",
 	agents_status: "orchestration",
 	agents_cancel: "orchestration",
+	ask_user: "interaction",
+	tasks: "interaction",
 	browser_open: "browser",
 	browser_close: "browser",
 	browser_status: "browser",
@@ -165,6 +174,7 @@ export function airaCapabilityClassLabel(cls: AiraClassifiedCapability): string 
 		network: "network",
 		browser: "browser",
 		orchestration: "orchestration",
+		interaction: "interaction",
 		unknown: "unknown",
 	} satisfies Record<AiraClassifiedCapability, string>;
 	return labels[cls as keyof typeof labels] ?? "unknown";

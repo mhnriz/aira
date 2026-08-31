@@ -167,6 +167,20 @@ export interface Settings {
 		tokenBudget?: number;
 		maxDurationMs?: number;
 	};
+	/** Native Aira permission controls (Phase 11; canonical settings owner). */
+	permissions?: {
+		enabled?: boolean;
+		mode?: "normal" | "permissive" | "strict" | "yolo";
+	};
+	/** Native Aira interaction controls (Phase 11; canonical settings owner). */
+	interaction?: {
+		/** Auto-timeout for open questions in milliseconds; 0 = no timeout. */
+		timeoutMs?: number;
+	};
+	/** Native Aira task-graph controls (Phase 11; canonical settings owner). */
+	tasks?: {
+		enabled?: boolean;
+	};
 }
 
 function isMergeableObject(value: unknown): value is Record<string, unknown> {
@@ -1320,6 +1334,65 @@ export class SettingsManager {
 	}): void {
 		this.globalSettings.goals = settings;
 		this.markModified("goals");
+		this.save();
+	}
+
+	// Native Aira permission settings (Phase 11). Same canonical store;
+	// invalid stored values normalize to conservative defaults (normal).
+	getPermissionsSettings(): {
+		enabled: boolean;
+		mode: "normal" | "permissive" | "strict" | "yolo";
+	} {
+		const permissions = this.settings.permissions;
+		if (!permissions || typeof permissions !== "object") {
+			return { enabled: true, mode: "normal" };
+		}
+		const rawMode = permissions.mode;
+		const mode = rawMode === "permissive" || rawMode === "strict" || rawMode === "yolo" ? rawMode : "normal";
+		return {
+			enabled: permissions.enabled === undefined ? true : permissions.enabled === true,
+			mode,
+		};
+	}
+
+	setPermissionsSettings(settings: { enabled: boolean; mode: "normal" | "permissive" | "strict" | "yolo" }): void {
+		this.globalSettings.permissions = settings;
+		this.markModified("permissions");
+		this.save();
+	}
+
+	// Native Aira interaction settings (Phase 11). Same canonical store.
+	getInteractionSettings(): { timeoutMs: number } {
+		const interaction = this.settings.interaction;
+		if (!interaction || typeof interaction !== "object") {
+			return { timeoutMs: 0 };
+		}
+		const rawTimeout = interaction.timeoutMs;
+		const timeoutMs =
+			typeof rawTimeout === "number" && Number.isFinite(rawTimeout) && rawTimeout >= 0 && rawTimeout <= 86_400_000
+				? Math.floor(rawTimeout)
+				: 0;
+		return { timeoutMs };
+	}
+
+	setInteractionSettings(settings: { timeoutMs: number }): void {
+		this.globalSettings.interaction = settings;
+		this.markModified("interaction");
+		this.save();
+	}
+
+	// Native Aira task-graph settings (Phase 11). Same canonical store.
+	getTasksSettings(): { enabled: boolean } {
+		const tasks = this.settings.tasks;
+		if (!tasks || typeof tasks !== "object") {
+			return { enabled: true };
+		}
+		return { enabled: tasks.enabled === undefined ? true : tasks.enabled === true };
+	}
+
+	setTasksSettings(settings: { enabled: boolean }): void {
+		this.globalSettings.tasks = settings;
+		this.markModified("tasks");
 		this.save();
 	}
 

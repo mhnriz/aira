@@ -87,10 +87,46 @@ describe("Aira /doctor command (Phase 4 scope)", () => {
 		// A real session arms the goal manager which publishes a snapshot; a
 		// bare acquired state has none, so publish the honest idle one.
 		state.goal = idleGoalSnapshot(state.mode);
+		// A real session arms the Phase 11 managers which publish snapshots;
+		// a bare acquired state has none, so publish the honest idle ones.
+		state.permissions = {
+			enabled: true,
+			mode: "normal",
+			persistentRules: 0,
+			sessionRules: 0,
+			onceApprovals: 0,
+			store: { status: "ok", path: undefined, error: undefined },
+			lastDecision: undefined,
+			updatedAt: Date.now(),
+			summary: "normal",
+		};
+		state.interaction = {
+			pending: false,
+			question: undefined,
+			recentClosed: [],
+			uiAttached: false,
+			updatedAt: Date.now(),
+			summary: "idle",
+		};
+		state.tasks = {
+			enabled: true,
+			total: 0,
+			pending: 0,
+			active: 0,
+			blocked: 0,
+			completed: 0,
+			cancelled: 0,
+			failed: 0,
+			current: undefined,
+			rows: [],
+			childRows: 0,
+			updatedAt: Date.now(),
+			summary: "no tasks",
+		};
 		const report = buildAiraDoctorReport(state);
 
 		expect(report.home).toBe(expectedHome);
-		expect(report.checks.length).toBe(13);
+		expect(report.checks.length).toBe(16);
 		for (const check of report.checks) {
 			expect(check.pass, `${check.name} should pass`).toBe(true);
 		}
@@ -247,10 +283,44 @@ describe("Aira /doctor command (Phase 4 scope)", () => {
 		state.verification = initialAiraVerificationStatus({ enabled: true, auto: "smart", contextBudget: "compact" });
 		state.orchestration = initialAiraOrchestrationStatus(true, 2);
 		state.goal = idleGoalSnapshot(state.mode);
+		state.permissions = {
+			enabled: true,
+			mode: "normal",
+			persistentRules: 0,
+			sessionRules: 0,
+			onceApprovals: 0,
+			store: { status: "ok", path: undefined, error: undefined },
+			lastDecision: undefined,
+			updatedAt: Date.now(),
+			summary: "normal",
+		};
+		state.interaction = {
+			pending: false,
+			question: undefined,
+			recentClosed: [],
+			uiAttached: false,
+			updatedAt: Date.now(),
+			summary: "idle",
+		};
+		state.tasks = {
+			enabled: true,
+			total: 0,
+			pending: 0,
+			active: 0,
+			blocked: 0,
+			completed: 0,
+			cancelled: 0,
+			failed: 0,
+			current: undefined,
+			rows: [],
+			childRows: 0,
+			updatedAt: Date.now(),
+			summary: "no tasks",
+		};
 		const text = formatAiraDoctorReport(buildAiraDoctorReport(state));
 
 		expect(text).toContain(`home: ${expectedHome}`);
-		expect(text).toContain("summary: 13/13 checks passed");
+		expect(text).toContain("summary: 16/16 checks passed");
 		expect(text).toContain("ok  home:");
 		expect(text).toContain("ok  browser: availability probe pending");
 		disposeAiraSessionState("doctor-5", state);

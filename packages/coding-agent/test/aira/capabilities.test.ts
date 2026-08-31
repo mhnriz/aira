@@ -46,6 +46,16 @@ describe("Aira capability classification (native semantic contract)", () => {
 		}
 	});
 
+	it("classifies the native interaction tools (Phase 11) as interaction", () => {
+		for (const tool of ["ask_user", "tasks"]) {
+			expect(classifyAiraCapability(tool), tool).toBe("interaction");
+			// Interaction never mutates the workspace or spawns processes, so
+			// it is NOT PLAN-mutating and stays available in read-only mode.
+			expect(isAiraMutatingCapability(tool), tool).toBe(false);
+			expect(isAiraMutatingTool(tool), tool).toBe(false);
+		}
+	});
+
 	it("leaves third-party/unknown tools unclassified and PLAN-permissive", () => {
 		expect(classifyAiraCapability("some-extension-tool")).toBe("unknown");
 		expect(classifyAiraCapability("lens_diagnostics")).toBe("unknown");

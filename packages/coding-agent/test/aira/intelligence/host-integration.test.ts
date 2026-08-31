@@ -145,6 +145,7 @@ describe("Aira ambient intelligence through the host (Phase 5)", () => {
 				"agents_cancel",
 				"agents_delegate",
 				"agents_status",
+				"ask_user",
 				"browser_console",
 				"browser_navigate",
 				"browser_network",
@@ -159,6 +160,7 @@ describe("Aira ambient intelligence through the host (Phase 5)", () => {
 				"process_logs",
 				"process_status",
 				"read",
+				"tasks",
 			]);
 			harness.setResponses([fauxAssistantMessage(fauxText("planning"))]);
 			await harness.session.prompt("which file handles tray state?");

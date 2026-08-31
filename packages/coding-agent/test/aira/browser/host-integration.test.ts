@@ -186,8 +186,12 @@ describe("Aira browser runtime through the host (Phase 7)", () => {
 	});
 
 	it("runs a real model tool call: open → observe returns structured page state", async () => {
+		// Phase 11: browser lifecycle is an ASK by default in normal permission
+		// mode; this flow tests the mechanics, so the session opts into
+		// permissive (auto-approve) mode explicitly.
 		const harness = await createHarness({
 			cwd: makeProjectDir(),
+			settings: { permissions: { enabled: true, mode: "permissive" } } as never,
 			airaBrowserOptions: { provider: fakeProviderFactory() },
 		});
 		try {

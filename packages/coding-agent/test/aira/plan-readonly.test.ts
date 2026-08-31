@@ -41,6 +41,7 @@ describe("Aira PLAN read-only enforcement (host/tool-policy level)", () => {
 			"agents_cancel",
 			"agents_delegate",
 			"agents_status",
+			"ask_user",
 			"bash",
 			"browser_click",
 			"browser_close",
@@ -63,6 +64,7 @@ describe("Aira PLAN read-only enforcement (host/tool-policy level)", () => {
 			"process_status",
 			"process_stop",
 			"read",
+			"tasks",
 			"write",
 		]);
 	});
@@ -76,6 +78,7 @@ describe("Aira PLAN read-only enforcement (host/tool-policy level)", () => {
 			"agents_cancel",
 			"agents_delegate",
 			"agents_status",
+			"ask_user",
 			"browser_console",
 			"browser_navigate",
 			"browser_network",
@@ -90,6 +93,7 @@ describe("Aira PLAN read-only enforcement (host/tool-policy level)", () => {
 			"process_logs",
 			"process_status",
 			"read",
+			"tasks",
 		]);
 	});
 
@@ -101,6 +105,7 @@ describe("Aira PLAN read-only enforcement (host/tool-policy level)", () => {
 			"agents_cancel",
 			"agents_delegate",
 			"agents_status",
+			"ask_user",
 			"bash",
 			"browser_click",
 			"browser_close",
@@ -123,6 +128,7 @@ describe("Aira PLAN read-only enforcement (host/tool-policy level)", () => {
 			"process_status",
 			"process_stop",
 			"read",
+			"tasks",
 			"write",
 		]);
 
@@ -132,6 +138,7 @@ describe("Aira PLAN read-only enforcement (host/tool-policy level)", () => {
 			"agents_cancel",
 			"agents_delegate",
 			"agents_status",
+			"ask_user",
 			"bash",
 			"browser_click",
 			"browser_close",
@@ -154,6 +161,7 @@ describe("Aira PLAN read-only enforcement (host/tool-policy level)", () => {
 			"process_status",
 			"process_stop",
 			"read",
+			"tasks",
 			"write",
 		]);
 	});

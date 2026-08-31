@@ -39,6 +39,12 @@ export interface AiraStatusReport {
 	orchestration?: string;
 	/** Compact goal line from the canonical snapshot (Phase 10). */
 	goal?: string;
+	/** Compact permission line from the canonical snapshot (Phase 11). */
+	permissions?: string;
+	/** Compact interaction line from the canonical snapshot (Phase 11). */
+	interaction?: string;
+	/** Compact task line from the canonical snapshot (Phase 11). */
+	tasks?: string;
 }
 
 export function buildAiraStatusReport(state: AiraSessionState | undefined): AiraStatusReport {
@@ -61,6 +67,9 @@ export function buildAiraStatusReport(state: AiraSessionState | undefined): Aira
 		verification: summarizeAiraVerification(state.verification),
 		orchestration: summarizeAiraOrchestration(state.orchestration),
 		goal: summarizeAiraGoal(state.goal),
+		permissions: summarizeAiraPermissions(state.permissions),
+		interaction: summarizeAiraInteraction(state.interaction),
+		tasks: summarizeAiraTasks(state.tasks),
 	};
 }
 
@@ -83,6 +92,34 @@ function summarizeAiraBrowser(browser: AiraBrowserStatus | undefined): string | 
 		return `active${url ? ` (${url})` : ""}`;
 	}
 	return browser.status;
+}
+
+/** Compact one-line permission summary for /status (restrained). */
+function summarizeAiraPermissions(permissions: AiraSessionState["permissions"]): string | undefined {
+	if (!permissions) {
+		return undefined;
+	}
+	return permissions.enabled ? permissions.mode : "disabled";
+}
+
+/** Compact one-line interaction summary for /status (only when pending). */
+function summarizeAiraInteraction(interaction: AiraSessionState["interaction"]): string | undefined {
+	if (!interaction || !interaction.pending) {
+		return undefined;
+	}
+	const question = interaction.question;
+	if (!question) {
+		return "question pending";
+	}
+	return `${question.type} question pending (${question.choicesCount} choices · ${Math.round(question.durationMs / 1000)}s)`;
+}
+
+/** Compact one-line task summary for /status (restrained). */
+function summarizeAiraTasks(tasks: AiraSessionState["tasks"]): string | undefined {
+	if (!tasks) {
+		return undefined;
+	}
+	return tasks.enabled ? tasks.summary : "disabled";
 }
 
 export function formatAiraStatusReport(report: AiraStatusReport): string {
@@ -109,6 +146,15 @@ export function formatAiraStatusReport(report: AiraStatusReport): string {
 	}
 	if (report.goal) {
 		lines.push(`goal: ${report.goal}`);
+	}
+	if (report.permissions) {
+		lines.push(`permissions: ${report.permissions}`);
+	}
+	if (report.interaction) {
+		lines.push(`interaction: ${report.interaction}`);
+	}
+	if (report.tasks) {
+		lines.push(`tasks: ${report.tasks}`);
 	}
 	return lines.join("\n");
 }

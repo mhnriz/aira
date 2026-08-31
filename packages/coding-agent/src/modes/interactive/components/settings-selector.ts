@@ -74,6 +74,34 @@ function goalSettingsOf(config: SettingsConfig): SettingsConfig["goalSettings"] 
 	);
 }
 
+/** Older hosts/tests may omit permissionSettings; defaults keep the selector stable. */
+function permissionSettingsOf(config: SettingsConfig): SettingsConfig["permissionSettings"] {
+	return (
+		config.permissionSettings ?? {
+			enabled: true,
+			mode: "normal",
+		}
+	);
+}
+
+/** Older hosts/tests may omit interactionSettings; defaults keep the selector stable. */
+function interactionSettingsOf(config: SettingsConfig): SettingsConfig["interactionSettings"] {
+	return (
+		config.interactionSettings ?? {
+			timeoutMs: 0,
+		}
+	);
+}
+
+/** Older hosts/tests may omit taskSettings; defaults keep the selector stable. */
+function taskSettingsOf(config: SettingsConfig): SettingsConfig["taskSettings"] {
+	return (
+		config.taskSettings ?? {
+			enabled: true,
+		}
+	);
+}
+
 const THINKING_DESCRIPTIONS: Record<ThinkingLevel, string> = {
 	off: "No reasoning",
 	minimal: "Very brief reasoning (~1k tokens)",
@@ -157,6 +185,16 @@ export interface SettingsConfig {
 		tokenBudget: number | undefined;
 		maxDurationMs: number | undefined;
 	};
+	permissionSettings: {
+		enabled: boolean;
+		mode: "normal" | "permissive" | "strict" | "yolo";
+	};
+	interactionSettings: {
+		timeoutMs: number;
+	};
+	taskSettings: {
+		enabled: boolean;
+	};
 }
 
 export interface SettingsCallbacks {
@@ -217,6 +255,12 @@ export interface SettingsCallbacks {
 		tokenBudget: number | undefined;
 		maxDurationMs: number | undefined;
 	}) => void;
+	onPermissionSettingsChange: (settings: {
+		enabled: boolean;
+		mode: "normal" | "permissive" | "strict" | "yolo";
+	}) => void;
+	onInteractionSettingsChange: (settings: { timeoutMs: number }) => void;
+	onTaskSettingsChange: (settings: { enabled: boolean }) => void;
 	onCancel: () => void;
 }
 
@@ -1262,6 +1306,46 @@ export class SettingsSelectorComponent extends Container {
 						() => done(),
 					),
 			},
+			{
+				id: "permissions",
+				label: "Aira permissions",
+				description:
+					"Deterministic authorization: enable the pipeline and choose the permission mode (PLAN read-only stays absolute)",
+				currentValue: `${permissionSettingsOf(config).mode} · ${permissionSettingsOf(config).enabled ? "on" : "off"}`,
+				submenu: (_currentValue, done) =>
+					new AiraPermissionsSubmenu(
+						permissionSettingsOf(config),
+						(settings) => callbacks.onPermissionSettingsChange(settings),
+						() => done(),
+					),
+			},
+			{
+				id: "interaction",
+				label: "Aira interaction",
+				description: "Structured Q&A with the user: optional auto-timeout for open questions",
+				currentValue:
+					interactionSettingsOf(config).timeoutMs === 0
+						? "no timeout"
+						: `${Math.round(interactionSettingsOf(config).timeoutMs / 1000)}s`,
+				submenu: (_currentValue, done) =>
+					new AiraInteractionSubmenu(
+						interactionSettingsOf(config),
+						(settings) => callbacks.onInteractionSettingsChange(settings),
+						() => done(),
+					),
+			},
+			{
+				id: "tasks",
+				label: "Aira tasks",
+				description: "Canonical session task graph and /tasks surface (child rows project from orchestration)",
+				currentValue: taskSettingsOf(config).enabled ? "on" : "off",
+				submenu: (_currentValue, done) =>
+					new AiraTaskSubmenu(
+						taskSettingsOf(config),
+						(settings) => callbacks.onTaskSettingsChange(settings),
+						() => done(),
+					),
+			},
 		];
 
 		// Only show image toggle if terminal supports it
@@ -1490,5 +1574,167 @@ export class SettingsSelectorComponent extends Container {
 
 	getSettingsList(): SettingsList {
 		return this.settingsList;
+	}
+}
+
+/**
+ * Aira permission settings submenu (Phase 11): enable deterministic
+ * authorization and choose the permission mode. Modes are documented in
+ * the Phase 11 report; PLAN read-only stays absolute in every mode.
+ */
+class AiraPermissionsSubmenu extends Container {
+	private settingsList: SettingsList;
+	private state: { enabled: boolean; mode: "normal" | "permissive" | "strict" | "yolo" };
+
+	constructor(
+		initial: { enabled: boolean; mode: "normal" | "permissive" | "strict" | "yolo" },
+		onChange: (settings: { enabled: boolean; mode: "normal" | "permissive" | "strict" | "yolo" }) => void,
+		onCancel: () => void,
+	) {
+		super();
+
+		this.state = { ...initial };
+
+		const items: SettingItem[] = [
+			{
+				id: "permissions-enabled",
+				label: "Enable permissions",
+				description: "Deterministic authorization pipeline (PLAN read-only stays absolute in every mode)",
+				currentValue: this.state.enabled ? "true" : "false",
+				values: ["true", "false"],
+			},
+			{
+				id: "permissions-mode",
+				label: "Permission mode",
+				description:
+					"normal: ask on risky commands / out-of-workspace writes / unknown tools (default). permissive: auto-approve those (explicit ask rules still prompt). strict: deny everything not explicitly allowed. yolo: bypass prompts (explicit deny rules and PLAN remain absolute)",
+				currentValue: this.state.mode,
+				values: ["normal", "permissive", "strict", "yolo"],
+			},
+		];
+
+		this.settingsList = new SettingsList(
+			items,
+			Math.min(items.length, 10),
+			getSettingsListTheme(),
+			(id, newValue) => {
+				switch (id) {
+					case "permissions-enabled":
+						this.state = { ...this.state, enabled: newValue === "true" };
+						onChange(this.state);
+						break;
+					case "permissions-mode":
+						this.state = { ...this.state, mode: newValue as "normal" | "permissive" | "strict" | "yolo" };
+						onChange(this.state);
+						break;
+				}
+			},
+			onCancel,
+		);
+
+		this.addChild(this.settingsList);
+	}
+
+	handleInput(data: string): void {
+		this.settingsList.handleInput(data);
+	}
+}
+
+/**
+ * Aira interaction settings submenu (Phase 11): optional auto-timeout for
+ * open questions. 0 = no timeout (a question waits until the user answers
+ * or cancels; headless sessions never hang by construction).
+ */
+class AiraInteractionSubmenu extends Container {
+	private settingsList: SettingsList;
+	private state: { timeoutMs: number };
+
+	constructor(
+		initial: { timeoutMs: number },
+		onChange: (settings: { timeoutMs: number }) => void,
+		onCancel: () => void,
+	) {
+		super();
+
+		this.state = { ...initial };
+
+		const items: SettingItem[] = [
+			{
+				id: "interaction-timeout",
+				label: "Question timeout",
+				description:
+					"Auto-resolve an unanswered question after this long (0 = no timeout; default). Cancelled questions are NEVER treated as answers",
+				currentValue: this.state.timeoutMs === 0 ? "none" : String(this.state.timeoutMs),
+				values: ["0", "60000", "300000", "900000"],
+			},
+		];
+
+		this.settingsList = new SettingsList(
+			items,
+			Math.min(items.length, 10),
+			getSettingsListTheme(),
+			(id, newValue) => {
+				if (id === "interaction-timeout") {
+					this.state = { ...this.state, timeoutMs: Number.parseInt(newValue, 10) };
+					onChange(this.state);
+				}
+			},
+			onCancel,
+		);
+
+		this.addChild(this.settingsList);
+	}
+
+	handleInput(data: string): void {
+		this.settingsList.handleInput(data);
+	}
+}
+
+/**
+ * Aira task settings submenu (Phase 11): enable the canonical session task
+ * graph. Disabling only hides the surface; orchestration ownership is
+ * untouched.
+ */
+class AiraTaskSubmenu extends Container {
+	private settingsList: SettingsList;
+	private state: { enabled: boolean };
+
+	constructor(
+		initial: { enabled: boolean },
+		onChange: (settings: { enabled: boolean }) => void,
+		onCancel: () => void,
+	) {
+		super();
+
+		this.state = { ...initial };
+
+		const items: SettingItem[] = [
+			{
+				id: "tasks-enabled",
+				label: "Enable tasks",
+				description: "Session task graph and /tasks surface (child rows project from orchestration)",
+				currentValue: this.state.enabled ? "true" : "false",
+				values: ["true", "false"],
+			},
+		];
+
+		this.settingsList = new SettingsList(
+			items,
+			Math.min(items.length, 10),
+			getSettingsListTheme(),
+			(id, newValue) => {
+				if (id === "tasks-enabled") {
+					this.state = { ...this.state, enabled: newValue === "true" };
+					onChange(this.state);
+				}
+			},
+			onCancel,
+		);
+
+		this.addChild(this.settingsList);
+	}
+
+	handleInput(data: string): void {
+		this.settingsList.handleInput(data);
 	}
 }

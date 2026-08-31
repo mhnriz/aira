@@ -17,8 +17,11 @@ import type { AiraBrowserStatus } from "./browser/status.ts";
 import type { AiraExecutionStatus } from "./execution/status.ts";
 import type { AiraGoalSnapshot } from "./goal/types.ts";
 import type { AiraIntelligenceStatus } from "./intelligence/status.ts";
+import type { AiraInteractionStatus } from "./interaction/types.ts";
 import type { AiraOrchestrationStatus } from "./orchestration/types.ts";
+import type { AiraPermissionStatus } from "./permissions/types.ts";
 import type { AiraProjectProfile } from "./project/profile.ts";
+import type { AiraTasksStatus } from "./tasks/types.ts";
 import type { AiraVerificationStatus } from "./verification/types.ts";
 
 export type AiraMode = "build" | "plan" | "review";
@@ -52,6 +55,12 @@ export interface AiraSessionState {
 	orchestration: AiraOrchestrationStatus | undefined;
 	/** Goal snapshot; undefined until the goal manager publishes. */
 	goal: AiraGoalSnapshot | undefined;
+	/** Permission snapshot; undefined until the controller publishes. */
+	permissions: AiraPermissionStatus | undefined;
+	/** Interaction snapshot; undefined until the interaction manager publishes. */
+	interaction: AiraInteractionStatus | undefined;
+	/** Task-graph snapshot; undefined until the task manager publishes. */
+	tasks: AiraTasksStatus | undefined;
 	/** Phase 1: always ["core"]. */
 	capabilities: readonly AiraCapability[];
 	/** Set when the owning session was disposed. */
@@ -90,6 +99,9 @@ export function acquireAiraSessionState(
 		verification: undefined,
 		orchestration: undefined,
 		goal: undefined,
+		permissions: undefined,
+		interaction: undefined,
+		tasks: undefined,
 		capabilities: DEFAULT_AIRA_CAPABILITIES,
 	};
 	sessionStates.set(sessionId, state);

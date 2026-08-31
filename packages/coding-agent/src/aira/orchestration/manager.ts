@@ -75,6 +75,15 @@ export interface AiraOrchestrationManagerOptions {
 	}) => Promise<{ runtime: AiraChildRuntime; resolvedModel: string } | { unavailable: string } | undefined>;
 	/** Execution manager for process-class children (Phase 6 runtime reuse). */
 	executionManager?: AiraChildToolSetOptions["executionManager"];
+	/**
+	 * Phase 11 permission seam: root-owned deterministic child tool gate
+	 * (children never prompt; ask→deny upstream). Undefined = ungated
+	 * (tests / hosts without the permission controller).
+	 */
+	permissionGate?: (
+		toolName: string,
+		args: Record<string, unknown>,
+	) => { block: boolean; reason?: string } | undefined;
 	/** Runner seam (unit tests inject canned outcomes). */
 	runner?: (
 		runtime: AiraChildRuntime,
@@ -367,6 +376,7 @@ export class AiraOrchestrationManager implements AiraOrchestrationHandle {
 				prompt: envelope.prompt,
 				systemPrompt: envelope.systemPrompt,
 				tools: toolSet.tools,
+				gateTool: this.options.permissionGate,
 				timeoutMs,
 			};
 			const outcome: AiraChildOutcome = this.options.runner

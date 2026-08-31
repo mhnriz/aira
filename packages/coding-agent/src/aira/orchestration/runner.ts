@@ -55,6 +55,11 @@ export interface AiraChildRunnerOptions {
 	systemPrompt: string;
 	/** Mode-gated tool set. */
 	tools: AgentTool[];
+	/**
+	 * Phase 11 permission seam: deterministic child tool gate (root-owned
+	 * authorization; children never prompt — ASK resolves to DENY upstream).
+	 */
+	gateTool?: (toolName: string, args: Record<string, unknown>) => { block: boolean; reason?: string } | undefined;
 	timeoutMs?: number;
 	maxToolRounds?: number;
 	thinkingLevel?: "off" | "low" | "medium" | "high";
@@ -133,6 +138,17 @@ export async function runAiraChild(
 			}
 			const results: ToolResultMessage[] = [];
 			for (const call of calls) {
+				const gate = options.gateTool?.(call.name, (call.arguments ?? {}) as Record<string, unknown>);
+				if (gate?.block) {
+					results.push(
+						toolResultMessage(
+							call,
+							[{ type: "text", text: gate.reason ?? "blocked by permission policy" }],
+							true,
+						),
+					);
+					continue;
+				}
 				results.push(await executeChildTool(options.tools, call, signal));
 			}
 			messages.push(assistant, ...results);

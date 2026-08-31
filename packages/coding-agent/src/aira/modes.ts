@@ -52,7 +52,11 @@ export const NEXT_AIRA_MODE: Record<AiraMode, AiraMode> = {
  * orchestration scheduler IS the read-only enforcement point (PLAN
  * children receive read-only/diagnostic tool sets and mutation-capable
  * roles are refused at dispatch), so the tools stay usable in PLAN for
- * read-only exploratory children.
+ * read-only exploratory children. Phase 11 adds the interaction surface:
+ * `ask_user` (structured Q&A) and `tasks` (the session task graph) stay
+ * usable in PLAN — they never touch the workspace or processes; asking
+ * questions and planning tasks are read-only-mode activities (task rows
+ * are session state, not project state; documented in the Phase 11 ADR).
  */
 export const AIRA_READ_ONLY_TOOLS: readonly string[] = [
 	...BUILTIN_READ_ONLY_CAPABILITIES,
@@ -67,6 +71,8 @@ export const AIRA_READ_ONLY_TOOLS: readonly string[] = [
 	"agents_delegate",
 	"agents_status",
 	"agents_cancel",
+	"ask_user",
+	"tasks",
 ];
 
 /**

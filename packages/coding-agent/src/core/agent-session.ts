@@ -64,6 +64,12 @@ import {
 	type AiraIntelligenceHandle,
 	createAiraIntelligence,
 } from "../aira/intelligence/coordinator.ts";
+import {
+	type AiraInteractionHandle,
+	type AiraInteractionManagerOptions,
+	createAiraInteractionManager,
+} from "../aira/interaction/manager.ts";
+import { createAiraInteractionToolDefinitions } from "../aira/interaction/model-tool.ts";
 import { onAiraSessionCreated, onAiraSessionDisposed } from "../aira/lifecycle.ts";
 import { AIRA_READ_ONLY_TOOLS, isAiraMutatingTool } from "../aira/modes.ts";
 import type { AiraOrchestrationHandle, AiraOrchestrationManagerOptions } from "../aira/orchestration/manager.ts";
@@ -72,8 +78,19 @@ import { createAiraOrchestrationToolDefinitions } from "../aira/orchestration/mo
 import type { AiraChildRuntime } from "../aira/orchestration/runner.ts";
 import type { AiraOrchestrationSettings } from "../aira/orchestration/settings.ts";
 import { getAiraCacheDir } from "../aira/paths.ts";
+import {
+	type AiraPermissionControllerHandle,
+	type AiraPermissionControllerOptions,
+	createAiraPermissionController,
+} from "../aira/permissions/controller.ts";
 import { resolveAiraProjectInto } from "../aira/project/index.ts";
 import type { AiraMode, AiraSessionState } from "../aira/state.ts";
+import {
+	type AiraTaskManagerHandle,
+	type AiraTaskManagerOptions,
+	createAiraTaskManager,
+} from "../aira/tasks/manager.ts";
+import { createAiraTaskToolDefinitions } from "../aira/tasks/model-tool.ts";
 import type { AiraVerificationHandle } from "../aira/verification/manager.ts";
 import { type AiraVerificationManagerOptions, createAiraVerificationManager } from "../aira/verification/manager.ts";
 import type { AiraVerifierRuntime } from "../aira/verification/verifier.ts";
@@ -284,6 +301,12 @@ export interface AgentSessionConfig {
 		| "abortRun"
 		| "agentEvents"
 	>;
+	/** Interaction-runtime options (Aira phase 11; tests inject seams). */
+	airaInteractionOptions?: AiraInteractionManagerOptions;
+	/** Permission-controller options (Aira phase 11; tests inject stores). */
+	airaPermissionOptions?: Omit<AiraPermissionControllerOptions, "cwd" | "settings" | "interaction">;
+	/** Task-runtime options (Aira phase 11; tests inject seams). */
+	airaTaskOptions?: Omit<AiraTaskManagerOptions, "settings" | "orchestration">;
 }
 
 export interface ExtensionBindings {
@@ -422,6 +445,9 @@ export class AgentSession {
 	private _airaVerification: AiraVerificationHandle | undefined;
 	private _airaOrchestration: AiraOrchestrationHandle | undefined;
 	private _airaGoal: AiraGoalHandle | undefined;
+	private _airaInteraction: AiraInteractionHandle | undefined;
+	private _airaPermissions: AiraPermissionControllerHandle | undefined;
+	private _airaTasks: AiraTaskManagerHandle | undefined;
 	private _extensionUIContext?: ExtensionUIContext;
 	private _extensionMode: ExtensionMode = "print";
 	private _extensionCommandContextActions?: ExtensionCommandContextActions;
@@ -521,6 +547,10 @@ export class AgentSession {
 			settings: () => this.settingsManager.getOrchestrationSettings(),
 			resolveRuntime: (request) => this.resolveAiraChildRuntime(request),
 			executionManager: this._airaExecution,
+			// Phase 11: children never bypass root authorization. The gate is
+			// deterministic (ask→deny) — children never prompt, so nested
+			// interactive storms are impossible.
+			permissionGate: (toolName, args) => this._airaPermissions?.gateForChild(toolName, args),
 		});
 
 		// Aira goal seam (Phase 10): the session owns the native Goal Runtime.
@@ -566,6 +596,42 @@ export class AgentSession {
 					// best effort — the goal must never break the host
 				}
 			},
+		});
+
+		// Aira interaction seam (Phase 11): the native structured-Q&A manager.
+		// Created AFTER the goal manager so pending questions can reflect into
+		// goal waiting truthfully (kind user-question / permission). The TUI
+		// attaches a dialog bridge via attachUI() in interactive mode; headless
+		// sessions resolve questions as "unavailable" without ever hanging.
+		this._airaInteraction = createAiraInteractionManager(this._airaSessionState, {
+			...config.airaInteractionOptions,
+			settings: () => this.settingsManager.getInteractionSettings(),
+			goal: this._airaGoal
+				? {
+						considerUserInteraction: (change) => this._airaGoal?.considerUserInteraction(change),
+					}
+				: undefined,
+		});
+
+		// Aira permission seam (Phase 11): the deterministic authorization
+		// controller. Session-owned; persistent rules live in the canonical
+		// Aira-owned store (~/.aira/agent/permissions.json). Project config is
+		// never read (a repository cannot self-grant privileges).
+		this._airaPermissions = createAiraPermissionController(this._airaSessionState, {
+			...config.airaPermissionOptions,
+			cwd: this._cwd,
+			settings: () => this.settingsManager.getPermissionsSettings(),
+			interaction: this._airaInteraction,
+			projectRoot: () => this._airaSessionState.project?.root ?? this._cwd,
+		});
+
+		// Aira task seam (Phase 11): the canonical session task graph. The
+		// orchestration manager remains the owner of child RUN records; child
+		// runs project into the task graph as read-only rows via subscribe.
+		this._airaTasks = createAiraTaskManager(this._airaSessionState, {
+			...config.airaTaskOptions,
+			settings: () => this.settingsManager.getTasksSettings(),
+			orchestration: this._airaOrchestration,
 		});
 
 		// Always subscribe to agent events for internal handling
@@ -664,6 +730,29 @@ export class AgentSession {
 					block: true,
 					reason: `PLAN mode is read-only: ${toolCall.name} is blocked. Switch to BUILD (Shift+Tab) to modify the workspace.`,
 				};
+			}
+			// Aira permission seam (Phase 11): deterministic authorization after
+			// the PLAN boundary. ASK runs through the native interaction manager
+			// (TUI dialog when attached; truthful denial otherwise). Never
+			// weakens PLAN; never consults the model; token-free.
+			const permission = this._airaPermissions;
+			if (permission) {
+				try {
+					const outcome = await permission.gate(toolCall.name, (args ?? {}) as Record<string, unknown>);
+					if (outcome.block) {
+						return {
+							block: true,
+							reason: outcome.reason ?? `${toolCall.name} is blocked by permission policy`,
+						};
+					}
+				} catch (error) {
+					// Permission failure must degrade to ordinary usable Aira:
+					// log-less truthful denial of THIS call, never a wedged session.
+					return {
+						block: true,
+						reason: `${toolCall.name} could not be authorized (permission error: ${error instanceof Error ? error.message : String(error)}). Retry the request after checking /doctor.`,
+					};
+				}
 			}
 			const runner = this._extensionRunner;
 			if (!runner.hasHandlers("tool_call")) {
@@ -1062,6 +1151,14 @@ export class AgentSession {
 		// Aira goal seam: persist an active goal as paused (interrupted) and
 		// release listeners. The root session's teardown aborts owned runs.
 		void this._airaGoal?.dispose();
+		// Aira interaction seam: resolve any pending question truthfully (no
+		// orphaned dialogs; a pending tool call resolves as unavailable).
+		this._airaInteraction?.dispose();
+		// Aira permission seam: release listeners (rules are session-scoped;
+		// persistent rules stay in the Aira-owned store).
+		this._airaPermissions?.dispose();
+		// Aira task seam: release listeners and clear the session task graph.
+		this._airaTasks?.dispose();
 		// Aira intelligence seam: shut down providers (language servers, timers).
 		void this._airaIntelligence?.dispose();
 		// Aira lifecycle seam: release canonical state, ownership-checked so a
@@ -1137,6 +1234,21 @@ export class AgentSession {
 	/** Aira orchestration runtime for this session (tests and host). */
 	get airaOrchestration(): AiraOrchestrationHandle | undefined {
 		return this._airaOrchestration;
+	}
+
+	/** Aira interaction runtime for this session (Phase 11; tests and host). */
+	get airaInteraction(): AiraInteractionHandle | undefined {
+		return this._airaInteraction;
+	}
+
+	/** Aira permission controller for this session (Phase 11; tests and host). */
+	get airaPermissions(): AiraPermissionControllerHandle | undefined {
+		return this._airaPermissions;
+	}
+
+	/** Aira task manager for this session (Phase 11; tests and host). */
+	get airaTasks(): AiraTaskManagerHandle | undefined {
+		return this._airaTasks;
 	}
 	/** Resolve the fresh-context verifier runtime (current model + auth). */
 	private async resolveAiraVerifierRuntime(): Promise<AiraVerifierRuntime | undefined> {
@@ -3107,6 +3219,18 @@ export class AgentSession {
 			: {};
 		Object.assign(baseToolDefinitions, airaOrchestrationTools);
 
+		// Aira interaction seam (Phase 11): the native `ask_user` tool bound to
+		// THIS session's interaction manager. Core Aira tool; default active.
+		const airaInteractionTools = this._airaInteraction
+			? createAiraInteractionToolDefinitions({ runtime: this._airaInteraction })
+			: {};
+		Object.assign(baseToolDefinitions, airaInteractionTools);
+
+		// Aira task seam (Phase 11): the native `tasks` tool bound to THIS
+		// session's task manager. Core Aira tool; default active.
+		const airaTaskTools = this._airaTasks ? createAiraTaskToolDefinitions({ runtime: this._airaTasks }) : {};
+		Object.assign(baseToolDefinitions, airaTaskTools);
+
 		this._baseToolDefinitions = new Map(
 			Object.entries(baseToolDefinitions).map(([name, tool]) => [name, tool as ToolDefinition]),
 		);
@@ -3137,6 +3261,8 @@ export class AgentSession {
 					...Object.keys(airaExecutionTools),
 					...Object.keys(airaBrowserTools),
 					...Object.keys(airaOrchestrationTools),
+					...Object.keys(airaInteractionTools),
+					...Object.keys(airaTaskTools),
 				]
 			: [
 					"read",
@@ -3146,6 +3272,8 @@ export class AgentSession {
 					...Object.keys(airaExecutionTools),
 					...Object.keys(airaBrowserTools),
 					...Object.keys(airaOrchestrationTools),
+					...Object.keys(airaInteractionTools),
+					...Object.keys(airaTaskTools),
 				];
 		const baseActiveToolNames = options.activeToolNames ?? defaultActiveToolNames;
 		this._refreshToolRegistry({

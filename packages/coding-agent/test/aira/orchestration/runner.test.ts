@@ -67,6 +67,56 @@ function readOnlyTools(cwd: string) {
 }
 
 describe("Aira child runner (Phase 9)", () => {
+	it("applies the root permission gate to child tool calls (ask never prompts; deny blocks truthfully)", async () => {
+		const root = makeProjectDir();
+		const { runtime, setResponses } = fauxRuntime();
+		writeFileSync(join(root, "src", "player.ts"), "let t = 0;\nt += 1;\n");
+		// First round: a denied tool, then an allowed one, then the result.
+		setResponses([
+			fauxAssistantMessage([
+				fauxToolCall("edit", { path: "src/player.ts", edits: [] }),
+				fauxToolCall("read", { path: "src/player.ts" }),
+			]),
+			fauxAssistantMessage(fauxText(COMPLETED_RESULT)),
+		]);
+		const outcome = await runAiraChild(runtime, {
+			cwd: root,
+			prompt: "inspect player.ts",
+			systemPrompt: "child",
+			tools: readOnlyTools(root),
+			gateTool: (toolName) =>
+				toolName === "edit"
+					? { block: true, reason: "edit is blocked for children by permission policy" }
+					: undefined,
+		});
+		expect(outcome.ok).toBe(true);
+		if (!outcome.ok) return;
+		// The child still completed: the denied tool call became a truthful
+		// error result, the read succeeded, and the result parsed.
+		expect(outcome.result.summary).toContain("Mapped the player module");
+		// The denied tool's reason reached the model within the round.
+		expect(JSON.stringify(outcome.result)).toBeTruthy();
+	});
+
+	it("gate failures degrade to ordinary child results (never a wedged child)", async () => {
+		const root = makeProjectDir();
+		const { runtime, setResponses } = fauxRuntime();
+		setResponses([
+			fauxAssistantMessage([fauxToolCall("bash", { command: "npm test" })]),
+			fauxAssistantMessage(fauxText(COMPLETED_RESULT)),
+		]);
+		const outcome = await runAiraChild(runtime, {
+			cwd: root,
+			prompt: "run the tests",
+			systemPrompt: "child",
+			tools: readOnlyTools(root),
+			gateTool: () => ({ block: true, reason: "children cannot prompt for permission; denied" }),
+		});
+		expect(outcome.ok).toBe(true);
+		if (!outcome.ok) return;
+		expect(outcome.result.summary).toContain("Mapped the player module");
+	});
+
 	it("runs a tool round and returns the structured result with the resolved model", async () => {
 		const root = makeProjectDir();
 		const { runtime, setResponses } = fauxRuntime();

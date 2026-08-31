@@ -57,15 +57,22 @@ export type AiraGoalStopReason =
 	| "permission" // a capability/policy boundary blocked required work
 	| "plan-mode"; // read-only mode cannot produce implementation work
 
-/** Structured waiting reason — the future native Q&A / permission-mode seam. */
+/** Structured waiting reason — the Phase 11 native Q&A / permission-mode seam. */
 export interface AiraGoalWaiting {
 	/** Bounded reason category (see AiraGoalStopReason waiting classes). */
 	reason: AiraGoalStopReason;
+	/**
+	 * Structured interaction kind (Phase 11): "user-question" (semantic
+	 * Q&A), "permission" (tool authorization), "evidence" (verifier- or
+	 * capability-driven). Never inferred from strings — set explicitly by
+	 * the waiting owner.
+	 */
+	kind: "user-question" | "permission" | "evidence";
 	/** Bounded human-readable detail. */
 	detail: string;
 	/**
-	 * When `input-required`, the future structured Q&A component plugs in
-	 * here: what decision/information the user must provide. Bounded; never
+	 * When `input-required`, the structured Q&A component plugs in here:
+	 * what decision/information the user must provide. Bounded; never
 	 * a transcript.
 	 */
 	ask?: string;

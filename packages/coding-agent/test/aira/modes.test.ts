@@ -87,6 +87,8 @@ describe("Aira modes", () => {
 			"agents_delegate",
 			"agents_status",
 			"agents_cancel",
+			"ask_user",
+			"tasks",
 		]);
 		for (const tool of AIRA_READ_ONLY_TOOLS) {
 			expect(isAiraMutatingTool(tool)).toBe(false);

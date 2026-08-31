@@ -119,6 +119,19 @@ export type AiraGoalActionResult =
 export interface AiraGoalHandle {
 	/** User message seam: promote / resume / steer on real user prompts. */
 	considerUserObjective(text: string): void;
+	/**
+	 * Phase 11 interaction seam: pending/answered/cancelled structured
+	 * questions reflect into goal waiting truthfully (kind
+	 * user-question/permission) and resume on answers. A cancelled semantic
+	 * question is NOT an answer: the goal stays waiting for real user
+	 * guidance.
+	 */
+	considerUserInteraction(change: {
+		type: "permission" | "semantic";
+		state: "pending" | "answered" | "closed";
+		prompt: string;
+		detail?: string;
+	}): void;
 	/** Manual goal creation (explicit user intent; no SMART gate). */
 	create(objective: string): AiraGoalActionResult;
 	/** Feed host agent events (completion-boundary subscription). */
@@ -174,6 +187,8 @@ interface AiraGoalState {
 	/** Bounded repair context of the last FAIL (resume without a fresh result). */
 	repairContext: AiraGoalRepairContext | undefined;
 	lastEvent: string | undefined;
+	/** True when the current waiting state was opened by the interaction seam. */
+	waitingInteraction?: boolean;
 }
 
 export class AiraGoalManager implements AiraGoalHandle {
@@ -226,6 +241,9 @@ export class AiraGoalManager implements AiraGoalHandle {
 					recovered.status === "paused" && recovered.stopReason === "interrupted"
 						? "recovered after restart (running goal paused; resume explicitly)"
 						: `recovered after restart (${recovered.status})`,
+				waitingInteraction: recovered.waiting
+					? recovered.waiting.kind === "user-question" || recovered.waiting.kind === "permission"
+					: undefined,
 			};
 			this.persistenceRecord = { status: "ok", error: undefined, path: this.persistence.path };
 		}
@@ -278,6 +296,76 @@ export class AiraGoalManager implements AiraGoalHandle {
 		if (current.status === "active" || current.status === "repairing") {
 			this.setEvent(current, "user steering message received");
 		}
+	}
+
+	considerUserInteraction(change: {
+		type: "permission" | "semantic";
+		state: "pending" | "answered" | "closed";
+		prompt: string;
+		detail?: string;
+	}): void {
+		if (this.disposed) {
+			return;
+		}
+		const current = this.goal;
+		if (!current) {
+			return;
+		}
+		if (change.state === "pending") {
+			// A question opened while a round is in flight: the goal waits
+			// truthfully with a structured kind (never inferred from strings).
+			if (!AIRA_GOAL_RUNNING_STATUSES.includes(current.status)) {
+				return;
+			}
+			const kind: AiraGoalWaiting["kind"] = change.type === "permission" ? "permission" : "user-question";
+			this.transition(current, "waiting", "interaction pending");
+			current.stopReason = kind === "permission" ? "permission" : "input-required";
+			current.waiting = {
+				reason: current.stopReason,
+				kind,
+				detail: boundedText(change.prompt, MAX_WAITING_DETAIL_CHARS),
+				...(kind === "user-question" ? { ask: boundedText(change.prompt, 200) } : {}),
+			};
+			current.waitingInteraction = true;
+			this.setEvent(current, `waiting: ${kind} — ${boundedText(change.prompt, 120)}`);
+			this.persistGoal(current);
+			this.publish();
+			return;
+		}
+		// Only interaction-opened waits are resumed/kept by this seam.
+		if (!(current.status === "waiting" && current.waitingInteraction === true)) {
+			return;
+		}
+		if (change.state === "answered") {
+			// A real answer (any kind) resumes the round; the in-flight run
+			// continues with the bounded answer.
+			this.transition(current, "active", "interaction answered");
+			current.stopReason = undefined;
+			current.waiting = undefined;
+			current.waitingInteraction = undefined;
+			this.setEvent(current, `user answered — goal resumed (${change.type})`);
+			this.persistGoal(current);
+			this.publish();
+			return;
+		}
+		// closed (cancelled / timed-out / unavailable / superseded)
+		if (change.type === "permission") {
+			// A permission denial/cancel is a real authorization outcome: the
+			// round proceeds with the truthful denial.
+			this.transition(current, "active", "interaction closed");
+			current.stopReason = undefined;
+			current.waiting = undefined;
+			current.waitingInteraction = undefined;
+			this.setEvent(current, "permission outcome delivered — goal resumed");
+			this.persistGoal(current);
+			this.publish();
+			return;
+		}
+		// A cancelled semantic question is NOT an answer: the goal stays
+		// waiting truthfully (next real user message resumes it — the
+		// considerUserObjective seam). Never invents an answer.
+		this.setEvent(current, "question cancelled — awaiting user guidance");
+		this.publish();
 	}
 
 	create(objective: string): AiraGoalActionResult {
@@ -556,7 +644,7 @@ export class AiraGoalManager implements AiraGoalHandle {
 
 		if (result.verdict === "pass") {
 			current.repairContext = undefined;
-			this.complete(current, result);
+			this.complete(current);
 			return;
 		}
 		if (result.verdict === "fail") {
@@ -660,7 +748,7 @@ export class AiraGoalManager implements AiraGoalHandle {
 						this.commitChildUsage(current);
 						if (fresh.verdict === "pass") {
 							current.repairContext = undefined;
-							this.complete(current, fresh);
+							this.complete(current);
 							return;
 						}
 						if (fresh.verdict === "fail") {
@@ -791,7 +879,7 @@ export class AiraGoalManager implements AiraGoalHandle {
 		this.publish();
 	}
 
-	private complete(current: AiraGoalState, result: AiraVerificationResult): void {
+	private complete(current: AiraGoalState): void {
 		this.transition(current, "completed", "verification PASS");
 		current.completedAt = this.now();
 		current.stopReason = undefined;
@@ -823,15 +911,17 @@ export class AiraGoalManager implements AiraGoalHandle {
 		reason: Extract<AiraGoalStopReason, "input-required" | "missing-evidence">,
 		detail: string,
 		firstMissing: string | undefined,
+		kind: AiraGoalWaiting["kind"] = "evidence",
 	): void {
 		this.transition(current, "waiting", "goal waits");
 		current.stopReason = reason;
 		current.waiting = {
 			reason,
+			kind,
 			detail: boundedText(detail, MAX_WAITING_DETAIL_CHARS),
 			...(reason === "input-required" && firstMissing ? { ask: boundedText(firstMissing, 200) } : {}),
 		};
-		this.setEvent(current, `waiting: ${reason}`);
+		this.setEvent(current, `waiting: ${kind}`);
 		this.persistGoal(current);
 		this.publish();
 	}
@@ -878,6 +968,7 @@ export class AiraGoalManager implements AiraGoalHandle {
 			evidenceAcquisitionRound: 0,
 			repairContext: undefined,
 			lastEvent: `goal started (${reason}) — round 1`,
+			waitingInteraction: undefined,
 		};
 		this.previousFailObservation = undefined;
 		this.persistGoal(this.goal);
@@ -1046,7 +1137,7 @@ export class AiraGoalManager implements AiraGoalHandle {
 				path: this.persistenceRecord.path,
 				error: this.persistenceRecord.error,
 			},
-			summary: summarizeGoal(this, current, tasks, verification),
+			summary: summarizeGoal(current, tasks, verification),
 		};
 	}
 
@@ -1124,7 +1215,6 @@ export function createAiraGoalManager(state: AiraSessionState, options: AiraGoal
 // ---------------------------------------------------------------------------
 
 function summarizeGoal(
-	manager: AiraGoalManager,
 	current: AiraGoalState,
 	tasks: AiraGoalTaskProjection,
 	verification: AiraGoalVerificationProjection,

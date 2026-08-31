@@ -46,8 +46,12 @@ import {
 import chalk from "chalk";
 import { spawn } from "child_process";
 import {
+	AIRA_PERMISSION_MODES,
 	type AiraGoalSnapshot,
+	type AiraInteractionHandle,
+	type AiraInteractionPendingProjection,
 	type AiraMode,
+	type AiraPermissionMode,
 	airaModeLabel,
 	buildAiraDoctorReport,
 	buildAiraModeReport,
@@ -55,7 +59,11 @@ import {
 	formatAiraDoctorReport,
 	formatAiraGoalReport,
 	formatAiraModeReport,
+	formatAiraPermissionRules,
+	formatAiraPermissionsReport,
 	formatAiraStatusReport,
+	formatAiraTaskDetail,
+	formatAiraTasksReport,
 	formatProcessLine,
 	getAiraSessionState,
 	nextAiraMode,
@@ -513,6 +521,8 @@ export class InteractiveMode {
 
 	// Agent subscription unsubscribe function
 	private unsubscribe?: () => void;
+	private interactionUnsubscribe?: () => void;
+	private activeInteractionId: string | undefined;
 	private signalCleanupHandlers: Array<() => void> = [];
 
 	// Track if editor is in bash mode (text starts with !)
@@ -3087,6 +3097,16 @@ export class InteractiveMode {
 				this.editor.setText("");
 				return;
 			}
+			if (text === "/permissions" || text.startsWith("/permissions ")) {
+				this.handlePermissionsCommand(text);
+				this.editor.setText("");
+				return;
+			}
+			if (text === "/tasks" || text.startsWith("/tasks ")) {
+				this.handleTasksCommand(text);
+				this.editor.setText("");
+				return;
+			}
 			if (text === "/changelog") {
 				this.handleChangelogCommand();
 				this.editor.setText("");
@@ -3236,6 +3256,151 @@ export class InteractiveMode {
 	private subscribeToAgent(): void {
 		this.unsubscribe = this.session.subscribe(async (event) => {
 			await this.handleEvent(event);
+		});
+		this.attachAiraInteractionBridge();
+	}
+
+	/**
+	 * Phase 11 — the native structured-Q&A UI bridge. The TUI dialog renders
+	 * pending interactions (permission ASK and semantic ask_user questions)
+	 * through the existing selector/input machinery and delivers answers back
+	 * to the canonical interaction manager. Headless modes never attach and
+	 * questions resolve truthfully as unavailable.
+	 */
+	private attachAiraInteractionBridge(): void {
+		const interaction = this.session.airaInteraction;
+		if (!interaction) {
+			return;
+		}
+		interaction.attachUI();
+		this.interactionUnsubscribe = interaction.subscribe((status) => {
+			if (!status.pending || !status.question || this.activeInteractionId) {
+				return;
+			}
+			void this.showAiraInteractionDialog(status.question);
+		});
+	}
+
+	private detachAiraInteractionBridge(): void {
+		this.interactionUnsubscribe?.();
+		this.interactionUnsubscribe = undefined;
+		this.session.airaInteraction?.detachUI();
+	}
+
+	private async showAiraInteractionDialog(question: AiraInteractionPendingProjection): Promise<void> {
+		const interaction = this.session.airaInteraction;
+		if (!interaction || this.activeInteractionId) {
+			return;
+		}
+		this.activeInteractionId = question.interactionId;
+		const dialogOpts: ExtensionUIDialogOptions | undefined =
+			this.settingsManager.getInteractionSettings().timeoutMs > 0
+				? { timeout: this.settingsManager.getInteractionSettings().timeoutMs }
+				: undefined;
+		try {
+			if (question.type === "permission") {
+				await this.showAiraPermissionDialog(question, interaction, dialogOpts);
+				return;
+			}
+			await this.showAiraSemanticDialog(question, interaction, dialogOpts);
+		} finally {
+			this.activeInteractionId = undefined;
+		}
+	}
+
+	private async showAiraPermissionDialog(
+		question: AiraInteractionPendingProjection,
+		interaction: NonNullable<AiraInteractionHandle>,
+		opts: ExtensionUIDialogOptions | undefined,
+	): Promise<void> {
+		const labels = ["Allow once", "Allow session", "Allow always", "Deny"] as const;
+		const picked = await this.showExtensionSelector(question.prompt, [...labels], opts);
+		if (picked === undefined) {
+			interaction.answer(question.interactionId, { resolution: "cancelled", selections: [] });
+			return;
+		}
+		const decision =
+			picked === "Allow once"
+				? "allow-once"
+				: picked === "Allow session"
+					? "allow-session"
+					: picked === "Allow always"
+						? "allow-always"
+						: "deny";
+		interaction.answer(question.interactionId, { resolution: "answered", selections: [], decision });
+	}
+
+	private async showAiraSemanticDialog(
+		question: AiraInteractionPendingProjection,
+		interaction: NonNullable<AiraInteractionHandle>,
+		opts: ExtensionUIDialogOptions | undefined,
+	): Promise<void> {
+		const title = question.context ? `${question.prompt}\n\n${question.context}` : question.prompt;
+		if (question.choices.length === 0 && !question.freeform) {
+			// Nothing to answer with: cancel truthfully (cannot invent an answer).
+			interaction.answer(question.interactionId, { resolution: "cancelled", selections: [] });
+			return;
+		}
+		if (question.choices.length === 0 && question.freeform) {
+			const text = await this.showExtensionInput(title, "Type your answer...", opts);
+			interaction.answer(question.interactionId, {
+				resolution: text === undefined || text.trim() === "" ? "cancelled" : "answered",
+				selections: [],
+				...(text !== undefined && text.trim() !== "" ? { text: text.trim() } : {}),
+			});
+			return;
+		}
+		const selections: string[] = [];
+		let custom: string | undefined;
+		const remaining = new Map(question.choices.map((choice) => [choice.id, choice]));
+		// Multi-select: pick repeatedly until "Done" (or Escape cancels).
+		for (;;) {
+			const options: string[] = [...remaining.values()].map((choice) => choice.label);
+			if (question.freeform) {
+				options.push("Type custom answer…");
+			}
+			if (question.multiSelect) {
+				options.push("Done");
+			}
+			const picked = await this.showExtensionSelector(title, options, opts);
+			if (picked === undefined) {
+				interaction.answer(question.interactionId, { resolution: "cancelled", selections: [] });
+				return;
+			}
+			if (picked === "Done") {
+				break;
+			}
+			if (picked === "Type custom answer…") {
+				const text = await this.showExtensionInput(title, "Type your answer...", opts);
+				if (text === undefined) {
+					interaction.answer(question.interactionId, { resolution: "cancelled", selections: [] });
+					return;
+				}
+				if (text.trim() !== "") {
+					custom = text.trim();
+				}
+				if (!question.multiSelect) {
+					break;
+				}
+				continue;
+			}
+			const choice = [...remaining.values()].find((candidate) => candidate.label === picked);
+			if (choice) {
+				selections.push(choice.id);
+				remaining.delete(choice.id);
+			}
+			if (!question.multiSelect) {
+				break;
+			}
+		}
+		if (selections.length === 0 && custom === undefined) {
+			interaction.answer(question.interactionId, { resolution: "cancelled", selections: [] });
+			return;
+		}
+		interaction.answer(question.interactionId, {
+			resolution: "answered",
+			selections,
+			...(custom !== undefined ? { text: custom } : {}),
 		});
 	}
 
@@ -4427,6 +4592,185 @@ export class InteractiveMode {
 		this.ui.requestRender();
 	}
 
+	/**
+	 * `/permissions` — restrained authorization status (Phase 11).
+	 * `/permissions mode <normal|permissive|strict|yolo>` switches the
+	 * canonical permission mode; `/permissions rule add <tool> [pattern]
+	 * <allow|ask|deny>` and `/permissions rule remove <id>` manage persistent
+	 * rules (Aira-owned config). Never evaluates a request here.
+	 */
+	private handlePermissionsCommand(text: string): void {
+		const permissions = this.session.airaPermissions;
+		if (!permissions) {
+			this.showStatus("permissions runtime unavailable");
+			return;
+		}
+		const args = text.startsWith("/permissions ") ? text.slice(13).trim() : "";
+		if (args === "" || args === "status") {
+			this.renderPermissionsLines(formatAiraPermissionsReport(permissions.status()));
+			return;
+		}
+		if (args === "rule list" || args === "list") {
+			const all = permissions.rules();
+			this.renderPermissionsLines(formatAiraPermissionRules(all.session, all.persistent));
+			return;
+		}
+		if (args.startsWith("mode ")) {
+			const mode = args.slice(5).trim();
+			if (!AIRA_PERMISSION_MODES.includes(mode as AiraPermissionMode)) {
+				this.showStatus(`permissions: unknown mode "${mode}" (normal | permissive | strict | yolo)`);
+				return;
+			}
+			const current = this.settingsManager.getPermissionsSettings();
+			this.settingsManager.setPermissionsSettings({ ...current, mode: mode as AiraPermissionMode });
+			permissions.setMode(mode as AiraPermissionMode);
+			this.showStatus(`permissions: mode set to ${mode} (PLAN read-only remains absolute)`);
+			return;
+		}
+		if (args.startsWith("rule add ")) {
+			const result = this.addPermissionRule(args.slice(9).trim());
+			this.showStatus(result.ok ? `permissions: ${result.message}` : `permissions: ${result.message}`);
+			return;
+		}
+		if (args.startsWith("rule remove ")) {
+			const id = args.slice(12).trim();
+			const result = permissions.removeRule(id);
+			this.showStatus(result.ok ? `permissions: ${result.message}` : `permissions: ${result.message}`);
+			return;
+		}
+		if (args.startsWith("rule")) {
+			this.showStatus(
+				'permissions: use "rule add <tool> [pattern] <allow|ask|deny>" or "rule remove <id>" or "rule list"',
+			);
+			return;
+		}
+		this.showStatus(
+			`permissions: unknown subcommand "${args}" (use /permissions, /permissions status, /permissions mode <mode>, /permissions rule add|list|remove)`,
+		);
+	}
+
+	private addPermissionRule(args: string): { ok: boolean; message: string } {
+		const permissions = this.session.airaPermissions;
+		if (!permissions) {
+			return { ok: false, message: "permissions runtime unavailable" };
+		}
+		const parts = args.split(/\s+/).filter((part) => part.length > 0);
+		const action = parts[parts.length - 1];
+		if (action !== "allow" && action !== "ask" && action !== "deny") {
+			return { ok: false, message: "rule action must be allow, ask, or deny" };
+		}
+		const tool = parts[0];
+		if (!tool || !/^[a-zA-Z0-9_.-]+$/.test(tool)) {
+			return { ok: false, message: "rule tool must be a plain tool name" };
+		}
+		let subject: string;
+		let match: "exact" | "wildcard";
+		if (parts.length === 2) {
+			subject = tool;
+			match = "exact";
+		} else if (parts.length === 3) {
+			subject = parts[1];
+			match = subject.includes("*") || subject.includes("?") ? "wildcard" : "exact";
+		} else {
+			return { ok: false, message: "usage: rule add <tool> [pattern] <allow|ask|deny>" };
+		}
+		return permissions.addRule({ tool, subject, match, action }, "persistent");
+	}
+
+	private renderPermissionsLines(report: string): void {
+		this.chatContainer.addChild(new Spacer(1));
+		this.chatContainer.addChild(
+			new Text(
+				theme.fg(
+					"dim",
+					report
+						.split("\n")
+						.map((line) => `  ${line}`)
+						.join("\n"),
+				),
+				1,
+				0,
+			),
+		);
+		this.ui.requestRender();
+	}
+
+	/**
+	 * `/tasks` — restrained task-graph surface (Phase 11). Renders the live
+	 * task manager state (the canonical snapshot is for doctors); `/tasks
+	 * add <title>`, `/tasks done <id>`, `/tasks cancel <id>`, `/tasks get
+	 * <id>` operate through the single canonical task owner. Child rows are
+	 * orchestration-owned and refuse mutations here (/agents cancel).
+	 */
+	private handleTasksCommand(text: string): void {
+		const tasks = this.session.airaTasks;
+		if (!tasks) {
+			this.showStatus("tasks runtime unavailable");
+			return;
+		}
+		const args = text.startsWith("/tasks ") ? text.slice(7).trim() : "";
+		if (args === "" || args === "status") {
+			this.renderTasksLines(formatAiraTasksReport(tasks.status()));
+			return;
+		}
+		if (args.startsWith("add ")) {
+			const result = tasks.create(args.slice(4).trim(), { source: "user" });
+			this.showStatus(
+				result.ok ? `tasks: added ${result.task.id} · ${result.task.title}` : `tasks: ${result.message}`,
+			);
+			return;
+		}
+		if (args.startsWith("done ")) {
+			const id = args.slice(5).trim();
+			const result = tasks.patch(id, { status: "completed" });
+			this.showStatus(result.ok ? `tasks: completed ${id}` : `tasks: ${result.message}`);
+			return;
+		}
+		if (args.startsWith("cancel ")) {
+			const id = args.slice(7).trim();
+			const result = tasks.patch(id, { status: "cancelled" });
+			this.showStatus(result.ok ? `tasks: cancelled ${id}` : `tasks: ${result.message}`);
+			return;
+		}
+		if (args.startsWith("get ")) {
+			const id = args.slice(4).trim();
+			const task = tasks.get(id);
+			if (!task) {
+				this.showStatus(`tasks: unknown task "${id}"`);
+				return;
+			}
+			this.renderTasksLines(formatAiraTaskDetail(task));
+			return;
+		}
+		if (args.startsWith("remove ")) {
+			const id = args.slice(7).trim();
+			const result = tasks.remove(id);
+			this.showStatus(result.ok ? `tasks: removed ${id}` : `tasks: ${result.message}`);
+			return;
+		}
+		this.showStatus(
+			`tasks: unknown subcommand "${args}" (use /tasks, /tasks status, /tasks add <title>, /tasks done <id>, /tasks cancel <id>, /tasks get <id>, /tasks remove <id>)`,
+		);
+	}
+
+	private renderTasksLines(report: string): void {
+		this.chatContainer.addChild(new Spacer(1));
+		this.chatContainer.addChild(
+			new Text(
+				theme.fg(
+					"dim",
+					report
+						.split("\n")
+						.map((line) => `  ${line}`)
+						.join("\n"),
+				),
+				1,
+				0,
+			),
+		);
+		this.ui.requestRender();
+	}
+
 	/** `/verify status` — render the canonical verification snapshot (token-free). */
 	private showVerificationStatus(): void {
 		const verification = this.session.airaVerification;
@@ -4899,6 +5243,9 @@ export class InteractiveMode {
 			const verificationSettings = this.settingsManager.getVerificationSettings();
 			const orchestrationSettings = this.settingsManager.getOrchestrationSettings();
 			const goalSettings = this.settingsManager.getGoalSettings();
+			const permissionSettings = this.settingsManager.getPermissionsSettings();
+			const interactionSettings = this.settingsManager.getInteractionSettings();
+			const taskSettings = this.settingsManager.getTasksSettings();
 			selector = new SettingsSelectorComponent(
 				{
 					autoCompact: this.session.autoCompactionEnabled,
@@ -4943,6 +5290,9 @@ export class InteractiveMode {
 					verificationSettings,
 					orchestrationSettings,
 					goalSettings,
+					permissionSettings,
+					interactionSettings,
+					taskSettings,
 				},
 				{
 					onAutoCompactChange: (enabled) => {
@@ -5134,6 +5484,17 @@ export class InteractiveMode {
 					},
 					onGoalSettingsChange: (settings) => {
 						this.settingsManager.setGoalSettings(settings);
+					},
+					onPermissionSettingsChange: (settings) => {
+						this.settingsManager.setPermissionsSettings(settings);
+						// Keep the live controller snapshot in sync with canonical settings.
+						this.session.airaPermissions?.setMode(settings.mode);
+					},
+					onInteractionSettingsChange: (settings) => {
+						this.settingsManager.setInteractionSettings(settings);
+					},
+					onTaskSettingsChange: (settings) => {
+						this.settingsManager.setTasksSettings(settings);
 					},
 					onCancel: () => {
 						done();
@@ -6982,6 +7343,7 @@ export class InteractiveMode {
 
 	stop(fullscreenExitOutput = this.settingsManager.getFullscreenExitOutput()): void {
 		this.disposeActiveSelector();
+		this.detachAiraInteractionBridge();
 		if (this.settingsManager.getShowTerminalProgress()) {
 			this.ui.terminal.setProgress(false);
 		}

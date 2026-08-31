@@ -25,6 +25,7 @@ import { KEYBINDINGS } from "../../core/keybindings.ts";
 import { classifyAiraBrowserOperation, classifyAiraCapability, isAiraCapabilityReadOnly } from "../capabilities.ts";
 import { AIRA_MODE_CYCLE, AIRA_MUTATING_TOOLS, AIRA_READ_ONLY_TOOLS, isAiraMutatingTool } from "../modes.ts";
 import { displayPathUnderHome, getAiraHome } from "../paths.ts";
+import { AIRA_PERMISSION_MODES, evaluateAiraPermissionRequest } from "../permissions/index.ts";
 import { summarizeAiraProject } from "../project/profile.ts";
 import type { AiraSessionState } from "../state.ts";
 
@@ -296,6 +297,80 @@ export function buildAiraDoctorReport(state: AiraSessionState | undefined): Aira
 			name: "goal",
 			pass: true,
 			detail: `${goal.enabled ? "enabled" : "disabled"} · auto ${goal.auto} · ${goal.status}${goal.objective ? ` · "${goal.objective}"` : ""} · round ${goal.round}/${goal.maxRounds} · max rounds ${goal.maxRounds}${goal.budget.tokens !== undefined ? ` · token budget ${goal.budget.tokens}` : ""}${goal.budget.maxDurationMs !== undefined ? ` · duration ${Math.round(goal.budget.maxDurationMs / 60000)}m` : ""}${usageLine}${waitingLine}${persistenceLine}`,
+		});
+	}
+
+	// 14. Permission controller: canonical settings + snapshot + store health.
+	// Health reporting never evaluates a request (token-free by construction);
+	// a failed persistent store is reported truthfully but must NOT break the
+	// host (rules keep applying in-session). PLAN is absolute by design: the
+	// check below proves no permission mode can weaken the read-only boundary.
+	const permissions = state?.permissions;
+	if (!permissions) {
+		checks.push({
+			name: "permissions",
+			pass: false,
+			detail: "no permission snapshot (controller wiring)",
+		});
+	} else {
+		const storeLine =
+			permissions.store.status === "failed"
+				? ` · store FAILED${permissions.store.error ? `: ${permissions.store.error}` : ""}`
+				: ` · store ${permissions.store.status}`;
+		const planBoundaryHolds = AIRA_PERMISSION_MODES.every(
+			(mode) =>
+				evaluateAiraPermissionRequest(
+					{ tool: "edit", capability: "mutating", subject: "/tmp/x" },
+					{ mode, rules: [], plan: true },
+				).action === "deny" &&
+				evaluateAiraPermissionRequest(
+					{ tool: "bash", capability: "process", subject: "npm test" },
+					{ mode, rules: [], plan: true },
+				).action === "deny",
+		);
+		checks.push({
+			name: "permissions",
+			pass: permissions.enabled && permissions.mode !== undefined && planBoundaryHolds,
+			detail: `${permissions.enabled ? "enabled" : "disabled"} · mode ${permissions.mode} · ${permissions.persistentRules} persistent rule(s) · ${permissions.sessionRules} session rule(s) · ${permissions.onceApprovals} once approval(s)${storeLine}${planBoundaryHolds ? " · PLAN absolute (no mode can weaken read-only)" : " · PLAN boundary BROKEN"}`,
+		});
+	}
+
+	// 15. Interaction: canonical snapshot + pending question truth. Health
+	// reporting never opens a question (no prompts, no model tokens); a
+	// pending question is reflected, never resolved by the doctor.
+	const interaction = state?.interaction;
+	if (!interaction) {
+		checks.push({
+			name: "interaction",
+			pass: false,
+			detail: "no interaction snapshot (manager wiring)",
+		});
+	} else {
+		const pendingLine = interaction.pending
+			? ` · PENDING ${interaction.question?.type ?? "question"}: "${interaction.question?.prompt ?? ""}" (${Math.round((interaction.question?.durationMs ?? 0) / 1000)}s)`
+			: " · idle";
+		checks.push({
+			name: "interaction",
+			pass: true,
+			detail: `${interaction.uiAttached ? "UI attached" : "no UI attached (headless — questions resolve unavailable)"}${pendingLine}`,
+		});
+	}
+
+	// 16. Task graph: canonical settings + snapshot. Health reporting never
+	// mutates tasks; a disabled feature reports truthfully and is NOT a
+	// failure. Task state failure must not break the host.
+	const tasks = state?.tasks;
+	if (!tasks) {
+		checks.push({
+			name: "tasks",
+			pass: false,
+			detail: "no task snapshot (manager wiring)",
+		});
+	} else {
+		checks.push({
+			name: "tasks",
+			pass: true,
+			detail: `${tasks.enabled ? "enabled" : "disabled"} · ${tasks.total} task(s) · ${tasks.completed} completed · ${tasks.active} active · ${tasks.blocked} blocked · ${tasks.childRows} orchestration-projected row(s)`,
 		});
 	}
 
