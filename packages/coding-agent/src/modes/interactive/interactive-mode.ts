@@ -895,7 +895,6 @@ export class InteractiveMode {
 			requestRender: () => this.ui.requestRender(),
 			invalidate: () => this.ui.invalidate(),
 			layoutChanged: () => this.rebuildWorkbenchLayout(),
-			showStatus: (message) => this.showStatus(message),
 		});
 		this.workbench.attach();
 	}
@@ -6990,8 +6989,8 @@ export class InteractiveMode {
 			ui: this.ui,
 			editorContainer: this.editorContainer,
 			editor: this.editor,
-			showStatus: (message) => this.showStatus(message),
 			showError: (message) => this.showError(message),
+			showStatus: (message) => this.showStatus(message),
 		});
 	}
 

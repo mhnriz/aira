@@ -302,13 +302,20 @@ function executionRelevant(state: AiraSessionState): boolean {
 	const execution = state.execution;
 	if (!execution) return false;
 	if (execution.processes.some((p) => p.status === "running")) return true;
-	return execution.recentResults.length > 0;
+	if (execution.recentResults.length > 0) return true;
+	// Settled evidence: a failed background/dev process is useful even without
+	// a foreground result record (dogfood finding: `process_start` background
+	// runs never push a recent result, only the process row).
+	return execution.processes.some((p) => p.exitCode !== undefined && p.exitCode !== 0 && Boolean(p.exitReason));
 }
 
 export function executionPanel(state: AiraSessionState): WorkbenchPanel | undefined {
 	const execution = state.execution;
 	if (!execution || !executionRelevant(state)) return undefined;
 	const running = execution.processes.filter((p) => p.status === "running");
+	const failedSettled = execution.processes.filter(
+		(p) => p.status !== "running" && p.exitCode !== undefined && p.exitCode !== 0,
+	);
 	const priority: WorkbenchPriority = running.length > 0 ? 1 : 2;
 	const rows: WorkbenchRow[] = [];
 	for (const process of running.slice(0, 4)) {
@@ -319,6 +326,16 @@ export function executionPanel(state: AiraSessionState): WorkbenchPanel | undefi
 			role: "cyan",
 			trailing: elapsed(process.startedAt ? Date.now() - process.startedAt : undefined),
 			trailingRole: "muted",
+		});
+	}
+	for (const process of failedSettled.slice(0, 3)) {
+		rows.push({
+			key: process.id,
+			value: `✕ ${process.command}`,
+			role: "red",
+			trailing: `code ${process.exitCode}`,
+			trailingRole: "muted",
+			detail: process.exitReason,
 		});
 	}
 	for (const result of execution.recentResults.slice(0, 4)) {

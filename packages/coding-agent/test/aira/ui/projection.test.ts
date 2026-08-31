@@ -434,6 +434,36 @@ describe("Workbench panel projection", () => {
 		disposeFixture(state);
 	});
 
+	it("shows the Execution panel for a failed background process (dogfood finding)", () => {
+		const state = sessionFixture();
+		state.execution = {
+			active: true,
+			degraded: false,
+			processes: [
+				{
+					id: "test-1",
+					purpose: "test",
+					mode: "background",
+					status: "exited",
+					command: "node -e 'process.exit(3)'",
+					cwd: "/tmp/repo",
+					createdAt: 1,
+					startedAt: 1,
+					exitedAt: 2,
+					exitCode: 3,
+					exitReason: "exit",
+				},
+			],
+			recentResults: [],
+		};
+		const projection = projectWorkbench(defaultInput(state, 160));
+		const panel = projection.panels.find((p) => p.id === "execution");
+		expect(panel).toBeDefined();
+		expect(panel?.rows[0]?.value).toContain("✕ node -e 'process.exit(3)'");
+		expect(panel?.rows[0]?.trailing).toContain("code 3");
+		disposeFixture(state);
+	});
+
 	it("omits panels with no relevant state", () => {
 		const state = sessionFixture();
 		const projection = projectWorkbench(defaultInput(state, 160));

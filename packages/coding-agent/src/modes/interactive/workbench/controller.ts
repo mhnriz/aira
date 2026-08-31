@@ -47,7 +47,6 @@ export interface WorkbenchControllerOptions {
 	invalidate: () => void;
 	/** Host rebuilds the fullscreen layout root (layoutChanged). */
 	layoutChanged: () => void;
-	showStatus: (message: string) => void;
 }
 
 const WORKBENCH_GIT_REFRESH_MS = 400;
@@ -138,7 +137,13 @@ export class WorkbenchController {
 	}
 
 	toggle(): void {
-		this.explicitVisible = !(this.explicitVisible === false);
+		// Visibility semantics: undefined = default-on; false = explicit off;
+		// true = explicit on. First toggle from the default hides the sidebar.
+		if (this.explicitVisible === false) {
+			this.explicitVisible = true;
+		} else {
+			this.explicitVisible = false;
+		}
 		this.reconcile();
 	}
 
@@ -149,9 +154,15 @@ export class WorkbenchController {
 
 	syncSettings(): void {
 		const settings = this.session.settingsManager.getWorkbenchSettings();
+		const widthChanged =
+			settings.width !== this.sidebarWidth ||
+			settings.enabled !== this.workbenchEnabled ||
+			settings.showOnStartup !== this.showOnStartup;
 		this.sidebarWidth = settings.width;
 		this.showOnStartup = settings.showOnStartup;
+		this.workbenchEnabled = settings.enabled;
 		this.sidebarScroll.setScrollbar(this.session.settingsManager.getFullscreenScrollbar());
+		if (widthChanged) this.options.layoutChanged();
 		this.reconcile();
 	}
 

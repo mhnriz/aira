@@ -279,7 +279,7 @@ function contextSegment(context: {
 	over90: boolean;
 	over70: boolean;
 }): WorkbenchFooterSegment {
-	const text = `${context.percent}%/${formatTokens(context.window)}${context.autoCompact ? " ·auto" : ""}`;
+	const text = `${context.percent}%/${formatTokens(context.window)}${context.autoCompact ? " (auto)" : ""}`;
 	return {
 		id: "context",
 		text,
