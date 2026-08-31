@@ -184,18 +184,19 @@ bounded seam inputs (working set, symbols). ADR-031.
   after widening; explicit OFF stays off; explicit ON restores. Resize
   itself re-evaluates through `visible()`/`visibleAt()` — no layout rebuild
   on resize (only on toggle/settings change).
-- The `Ctrl+O` toggle is session-scoped state (`explicitVisible` tri-state);
+- The `Ctrl+Shift+O` toggle is session-scoped state (`explicitVisible` tri-state);
   `/workbench [on|off]` mirrors it.
 
 ## 5. Panels
 
 | Panel | Visibility rule | Canonical source | Update |
 | --- | --- | --- | --- |
-| Interaction (Question/Authorization) | pending interaction only | `state.interaction` | subscription |
+| Interaction (Question/Permission) | pending interaction only | `state.interaction` | subscription |
 | Current Finding | a meaningful arbitrated finding exists | arbitration across `state.*` | subscription |
 | Verification | status != idle or result exists | `state.verification` | subscription |
 | Goal | `goal.status != idle` | `state.goal` | subscription |
-| Tasks & Agents | tasks or active children exist | `state.tasks` + `state.orchestration` | subscription |
+| Tasks | canonical task rows exist | `state.tasks` | subscription |
+| Agents | running/queued children or failures exist | `state.orchestration` | subscription |
 | Execution | running process, failed settled process, or recent result | `state.execution` | subscription (events) |
 | Browser | active/degraded/tabs/check/console evidence | `state.browser` | subscription |
 | Working Set | changed files (bounded 8) | canonical `workingSet()` seam (git) | coalesced refresh |
@@ -226,14 +227,14 @@ preserved; per-segment compact variants kick in before dropping.
 
 ## 7. Input / keybindings
 
-- `app.workbench.toggle` — default `ctrl+o` (`Ctrl+O`).
-- `app.tools.expand` — default MOVED to `alt+o` (tool output expansion).
+- `app.workbench.toggle` — default `ctrl+shift+o` (`Ctrl+Shift+O`).
+- `app.tools.expand` — default `ctrl+o` (`Ctrl+O`, preserved).
 - `app.tree.filter.cycleForward/Backward` — unchanged (`ctrl+o` /
   `shift+ctrl+o`, context-scoped to the tree selector).
 - Conflict policy (truthful): user customizations are never overwritten
   (user bindings override defaults in `KeybindingsManager`); `/doctor`
-  reports `workbench shortcut` (toggle owns `ctrl+o`; expansion does not)
-  and the keybinding docs record the migration. Documented in
+  reports `workbench shortcut` (`ctrl+shift+o`) and preserved expansion
+  (`ctrl+o`). Documented in
   `packages/coding-agent/docs/keybindings.md`.
 - Focus/scroll: the sidebar never takes focus (nonCapturing overlay /
   non-primary ScrollView); conversation scroll keys stay on the primary
@@ -260,7 +261,7 @@ minus `theme`, so the DEFAULT theme path applies), built bundle
 - **CASE 1 Default (wide)**: Workbench visible on startup; `aira-zhr` active
   (unset theme → aira-zhr on dark; /doctor `aira-zhr theme: resolved`);
   footer `◈ BUILD │ LSP TS │ PERM normal · cwd (master) · ctx · model`.
-- **CASE 2 Toggle**: two `Ctrl+O` presses hide + restore the sidebar, no
+- **CASE 2 Toggle**: two `Ctrl+Shift+O` presses hide + restore the sidebar, no
   state loss. `/workbench off|on` works.
 - **CASE 3 Narrow/Medium**: at 90 cols the sidebar is auto-hidden and the
   footer keeps mode/context/model (drops opportunistic segments); at 116
@@ -293,9 +294,9 @@ minus `theme`, so the DEFAULT theme path applies), built bundle
   evidence/input states raise to P0 Current Finding; `/goal stop|clear`
   update the panel instantly.
 - **CASE 10 Tasks/Agents**: `agents_delegate` batch of two explore children
-  → Tasks & Agents panel `✓ … (explore)` rows + `2 done` hint, footer
+  → distinct Tasks and Agents panels with truthful running/queued rows, footer
   `AGENTS 0` after settling; goal task projection `2/2`.
-- **CASE 11 Permission**: browser_open ASK naturally → Authorization panel
+- **CASE 11 Permission**: browser_open ASK naturally → Permission panel
   at the TOP (P0), Current Finding `authorization: Allow browser_open to
   run?`, footer `ASK ● Allow browser_open to run?`; answering updates state
   immediately (panel disappears).
@@ -316,8 +317,8 @@ minus `theme`, so the DEFAULT theme path applies), built bundle
   truncation + required segments, background-process execution panel,
   medium dropping), `ui/theme.test.ts` (aira-zhr built-in + semantic
   mapping + classic fallbacks + default resolution), `ui/headless.test.ts`
-  (module boundary), `workbench-keybindings.test.ts` (Ctrl+O toggle,
-  Alt+O migration, user override, tree-filter untouched, conflict-free
+  (module boundary), `workbench-keybindings.test.ts` (Ctrl+Shift+O toggle,
+  Ctrl+O preservation, user override, tree-filter untouched, conflict-free
   defaults).
 - Updated: `commands/doctor.test.ts` (18 checks incl. workbench shortcut +
   aira-zhr theme), intelligence/verification fixtures (`findings.top`).
@@ -357,8 +358,8 @@ minus `theme`, so the DEFAULT theme path applies), built bundle
 
 - ADR-031 — Aira owns one native Workbench; UI only projects (no second
   state owner, no TUI in headless).
-- ADR-032 — Responsive sidebar policy + `Ctrl+O` binding (auto-hide below
-  the safe minimum; explicit off respected; tool expansion moved to Alt+O).
+- ADR-032 — Responsive sidebar policy + semantic Workbench binding (auto-hide
+  below the safe minimum; explicit off respected; Ctrl+O expansion preserved).
 - ADR-033 — Footer priority system + highest-priority finding arbitration.
 - ADR-034 — Theme semantic contract: eight optional roles with classic
   fallbacks; `aira-zhr` is the default dark theme.
@@ -381,8 +382,92 @@ minus `theme`, so the DEFAULT theme path applies), built bundle
 5. `e1605def7` fix(aira): regular-mode rail never paints over the footer
    (short-document geometry — final dogfood capture found the rail
    covering the floating footer; fixed via footer-start-row tracking).
+6. `d8d09d000` fix(coding-agent): visual-parity polish, truthful task/agent and
+   intelligence projections, native footer arbitration, semantic shortcut
+   preservation, renderer invariants, and regression coverage.
 
-## 14. Stopping point
+## 14. Visual-parity polish follow-up (2026-09-01)
+
+### 14.1 Gap audit
+
+The approved HTML composes a dominant conversation pane and a quieter
+engineering pane with a continuous edge, compact section rhythm, fixed label
+columns, right-aligned metadata, progressive disclosure, and a footer split
+into operational state (left) and session telemetry (right). The first native
+implementation had the correct architecture and data, but several renderer
+details still read as plain status text: its pane edge ended with content,
+10-cell labels could collide (`Permissionnormal`), trailing values did not
+align, detail rows were not counted by height fitting, TASKS and AGENTS shared
+one ambiguous panel, cold intelligence could show `uninitialized`, and the
+native footer did not call its own drop arbitration.
+
+### 14.2 Implementation decisions
+
+- The regular-mode rail now paints one continuous muted `│` edge down to the
+  footer. Fullscreen keeps content-height rendering inside its independent
+  ScrollView instead of allocating an artificial 10,000-line surface.
+- `AIRA` uses copper and `WORKBENCH` uses primary text. Section titles are
+  restrained primary text; semantic state colors remain canonical.
+- Rows have a responsive label column with a guaranteed gap, right-aligned
+  trailing metadata, ANSI-aware truncation, stable output width, indented
+  bounded details, and accurate height accounting.
+- Intelligence suppresses a cold `uninitialized`/`unavailable` snapshot,
+  reports `clean` only when the canonical change seam says zero changes, and
+  shows at most three diagnostic locations/messages with explicit non-fresh
+  status. Stale or indeterminate errors never render as current errors.
+- TASKS projects `state.tasks`; AGENTS separately projects canonical child
+  lifecycle (`running`, `queued`, failure). Footer counts use `running+queued`
+  notation instead of an ambiguous active total.
+- Pending semantic questions and permission asks remain secondary projections
+  of the Phase 11 interaction owner. The sidebar is never required to answer.
+- Native footer rendering now applies the same drop-rank arbitration as the
+  headless projection. Narrow mode drops permission/git/detail before the
+  required mode/context/model segments.
+- The default composer border uses aira-zhr copper when thinking is off;
+  existing thinking/bash semantic border states remain authoritative.
+- `app.workbench.toggle` is `Ctrl+Shift+O`; `app.tools.expand` remains
+  `Ctrl+O`. Tree bindings remain context-scoped and unchanged.
+
+### 14.3 Pi Atelier follow-up findings
+
+- **ADOPT:** ANSI-aware width padding/truncation and full-height dock edge.
+- **ADAPT:** height-aware panel fitting now counts secondary detail rows;
+  native Aira keeps its flat HTML-derived hierarchy rather than Atelier cards.
+- **ADAPT:** footer priorities are applied at the final native composition
+  boundary, not only in a parallel projection used by tests.
+- **REJECT:** draggable resize, animated jewels, boxed crowns, contributed
+  panels, prototype adapters, and Atelier visual identity remain out of scope.
+
+### 14.4 Responsive and performance verification
+
+Built-native captures were inspected at 142×40 and 90×28. Wide mode keeps a
+42-column Workbench with a continuous edge and aligned rows; narrow mode hides
+the Workbench and preserves transcript/editor width. The existing live-resize
+SIGWINCH limitation remains external to this pass, so widths were launched as
+separate sessions. Rendering remains event-driven and token-free: no new scan,
+Git, LSP, browser, provider, model, timer, or polling path was added.
+
+The HTML target's CSS backgrounds, rounded cards, proportional grid, mouse
+hover/focus effects, and pixel spacing cannot be reproduced faithfully in a
+cell terminal. The native equivalent uses color, edge continuity, whitespace,
+alignment, and bounded disclosure. The in-app browser also blocks local
+`file://` rendering by policy, so the HTML comparison used its checked-in
+HTML/CSS source; native comparison used actual tmux captures.
+
+Focused coverage now includes idle sparse state, goal progress, distinct
+running/queued agents, execution, browser, verifier, interaction/permission,
+fresh and non-fresh LSP findings, responsive visibility, native footer drops,
+renderer width/label/detail invariants, semantic keybindings, headless
+isolation, and missing optional state. The final focused run passed 70 tests
+across eight files, and `npm run check` passed. The coding-agent package build
+also passed. The root build could not refresh the generated model catalog
+because this sandbox could not resolve `models.dev`; no generated file changed.
+The full `./test.sh` run continued across all workspaces but was not green:
+network and Unix-listener suites failed with sandbox `listen EPERM` errors and
+related timeouts. These failures are outside the Workbench paths; the focused
+regression set above remained green after that run.
+
+## 15. Stopping point
 
 Phase 12 is complete. Next roadmap phase per the renumbered table:
 **Phase 13 — Policy, Hooks, and Trust** (unchanged scope, renumbered).

@@ -460,7 +460,7 @@ engineering interface. Subsystems own state; the UI only projects it.
   regular-mode overlay rail; dynamic panel priority (P0–P3) and progressive
   disclosure;
 - response segment footer with drop ranks and the highest-priority finding;
-- `Ctrl+O` Workbench toggle (tool expansion moved to `Alt+O`), `/workbench`
+- `Ctrl+Shift+O` Workbench toggle (`Ctrl+O` remains tool expansion), `/workbench`
   command, four Workbench settings, `/doctor` workbench/theme/shortcut
   checks, extension-chrome conflict diagnostics.
 

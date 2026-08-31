@@ -838,26 +838,27 @@ test enforces the boundary).
 `/status`, `/doctor`, `/permissions`, `/processes`, `/browser`, `/verify`
 remain the authoritative plain-text surfaces and stay usable headless.
 
-## ADR-032 — Responsive sidebar policy and the `Ctrl+O` binding
+## ADR-032 — Responsive sidebar policy and semantic Workbench binding
 
 **Status:** accepted · Phase 12
 
 **Context.** The sidebar must be visible by default on wide terminals,
 auto-hide below a safe minimum, stay hidden when the user turned it off, and
-restore when the user asked for it. `Ctrl+O` was Pi's tool-output expansion.
+restore when the user asked for it. `Ctrl+O` is Pi's established tool-output
+expansion action and must remain available.
 
 **Decision.** Visibility is a pure policy (`aira/ui/visibility.ts`): width
 below `72 + sidebarWidth` hides the sidebar regardless of user choice; on
 safe widths, explicit OFF wins, else default follows `showOnStartup`, and
-explicit ON wins. `Ctrl+O` becomes `app.workbench.toggle`; tool-output
-expansion moves to `Alt+O` (`app.tools.expand`). User customizations are
-never overwritten (user bindings override defaults); the tree-filter
-bindings (context-scoped) are untouched; `/doctor` and the keybinding docs
-report the resolved truth.
+explicit ON wins. `app.workbench.toggle` defaults to `Ctrl+Shift+O`;
+`app.tools.expand` remains `Ctrl+O`. User customizations are never
+overwritten (user bindings override defaults); the tree-filter bindings
+(context-scoped) are untouched; `/doctor` and the keybinding docs report the
+resolved truth.
 
 **Consequences.** Deterministic, testable responsiveness (auto-hide,
 explicit-off, restore semantics all unit-tested); one documented shortcut
-migration with a truthful conflict path.
+binding contract with a truthful conflict path.
 
 ## ADR-033 — Footer priority system and the highest-priority finding
 

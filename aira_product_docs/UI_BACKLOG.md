@@ -380,8 +380,8 @@ Summary of what exists now (each projection derives from the canonical
 snapshot named in the entry; token-free by construction):
 
 - **Sidebar** (fullscreen HStack split; regular-mode viewport-fixed overlay
-  rail): dynamic panels P0–P3 — Interaction/Authorization, Current Finding,
-  Verification, Goal, Tasks & Agents, Execution, Browser, Working Set,
+  rail): dynamic panels P0–P3 — Interaction/Permission, Current Finding,
+  Verification, Goal, Tasks, Agents, Execution, Browser, Working Set,
   Relevant Symbols, Changeset, Intelligence, Control — each visible only
   when its source state is relevant (progressive disclosure).
 - **Footer**: responsive single-line segment rail with drop ranks
@@ -391,7 +391,8 @@ snapshot named in the entry; token-free by construction):
 - **Visibility policy**: default-on at safe widths, auto-hide below
   `72 + sidebarWidth`, explicit OFF respected, restore semantics
   deterministic (ADR-032).
-- **Input**: `Ctrl+O` toggles the sidebar (ADR-032), `/workbench [on|off]`,
+- **Input**: `Ctrl+Shift+O` toggles the sidebar while `Ctrl+O` retains tool
+  expansion (ADR-032), `/workbench [on|off]`,
   four settings (`workbench.enabled|showOnStartup|density|width`), `/doctor`
   workbench/theme/shortcut/chrome-conflict checks.
 - **Theme**: `aira-zhr` default dark theme + eight optional semantic color
@@ -399,6 +400,12 @@ snapshot named in the entry; token-free by construction):
 - **Tests**: projection, priority, visibility, footer arbitration,
   finding arbitration, theme mapping, keybindings, headless isolation
   (`test/aira/ui/*`).
+
+The visual-parity pass adds a continuous muted pane edge, width-stable rows,
+guaranteed label/value separation, right-aligned trailing metadata, bounded
+diagnostic detail, distinct TASKS and AGENTS lifecycle projections, and
+actual native-footer drop arbitration. Idle state remains sparse; cold
+`uninitialized` intelligence is suppressed until it carries useful truth.
 
 Carried-forward out of scope (later phases): fullscreen live-resize
 rendering on this dev machine is blocked by a PRE-EXISTING pi TUI crash on

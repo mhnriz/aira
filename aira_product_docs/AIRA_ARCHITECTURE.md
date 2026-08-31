@@ -515,8 +515,8 @@ subsystem changes.
 
 Aira now owns one native Workbench UI (ADR-031). The sidebar renders the
 engineering context beside the conversation; the footer is a responsive
-segment rail; `Ctrl+O` toggles the sidebar (`Alt+O` retains tool-output
-expansion, ADR-032). Structure:
+segment rail; `Ctrl+Shift+O` toggles the sidebar while `Ctrl+O` retains
+tool-output expansion (ADR-032). Structure:
 
 ```text
 Canonical subsystem snapshots (state.*)
