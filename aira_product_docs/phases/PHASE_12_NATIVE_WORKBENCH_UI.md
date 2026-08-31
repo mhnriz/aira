@@ -374,8 +374,13 @@ minus `theme`, so the DEFAULT theme path applies), built bundle
    layer, sidebar, footer rail, Ctrl+O toggle.
 3. `80c40f7b4` fix(aira): dogfood findings — execution panel shows failed
    background processes, context suffix, cleanup.
-4. docs commit (this report, ADRs, roadmap, architecture, UI backlog,
-   changelog, keybinding/theme docs).
+4. `3aaf9953f` docs(aira): Phase 12 report, ADR-031..035,
+   roadmap/architecture/backlog/changelog; restore footer telemetry as
+   usage segment; rebind hook fix (footer-width + rebind regression tests
+   restored to green).
+5. `e1605def7` fix(aira): regular-mode rail never paints over the footer
+   (short-document geometry — final dogfood capture found the rail
+   covering the floating footer; fixed via footer-start-row tracking).
 
 ## 14. Stopping point
 
