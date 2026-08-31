@@ -185,7 +185,14 @@ export class WorkbenchController {
 
 	private railHeight(): number {
 		const rows = this.tui?.terminal.rows ?? 24;
-		return Math.max(1, rows - this.options.getFooterLineCount() - 2);
+		const screenLimit = Math.max(1, rows - this.options.getFooterLineCount() - 2);
+		// The rail must never paint over the footer, wherever it sits in the
+		// composed document (regular mode: short documents leave the footer
+		// mid-screen; long ones put it at the bottom).
+		if (this.tui instanceof AiraTuiMainScreen && this.tui.footerStartRow > 0) {
+			return Math.max(1, Math.min(screenLimit, this.tui.footerStartRow));
+		}
+		return screenLimit;
 	}
 
 	// -----------------------------------------------------------------------

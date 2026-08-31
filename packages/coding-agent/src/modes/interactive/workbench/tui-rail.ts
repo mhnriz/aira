@@ -17,6 +17,8 @@ export class AiraTuiMainScreen extends TuiMainScreen {
 	private sidebarRail: Component | undefined;
 	private railWidthProvider: () => number = () => 0;
 	private fullWidthChildren = new Set<Component>();
+	/** Row index where the first full-width child's lines begin (last render). */
+	private lastFooterStartRow = 0;
 
 	/** Attach/detach the sidebar rail (width provider + full-width children). */
 	setSidebarRail(input: {
@@ -37,17 +39,32 @@ export class AiraTuiMainScreen extends TuiMainScreen {
 		return Math.max(0, Math.min(width, terminalWidth - 1));
 	}
 
+	/**
+	 * Row (in the composed document) where the footer begins after the last
+	 * render — the rail must never paint over the footer, wherever it sits
+	 * (short documents leave the footer mid-screen in regular mode).
+	 */
+	get footerStartRow(): number {
+		return this.lastFooterStartRow;
+	}
+
 	override render(width: number): string[] {
 		const railWidth = this.railWidthFor(width);
 		if (railWidth <= 0) {
+			this.lastFooterStartRow = 0;
 			return super.render(width);
 		}
 		const mainWidth = Math.max(1, width - railWidth);
 		const lines: string[] = [];
+		let footerStart = 0;
 		for (const child of this.children) {
+			if (this.fullWidthChildren.has(child)) {
+				footerStart = lines.length;
+			}
 			const childLines = this.fullWidthChildren.has(child) ? child.render(width) : child.render(mainWidth);
 			lines.push(...childLines);
 		}
+		this.lastFooterStartRow = footerStart;
 		return lines;
 	}
 }
