@@ -436,7 +436,7 @@ behavior updates listed above.
 1. `aa56155fa` — feat(aira): native interaction & control layer —
    permissions, Q&A, task graph (core implementation + host wiring +
    tests; 574 aira tests; npm run check clean).
-2. `(docs commit follows)` — docs: Phase 11 architecture, roadmap renumber
+2. `9f6d3666c` — docs: Phase 11 architecture, roadmap renumber
    (compaction moves to Phase 13), UI backlog B-006, ADR-030, changelog,
    phases report; plus the dogfood finding fix: `ask_user`/`tasks` added to
    the SDK default active tool list (`core/sdk.ts`) with regression
