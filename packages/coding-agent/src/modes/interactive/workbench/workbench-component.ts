@@ -114,7 +114,7 @@ export interface WorkbenchComponent {
 
 /** Deterministic panel count that fits the available height (priority order). */
 export function fitPanelCount(panels: readonly WorkbenchPanel[], maxHeight: number, showTitle: boolean): number {
-	let used = showTitle ? 2 : 0;
+	let used = showTitle ? 3 : 0;
 	let count = 0;
 	for (const panel of panels) {
 		const rowLines = panel.rows.reduce((sum, row) => sum + (row.detail ? 2 : 1), 0);
@@ -141,14 +141,15 @@ export function renderWorkbenchProjection(
 	if (showTitle) {
 		lines.push(
 			railLine(
-				`${theme.bold(roleColor("copper", "AIRA"))} ${theme.bold(roleColor("text", "WORKBENCH"))}`,
+				`${theme.bold(roleColor("text", "ENGINEERING"))} ${theme.bold(roleColor("copper", "CONTEXT"))}`,
 				safeWidth,
 			),
 		);
+		lines.push(railLine(roleColor("dim", "CANONICAL STATE · TOKEN-FREE"), safeWidth));
 		lines.push(railLine(theme.fg("borderMuted", "─".repeat(innerWidth)), safeWidth, "├"));
 	}
 	for (const panel of panels) {
-		if (lines.length > (showTitle ? 2 : 0)) lines.push(railLine("", safeWidth));
+		if (lines.length > (showTitle ? 3 : 0)) lines.push(railLine("", safeWidth));
 		const title = theme.bold(roleColor("text", panel.title.toUpperCase()));
 		const hint = panel.hint ? roleColor("dim", panel.hint) : undefined;
 		lines.push(railLine(spacedRow(title, hint, innerWidth), safeWidth));

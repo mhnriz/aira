@@ -2,7 +2,7 @@
  * Component for displaying bash command execution with streaming output.
  */
 
-import { Container, Loader, Spacer, Text, type TUI } from "@earendil-works/pi-tui";
+import { Container, Loader, Text, type TUI } from "@earendil-works/pi-tui";
 import {
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,
@@ -11,7 +11,6 @@ import {
 } from "../../../core/tools/truncate.ts";
 import { stripAnsi } from "../../../utils/ansi.ts";
 import { theme } from "../theme/theme.ts";
-import { DynamicBorder } from "./dynamic-border.ts";
 import { keyHint, keyText } from "./keybinding-hints.ts";
 import { truncateToVisualLines } from "./visual-truncate.ts";
 
@@ -28,40 +27,35 @@ export class BashExecutionComponent extends Container {
 	private fullOutputPath?: string;
 	private expanded = false;
 	private contentContainer: Container;
+	private readonly colorKey: "dim" | "bashMode";
 
 	constructor(command: string, ui: TUI, excludeFromContext = false) {
 		super();
 		this.command = command;
 
-		// Use dim border for excluded-from-context commands (!! prefix)
-		const colorKey = excludeFromContext ? "dim" : "bashMode";
-		const borderColor = (str: string) => theme.fg(colorKey, str);
+		// Dim excluded-from-context commands (!! prefix).
+		this.colorKey = excludeFromContext ? "dim" : "bashMode";
 
-		// Add spacer
-		this.addChild(new Spacer(1));
-
-		// Top border
-		this.addChild(new DynamicBorder(borderColor));
-
-		// Content container (holds dynamic content between borders)
+		// Content container holds the compact activity row and its output.
 		this.contentContainer = new Container();
 		this.addChild(this.contentContainer);
 
 		// Command header
-		const header = new Text(theme.fg(colorKey, theme.bold(`$ ${command}`)), 1, 0);
+		const header = new Text(
+			`${theme.bold(theme.fg(this.colorKey, "SHELL"))} ${theme.fg("muted", `$ ${command}`)}`,
+			0,
+			0,
+		);
 		this.contentContainer.addChild(header);
 
 		// Loader
 		this.loader = new Loader(
 			ui,
-			(spinner) => theme.fg(colorKey, spinner),
+			(spinner) => theme.fg(this.colorKey, spinner),
 			(text) => theme.fg("muted", text),
 			`Running... (${keyText("tui.select.cancel")} to cancel)`, // Plain text for loader
 		);
 		this.contentContainer.addChild(this.loader);
-
-		// Bottom border
-		this.addChild(new DynamicBorder(borderColor));
 	}
 
 	/**
@@ -135,7 +129,11 @@ export class BashExecutionComponent extends Container {
 		this.contentContainer.clear();
 
 		// Command header
-		const header = new Text(theme.fg("bashMode", theme.bold(`$ ${this.command}`)), 1, 0);
+		const header = new Text(
+			`${theme.bold(theme.fg(this.colorKey, "SHELL"))} ${theme.fg("muted", `$ ${this.command}`)}`,
+			0,
+			0,
+		);
 		this.contentContainer.addChild(header);
 
 		// Output
@@ -143,11 +141,11 @@ export class BashExecutionComponent extends Container {
 			if (this.expanded) {
 				// Show all lines
 				const displayText = availableLines.map((line) => theme.fg("muted", line)).join("\n");
-				this.contentContainer.addChild(new Text(`\n${displayText}`, 1, 0));
+				this.contentContainer.addChild(new Text(displayText, 1, 0));
 			} else {
 				// Use shared visual truncation utility with width-aware caching
 				const styledOutput = previewLogicalLines.map((line) => theme.fg("muted", line)).join("\n");
-				const styledInput = `\n${styledOutput}`;
+				const styledInput = styledOutput;
 				let cachedWidth: number | undefined;
 				let cachedLines: string[] | undefined;
 				this.contentContainer.addChild({
@@ -199,7 +197,7 @@ export class BashExecutionComponent extends Container {
 			}
 
 			if (statusParts.length > 0) {
-				this.contentContainer.addChild(new Text(`\n${statusParts.join("\n")}`, 1, 0));
+				this.contentContainer.addChild(new Text(statusParts.join("\n"), 1, 0));
 			}
 		}
 	}

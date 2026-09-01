@@ -19,7 +19,9 @@ import type {
 /** Maximum rows rendered per panel (bounded sidebar). */
 export const WORKBENCH_PANEL_ROW_LIMIT = 8;
 export const WORKBENCH_TASK_ROWS = 6;
-export const WORKBENCH_SYMBOL_ROWS = 8;
+export const WORKBENCH_WORKING_SET_ROWS = 4;
+export const WORKBENCH_SYMBOL_ROWS = 4;
+export const WORKBENCH_CHANGESET_ROWS = 2;
 
 function elapsed(ms: number | undefined): string | undefined {
 	if (ms === undefined) return undefined;
@@ -445,7 +447,7 @@ export function browserPanel(state: AiraSessionState): WorkbenchPanel | undefine
 
 export function workingSetPanel(files: readonly WorkbenchFileRow[]): WorkbenchPanel | undefined {
 	if (files.length === 0) return undefined;
-	const rows: WorkbenchRow[] = files.slice(0, WORKBENCH_PANEL_ROW_LIMIT).map((file) => {
+	const rows: WorkbenchRow[] = files.slice(0, WORKBENCH_WORKING_SET_ROWS).map((file) => {
 		const letter = statusLetter(file.status);
 		const delta = file.added > 0 || file.deleted > 0 ? `+${file.added} -${file.deleted}` : undefined;
 		return {
@@ -461,6 +463,7 @@ export function workingSetPanel(files: readonly WorkbenchFileRow[]): WorkbenchPa
 		title: "Working Set",
 		priority: 2,
 		rows,
+		hint: files.length > rows.length ? `${rows.length} of ${files.length}` : undefined,
 	};
 }
 
@@ -478,6 +481,7 @@ export function symbolsPanel(symbols: readonly WorkbenchSymbolRow[]): WorkbenchP
 		title: "Relevant Symbols",
 		priority: 2,
 		rows,
+		hint: symbols.length > rows.length ? `${rows.length} of ${symbols.length}` : undefined,
 	};
 }
 
@@ -496,7 +500,7 @@ export function changesetPanel(files: readonly WorkbenchFileRow[]): WorkbenchPan
 			role: "text",
 		},
 	];
-	for (const file of files.slice(0, 4)) {
+	for (const file of files.slice(0, WORKBENCH_CHANGESET_ROWS)) {
 		const delta = file.added > 0 || file.deleted > 0 ? `+${file.added} -${file.deleted}` : "new";
 		rows.push({
 			key: file.path,

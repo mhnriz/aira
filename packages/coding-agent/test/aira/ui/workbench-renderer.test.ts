@@ -48,8 +48,9 @@ describe("Workbench terminal renderer", () => {
 
 	it("renders a persistent pane edge and separated label/value columns", () => {
 		const lines = renderWorkbenchProjection(projection(), 38, 20);
-		expect(plain(lines[0] ?? "")).toContain("│  AIRA WORKBENCH");
-		expect(plain(lines[1] ?? "")).toMatch(/^├ {2}─+/);
+		expect(plain(lines[0] ?? "")).toContain("│  ENGINEERING CONTEXT");
+		expect(plain(lines[1] ?? "")).toContain("│  CANONICAL STATE · TOKEN-FREE");
+		expect(plain(lines[2] ?? "")).toMatch(/^├ {2}─+/);
 		const permission = lines.find((line) => plain(line).includes("Permission"));
 		expect(plain(permission ?? "")).toMatch(/Permission\s+normal/);
 	});

@@ -17,6 +17,7 @@ export class AiraTuiMainScreen extends TuiMainScreen {
 	private sidebarRail: Component | undefined;
 	private railWidthProvider: () => number = () => 0;
 	private fullWidthChildren = new Set<Component>();
+	private dockAnchor: Component | undefined;
 	/** Row index where the first full-width child's lines begin (last render). */
 	private lastFooterStartRow = 0;
 
@@ -25,10 +26,12 @@ export class AiraTuiMainScreen extends TuiMainScreen {
 		rail: Component | undefined;
 		getWidth: () => number;
 		fullWidthChildren?: ReadonlyArray<Component>;
+		dockAnchor?: Component;
 	}): void {
 		this.sidebarRail = input.rail;
 		this.railWidthProvider = input.getWidth;
 		this.fullWidthChildren = new Set(input.fullWidthChildren ?? []);
+		this.dockAnchor = input.dockAnchor;
 	}
 
 	/** Effective rail width for a terminal width (0 = no rail visible). */
@@ -50,18 +53,23 @@ export class AiraTuiMainScreen extends TuiMainScreen {
 
 	override render(width: number): string[] {
 		const railWidth = this.railWidthFor(width);
-		if (railWidth <= 0) {
-			this.lastFooterStartRow = 0;
-			return super.render(width);
-		}
-		const mainWidth = Math.max(1, width - railWidth);
+		const mainWidth = railWidth > 0 ? Math.max(1, width - railWidth) : width;
+		const renderedChildren = this.children.map((child) => ({
+			child,
+			lines: child.render(this.fullWidthChildren.has(child) ? width : mainWidth),
+		}));
+		const renderedLineCount = renderedChildren.reduce((total, rendered) => total + rendered.lines.length, 0);
+		const anchorFill = this.dockAnchor ? Math.max(0, this.terminal.rows - renderedLineCount) : 0;
 		const lines: string[] = [];
 		let footerStart = 0;
-		for (const child of this.children) {
+		for (const rendered of renderedChildren) {
+			const { child, lines: childLines } = rendered;
+			if (child === this.dockAnchor && anchorFill > 0) {
+				lines.push(...Array.from({ length: anchorFill }, () => ""));
+			}
 			if (this.fullWidthChildren.has(child)) {
 				footerStart = lines.length;
 			}
-			const childLines = this.fullWidthChildren.has(child) ? child.render(width) : child.render(mainWidth);
 			lines.push(...childLines);
 		}
 		this.lastFooterStartRow = footerStart;

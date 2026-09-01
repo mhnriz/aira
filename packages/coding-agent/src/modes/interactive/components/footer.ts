@@ -120,9 +120,12 @@ export class FooterComponent implements Component {
 		});
 
 		const active = new Set(arbitrateFooterSegments(left, right, width));
-		const line = composeFooter(
-			left.filter((segment) => active.has(segment)),
-			right.filter((segment) => active.has(segment)),
+		const line = styleStatusRail(
+			composeFooter(
+				left.filter((segment) => active.has(segment)),
+				right.filter((segment) => active.has(segment)),
+				width,
+			),
 			width,
 		);
 
@@ -135,7 +138,9 @@ export class FooterComponent implements Component {
 				.sort(([a], [b]) => a.localeCompare(b))
 				.map(([, text]) => sanitizeStatusText(text))
 				.join(" ");
-			lines.push(truncateToWidth(theme.fg("dim", statusLine), width, theme.fg("dim", "...")));
+			lines.push(
+				styleStatusRail(truncateToWidth(theme.fg("dim", statusLine), width, theme.fg("dim", "...")), width),
+			);
 		}
 		return lines;
 	}
@@ -191,6 +196,12 @@ export class FooterComponent implements Component {
 
 function segmentText(segment: WorkbenchFooterSegment): string {
 	return roleColor(segment.role, segment.text);
+}
+
+function styleStatusRail(line: string, width: number): string {
+	const clipped = truncateToWidth(line, width, "");
+	const padded = `${clipped}${" ".repeat(Math.max(0, width - visibleWidth(clipped)))}`;
+	return theme.bg("customMessageBg", padded);
 }
 
 /** Compose footer segments into one line with left/right balancing. */

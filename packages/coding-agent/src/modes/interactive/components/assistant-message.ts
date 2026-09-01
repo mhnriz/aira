@@ -99,6 +99,7 @@ export class AssistantMessageComponent extends Container {
 
 		if (hasVisibleContent) {
 			this.contentContainer.addChild(new Spacer(1));
+			this.contentContainer.addChild(new Text(theme.bold(theme.fg("copperBright", "AIRA")), this.outputPad, 0));
 		}
 
 		// Render content in order
@@ -108,7 +109,7 @@ export class AssistantMessageComponent extends Container {
 				// Assistant text messages with no background - trim the text
 				// Set paddingY=0 to avoid extra spacing before tool executions
 				this.contentContainer.addChild(
-					new Markdown(content.text.trim(), this.outputPad, 0, this.markdownTheme, undefined, {
+					new Markdown(content.text.trim(), this.outputPad + 2, 0, this.markdownTheme, undefined, {
 						transform: createMarkdownTransform("assistant", this.isStreaming, this.markdownTransformers),
 					}),
 				);
@@ -129,6 +130,7 @@ export class AssistantMessageComponent extends Container {
 				if (thinkingBlocks.length === 0) {
 					continue;
 				}
+				this.contentContainer.addChild(new Text(theme.fg("muted", "THINKING"), this.outputPad + 2, 0));
 
 				// Add spacing only when another visible assistant content block follows.
 				// This avoids a superfluous blank line before separately-rendered tool execution blocks.
@@ -139,14 +141,14 @@ export class AssistantMessageComponent extends Container {
 				if (this.hideThinkingBlock) {
 					// Show one static label for each run of thinking blocks when hidden.
 					this.contentContainer.addChild(
-						new Text(theme.italic(theme.fg("thinkingText", this.hiddenThinkingLabel)), this.outputPad, 0),
+						new Text(theme.italic(theme.fg("thinkingText", this.hiddenThinkingLabel)), this.outputPad + 2, 0),
 					);
 				} else {
 					// Render each run of thinking blocks as one Markdown section.
 					this.contentContainer.addChild(
 						new Markdown(
 							thinkingBlocks.join("\n\n"),
-							this.outputPad,
+							this.outputPad + 2,
 							0,
 							this.markdownTheme,
 							{

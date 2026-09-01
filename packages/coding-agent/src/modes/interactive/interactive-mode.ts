@@ -136,6 +136,7 @@ import { killTrackedDetachedChildren } from "../../utils/shell.ts";
 import { loadAllHighlightLanguages } from "../../utils/syntax-highlight.ts";
 import { ensureTool, type ToolStatus } from "../../utils/tools-manager.ts";
 import { checkForNewPiVersion, type LatestPiRelease } from "../../utils/version-check.ts";
+import { AiraHeaderComponent, AiraNoticeComponent } from "./components/aira-shell.ts";
 import { ArminComponent } from "./components/armin.ts";
 import { AssistantMessageComponent } from "./components/assistant-message.ts";
 import { BashExecutionComponent } from "./components/bash-execution.ts";
@@ -150,8 +151,8 @@ import { EarendilAnnouncementComponent } from "./components/earendil-announcemen
 import { ExtensionEditorComponent } from "./components/extension-editor.ts";
 import { ExtensionInputComponent } from "./components/extension-input.ts";
 import { ExtensionSelectorComponent } from "./components/extension-selector.ts";
-import { FooterComponent, formatTokens } from "./components/footer.ts";
-import { formatKeyText, keyDisplayText, keyHint, keyText, rawKeyHint } from "./components/keybinding-hints.ts";
+import { FooterComponent, formatCwdForFooter, formatTokens } from "./components/footer.ts";
+import { formatKeyText, keyDisplayText, keyText } from "./components/keybinding-hints.ts";
 import { LoginDialogComponent } from "./components/login-dialog.ts";
 import { createMermaidMarkdownTransformer } from "./components/mermaid.ts";
 import { ModelSelectorComponent } from "./components/model-selector.ts";
@@ -494,8 +495,8 @@ export class InteractiveMode {
 	private workingMessage: string | undefined = undefined;
 	private workingVisible = true;
 	private workingIndicatorOptions: WorkingIndicatorOptions | undefined = undefined;
-	private readonly defaultWorkingMessage = "Working...";
-	private readonly defaultHiddenThinkingLabel = "Thinking...";
+	private readonly defaultWorkingMessage = "Aira is working";
+	private readonly defaultHiddenThinkingLabel = "Reasoning hidden";
 	private hiddenThinkingLabel = this.defaultHiddenThinkingLabel;
 
 	private lastSigintTime = 0;
@@ -506,7 +507,7 @@ export class InteractiveMode {
 
 	// Status line tracking (for mutating immediately-sequential status updates)
 	private lastStatusSpacer: Spacer | undefined = undefined;
-	private lastStatusText: Text | undefined = undefined;
+	private lastStatusText: AiraNoticeComponent | undefined = undefined;
 	private managedToolStatusStarted = false;
 
 	// Streaming message tracking
@@ -891,6 +892,7 @@ export class InteractiveMode {
 		this.workbench = new WorkbenchController({
 			session: this.session,
 			footerComponent: this.footerContainer,
+			dockAnchorComponent: this.pendingMessagesContainer,
 			getBranch: () => this.footerDataProvider.getGitBranch() ?? undefined,
 			getFooterLineCount: () => this.footerRenderedLineCount(),
 			requestRender: () => this.ui.requestRender(),
@@ -1070,68 +1072,22 @@ export class InteractiveMode {
 
 		await this.themeController.applyFromSettings();
 
-		// Add header with keybindings from config (unless silenced)
-		if (this.options.verbose || !this.settingsManager.getQuietStartup()) {
-			const logo = theme.bold(theme.fg("accent", APP_NAME)) + theme.fg("dim", ` v${this.version}`);
-
-			// Build startup instructions using keybinding hint helpers
-			const hint = (keybinding: AppKeybinding, description: string) => keyHint(keybinding, description);
-
-			const expandedInstructions = [
-				hint("app.interrupt", "to interrupt"),
-				hint("app.clear", "to clear"),
-				rawKeyHint(`${keyText("app.clear")} twice`, "to exit"),
-				hint("app.exit", "to exit (empty)"),
-				hint("app.suspend", "to suspend"),
-				keyHint("tui.editor.deleteToLineEnd", "to delete to end"),
-				hint("app.thinking.cycle", "to cycle thinking level"),
-				hint("app.mode.cycle", "to cycle mode"),
-				rawKeyHint(`${keyText("app.model.cycleForward")}/${keyText("app.model.cycleBackward")}`, "to cycle models"),
-				hint("app.model.select", "to select model"),
-				hint("app.tools.expand", "to expand tools"),
-				hint("app.workbench.toggle", "to toggle Workbench"),
-				hint("app.thinking.toggle", "to expand thinking"),
-				hint("app.editor.external", "for external editor"),
-				rawKeyHint("/", "for commands"),
-				rawKeyHint("!", "to run bash"),
-				rawKeyHint("!!", "to run bash (no context)"),
-				hint("app.message.followUp", "to queue follow-up"),
-				hint("app.message.dequeue", "to edit all queued messages"),
-				hint("app.clipboard.pasteImage", "to paste image (with text fallback)"),
-				rawKeyHint("drop files", "to attach"),
-			].join("\n");
-			const compactInstructions = [
-				hint("app.interrupt", "interrupt"),
-				rawKeyHint(`${keyText("app.clear")}/${keyText("app.exit")}`, "clear/exit"),
-				rawKeyHint("/", "commands"),
-				rawKeyHint("!", "bash"),
-				hint("app.tools.expand", "more"),
-			].join(theme.fg("muted", " · "));
-			const compactOnboarding = theme.fg(
-				"dim",
-				`Press ${keyText("app.tools.expand")} to show full startup help and loaded resources.`,
-			);
-			const onboarding = theme.fg(
-				"dim",
-				`Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.`,
-			);
-			this.builtInHeader = new ExpandableText(
-				() => `${logo}\n${compactInstructions}\n${compactOnboarding}\n\n${onboarding}`,
-				() => `${logo}\n${expandedInstructions}\n\n${onboarding}`,
-				this.getStartupExpansionState(),
-				1,
-				0,
-			);
-
-			// Setup UI layout
-			this.headerContainer.addChild(new Spacer(1));
-			this.headerContainer.addChild(this.builtInHeader);
-			this.headerContainer.addChild(new Spacer(1));
-		} else {
-			// Minimal header when silenced
-			this.builtInHeader = new Text("", 0, 0);
-			this.headerContainer.addChild(this.builtInHeader);
-		}
+		const builtInHeader = new AiraHeaderComponent(() => {
+			const state = getAiraSessionState(this.session.sessionId);
+			const model = this.session.model;
+			return {
+				mode: airaModeLabel(state?.mode ?? "build"),
+				cwd: formatCwdForFooter(this.sessionManager.getCwd(), process.env.HOME || process.env.USERPROFILE),
+				branch: this.footerDataProvider.getGitBranch() ?? undefined,
+				model: model?.id ?? "no model",
+				thinking: model?.reasoning && this.session.thinkingLevel !== "off" ? this.session.thinkingLevel : undefined,
+				session: this.sessionManager.getSessionName() ?? "LOCAL",
+				controls: `${keyText("app.tools.expand")} details · ${keyText("app.workbench.toggle")} Workbench`,
+			};
+		});
+		builtInHeader.setExpanded(this.getStartupExpansionState());
+		this.builtInHeader = builtInHeader;
+		this.headerContainer.addChild(builtInHeader);
 		this.ui.requestRender();
 
 		// Ensure fd and rg are available after mounting the TUI (downloads if missing, adds to PATH via getBinDir)
@@ -1224,7 +1180,7 @@ export class InteractiveMode {
 			})
 			.finally(() => {
 				// On Windows, npm can overwrite the shared console title while checking
-				// extension package versions. Restore Pi's title after the startup check.
+				// extension package versions. Restore Aira's title after the startup check.
 				if (process.platform === "win32" && this.isInitialized) {
 					this.updateTerminalTitle();
 				}
@@ -1364,7 +1320,7 @@ export class InteractiveMode {
 		}
 
 		if (extendedKeysFormat === "xterm") {
-			return "tmux extended-keys-format is xterm. Pi works best with csi-u. Add `set -g extended-keys-format csi-u` to ~/.tmux.conf and restart tmux.";
+			return "tmux extended-keys-format is xterm. Aira works best with csi-u. Add `set -g extended-keys-format csi-u` to ~/.tmux.conf and restart tmux.";
 		}
 
 		return undefined;
@@ -1812,13 +1768,14 @@ export class InteractiveMode {
 		// Resource rendering is idempotent; chat clears no longer clear this separate container.
 		this.loadedResourcesContainer.clear();
 
-		const showListing = options?.force || this.options.verbose || !this.settingsManager.getQuietStartup();
+		const showListing = options?.force || this.options.verbose;
 		const showDiagnostics = showListing || options?.showDiagnosticsWhenQuiet === true;
 		if (!showListing && !showDiagnostics) {
 			return;
 		}
 
-		const sectionHeader = (name: string, color: ThemeColor = "mdHeading") => theme.fg(color, `[${name}]`);
+		const sectionHeader = (name: string, color: ThemeColor = "mdHeading") =>
+			theme.bold(theme.fg(color, name.toUpperCase()));
 		const formatCompactList = (items: string[], options?: { sort?: boolean }): string => {
 			const labels = items.map((item) => item.trim()).filter((item) => item.length > 0);
 			if (options?.sort !== false) {
@@ -1969,7 +1926,7 @@ export class InteractiveMode {
 			if (skillDiagnostics.length > 0) {
 				const warningLines = this.formatDiagnostics(skillDiagnostics, sourceInfos);
 				this.loadedResourcesContainer.addChild(
-					new Text(`${theme.fg("warning", "[Skill conflicts]")}\n${warningLines}`, 0, 0),
+					new Text(`${theme.bold(theme.fg("warning", "SKILL CONFLICTS"))}\n${warningLines}`, 0, 0),
 				);
 				this.loadedResourcesContainer.addChild(new Spacer(1));
 			}
@@ -1978,7 +1935,7 @@ export class InteractiveMode {
 			if (promptDiagnostics.length > 0) {
 				const warningLines = this.formatDiagnostics(promptDiagnostics, sourceInfos);
 				this.loadedResourcesContainer.addChild(
-					new Text(`${theme.fg("warning", "[Prompt conflicts]")}\n${warningLines}`, 0, 0),
+					new Text(`${theme.bold(theme.fg("warning", "PROMPT CONFLICTS"))}\n${warningLines}`, 0, 0),
 				);
 				this.loadedResourcesContainer.addChild(new Spacer(1));
 			}
@@ -2001,7 +1958,7 @@ export class InteractiveMode {
 			if (extensionDiagnostics.length > 0) {
 				const warningLines = this.formatDiagnostics(extensionDiagnostics, sourceInfos);
 				this.loadedResourcesContainer.addChild(
-					new Text(`${theme.fg("warning", "[Extension issues]")}\n${warningLines}`, 0, 0),
+					new Text(`${theme.bold(theme.fg("warning", "EXTENSION ISSUES"))}\n${warningLines}`, 0, 0),
 				);
 				this.loadedResourcesContainer.addChild(new Spacer(1));
 			}
@@ -2010,7 +1967,7 @@ export class InteractiveMode {
 			if (themeDiagnostics.length > 0) {
 				const warningLines = this.formatDiagnostics(themeDiagnostics, sourceInfos);
 				this.loadedResourcesContainer.addChild(
-					new Text(`${theme.fg("warning", "[Theme conflicts]")}\n${warningLines}`, 0, 0),
+					new Text(`${theme.bold(theme.fg("warning", "THEME CONFLICTS"))}\n${warningLines}`, 0, 0),
 				);
 				this.loadedResourcesContainer.addChild(new Spacer(1));
 			}
@@ -3862,9 +3819,9 @@ export class InteractiveMode {
 			this.chatContainer.addChild(new Spacer(1));
 			this.managedToolStatusStarted = true;
 		}
-		const message = status.type === "warning" ? `Warning: ${status.message}` : status.message;
-		const color = status.type === "warning" ? "warning" : "dim";
-		this.chatContainer.addChild(new Text(theme.fg(color, message), 1, 0));
+		this.chatContainer.addChild(
+			new AiraNoticeComponent(status.message, status.type === "warning" ? "warning" : "status"),
+		);
 		this.lastStatusSpacer = undefined;
 		this.lastStatusText = undefined;
 		this.ui.requestRender();
@@ -3882,13 +3839,13 @@ export class InteractiveMode {
 		const secondLast = children.length > 1 ? children[children.length - 2] : undefined;
 
 		if (last && secondLast && last === this.lastStatusText && secondLast === this.lastStatusSpacer) {
-			this.lastStatusText.setText(theme.fg("dim", message));
+			this.lastStatusText.setText(message);
 			this.ui.requestRender();
 			return;
 		}
 
 		const spacer = new Spacer(1);
-		const text = new Text(theme.fg("dim", message), 1, 0);
+		const text = new AiraNoticeComponent(message, "status");
 		this.chatContainer.addChild(spacer);
 		this.chatContainer.addChild(text);
 		this.lastStatusSpacer = spacer;
@@ -5044,6 +5001,7 @@ export class InteractiveMode {
 		if (isExpandable(activeHeader)) {
 			activeHeader.setExpanded(expanded);
 		}
+		this.showLoadedResources({ force: expanded, showDiagnosticsWhenQuiet: true });
 		for (const container of [this.loadedResourcesContainer, this.chatContainer]) {
 			for (const child of container.children) {
 				if (isExpandable(child)) {
@@ -5101,13 +5059,13 @@ export class InteractiveMode {
 
 	showError(errorMessage: string): void {
 		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(new Text(theme.fg("error", `Error: ${errorMessage}`), this.outputPad, 0));
+		this.chatContainer.addChild(new AiraNoticeComponent(errorMessage, "error"));
 		this.ui.requestRender();
 	}
 
 	showWarning(warningMessage: string): void {
 		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(new Text(theme.fg("warning", `Warning: ${warningMessage}`), 1, 0));
+		this.chatContainer.addChild(new AiraNoticeComponent(warningMessage, "warning"));
 		this.ui.requestRender();
 	}
 
@@ -5119,42 +5077,21 @@ export class InteractiveMode {
 			? hyperlink(theme.fg("accent", changelogUrl), changelogUrl)
 			: theme.fg("accent", changelogUrl);
 		const changelogLine = theme.fg("muted", "Changelog: ") + changelogLink;
-		const note = release.note?.trim();
-
+		const note = release.note?.trim().replace(/\s+/g, " ");
 		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(new DynamicBorder((text) => theme.fg("warning", text)));
 		this.chatContainer.addChild(
-			new Text(`${theme.bold(theme.fg("warning", "Update Available"))}\n${updateInstruction}`, 1, 0),
+			new AiraNoticeComponent(`${updateInstruction}${note ? ` · ${note}` : ""} · ${changelogLine}`, "update"),
 		);
-		if (note) {
-			this.chatContainer.addChild(new Spacer(1));
-			this.chatContainer.addChild(
-				new Markdown(note, 1, 0, this.getMarkdownThemeWithSettings(), {
-					color: (text) => theme.fg("muted", text),
-				}),
-			);
-			this.chatContainer.addChild(new Spacer(1));
-		}
-		this.chatContainer.addChild(new Text(changelogLine, 1, 0));
-		this.chatContainer.addChild(new DynamicBorder((text) => theme.fg("warning", text)));
 		this.ui.requestRender();
 	}
 
 	showPackageUpdateNotification(packages: string[]): void {
 		const action = theme.fg("accent", `${APP_NAME} update --extensions`);
 		const updateInstruction = theme.fg("muted", "Package updates are available. Run ") + action;
-		const packageLines = packages.map((pkg) => `- ${pkg}`).join("\n");
+		const packageList = packages.join(", ");
 
 		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(new DynamicBorder((text) => theme.fg("warning", text)));
-		this.chatContainer.addChild(
-			new Text(
-				`${theme.bold(theme.fg("warning", "Package Updates Available"))}\n${updateInstruction}\n${theme.fg("muted", "Packages:")}\n${packageLines}`,
-				1,
-				0,
-			),
-		);
-		this.chatContainer.addChild(new DynamicBorder((text) => theme.fg("warning", text)));
+		this.chatContainer.addChild(new AiraNoticeComponent(`${updateInstruction} · ${packageList}`, "update"));
 		this.ui.requestRender();
 	}
 

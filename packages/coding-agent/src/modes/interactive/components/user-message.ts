@@ -1,4 +1,4 @@
-import { Box, Container, Markdown, type MarkdownTheme } from "@earendil-works/pi-tui";
+import { Container, Markdown, type MarkdownTheme, Text } from "@earendil-works/pi-tui";
 import type { MarkdownTransformer } from "../../../core/extensions/types.ts";
 import { getMarkdownTheme, theme } from "../theme/theme.ts";
 import { createMarkdownTransform } from "./markdown-transform.ts";
@@ -37,11 +37,11 @@ export class UserMessageComponent extends Container {
 
 	private rebuild(): void {
 		this.clear();
-		const contentBox = new Box(this.outputPad, 1, (content: string) => theme.bg("userMessageBg", content));
-		contentBox.addChild(
+		this.addChild(new Text(theme.bold(theme.fg("copper", "YOU")), this.outputPad, 0));
+		this.addChild(
 			new Markdown(
 				this.text,
-				0,
+				this.outputPad + 2,
 				0,
 				this.markdownTheme,
 				{
@@ -54,7 +54,6 @@ export class UserMessageComponent extends Container {
 				},
 			),
 		);
-		this.addChild(contentBox);
 	}
 
 	override render(width: number): string[] {

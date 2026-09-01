@@ -39,6 +39,8 @@ export interface WorkbenchControllerOptions {
 	session: AgentSession;
 	/** Full-width footer child (regular-mode rail leaves it alone). */
 	footerComponent: Component;
+	/** First dock child; regular mode fills empty space before it. */
+	dockAnchorComponent: Component;
 	/** Cached git branch (from the footer data provider — never per render). */
 	getBranch: () => string | undefined;
 	/** Lines the footer occupies (regular-mode rail reserves them). */
@@ -309,6 +311,7 @@ export class WorkbenchController {
 			rail: this.container,
 			getWidth: () => this.sidebarWidthFor(tui.terminal.columns),
 			fullWidthChildren: [this.options.footerComponent],
+			dockAnchor: this.options.dockAnchorComponent,
 		});
 		if (!this.regularOverlay) {
 			this.regularOverlayOptions = {
