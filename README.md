@@ -19,6 +19,13 @@ $ aira
 
 **Aira speaks Pi, but Aira owns its world.**
 
+## Windows installation
+
+Windows releases provide self-contained `aira.exe` archives for x64 and ARM64.
+Download the matching `aira-windows-*.zip` from the GitHub Release, extract it to
+a directory on your `Path`, and run `aira`. Detailed PowerShell instructions and
+Git Bash setup are in the [Windows guide](packages/coding-agent/docs/windows.md).
+
 ## Status
 
 Phase 0 (fork and baseline) is complete. See [BASELINE.md](BASELINE.md) for the fork

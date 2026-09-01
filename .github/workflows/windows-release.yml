@@ -1,0 +1,142 @@
+name: Build Windows release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to attach the Windows archives to (for example, v0.84.3)
+        required: true
+        type: string
+      source_ref:
+        description: Source ref to build (defaults to the tag)
+        required: false
+        type: string
+      publish:
+        description: Publish archives to the GitHub Release instead of retaining a workflow artifact only
+        required: true
+        default: false
+        type: boolean
+
+permissions: {}
+
+concurrency:
+  group: windows-release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+      SOURCE_REF: ${{ inputs.source_ref || inputs.tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.SOURCE_REF }}
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+
+      - name: Hydrate release model data
+        run: npm run hydrate:model-data
+
+      - name: Build Windows binaries
+        run: ./scripts/build-binaries.sh --offline-model-data --out packages/coding-agent/binaries
+
+      - name: Package Aira Windows archives
+        run: |
+          set -euo pipefail
+
+          mkdir -p release-assets
+          for platform in windows-x64 windows-arm64; do
+            stage="release-assets/${platform}"
+            cp -R "packages/coding-agent/binaries/${platform}" "${stage}"
+            mv "${stage}/pi.exe" "${stage}/aira.exe"
+            (
+              cd "${stage}"
+              zip -r "../aira-${platform}.zip" .
+            )
+            rm -rf "${stage}"
+          done
+
+          cd release-assets
+          sha256sum aira-windows-x64.zip aira-windows-arm64.zip > SHA256SUMS
+
+      - name: Upload Windows release payload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: aira-windows-${{ env.RELEASE_TAG }}
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 14
+
+  smoke-test:
+    runs-on: windows-latest
+    needs: build
+    permissions:
+      actions: read
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+    steps:
+      - name: Download Windows release payload
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: aira-windows-${{ env.RELEASE_TAG }}
+          path: release-assets
+
+      - name: Verify and smoke-test Aira
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          Get-FileHash release-assets/aira-windows-x64.zip -Algorithm SHA256 | ForEach-Object {
+            if ("$($_.Hash.ToLower())  aira-windows-x64.zip" -notin (Get-Content release-assets/SHA256SUMS)) {
+              throw "The x64 archive checksum does not match SHA256SUMS."
+            }
+          }
+          Expand-Archive release-assets/aira-windows-x64.zip -DestinationPath extracted
+          & extracted/aira.exe --help
+          & extracted/aira.exe --version
+
+  publish:
+    runs-on: ubuntu-latest
+    needs:
+      - build
+      - smoke-test
+    if: ${{ inputs.publish }}
+    permissions:
+      actions: read
+      contents: write
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Download Windows release payload
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: aira-windows-${{ env.RELEASE_TAG }}
+          path: release-assets
+
+      - name: Upload verified Windows archives to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          gh release view "${RELEASE_TAG}" >/dev/null 2>&1 || \
+            gh release create "${RELEASE_TAG}" --verify-tag --draft --title "Aira ${RELEASE_TAG}"
+          gh release upload "${RELEASE_TAG}" \
+            release-assets/aira-windows-x64.zip \
+            release-assets/aira-windows-arm64.zip \
+            release-assets/SHA256SUMS \
+            --clobber
