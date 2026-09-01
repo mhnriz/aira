@@ -539,6 +539,29 @@ Canonical subsystem snapshots (state.*)
 - Extension chrome conflicts are diagnosed truthfully (`/doctor`); a
   third-party custom footer replaces the native rail per Pi's contract.
 
+### 18.2 Aira application shell (Phase 12 direction change)
+
+The Workbench is the context surface inside an Aira-owned application shell,
+not an additional panel attached to Pi's stock startup UI. Interactive mode
+retains the host runtime, transcript, editor behavior, queueing, tools,
+extensions, session semantics, keybindings, fullscreen renderer, and RPC/
+headless boundaries, but owns these presentation surfaces:
+
+- a three-line identity header with mode, session, project, model, and
+  thinking telemetry;
+- explicit `YOU`, `AIRA`, and `THINKING` transcript hierarchy;
+- compact status, warning, update, tool, and direct-shell activity rows;
+- a full-width framed composer around the existing editor behavior;
+- one footer telemetry rail and a bottom-anchored dock in sparse sessions;
+- the adjacent Engineering Context rail, with bounded overview panels so
+  working-set detail cannot starve intelligence or control state.
+
+`InteractiveMode` composes these surfaces. It does not become a state owner:
+all displayed engineering truth still comes from the canonical projection
+path described in §18.1. Ctrl+O expands existing detail and startup resources;
+the default shell stays quiet. Headless, SDK, RPC, and print paths never
+instantiate the shell components.
+
 Minimal explicit controls:
 
 ```text

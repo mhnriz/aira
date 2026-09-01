@@ -915,3 +915,28 @@ never breaks.
 
 **Consequences.** No silent fights; truthful diagnostics; extension UX
 contract preserved (extension status line still renders on its own line).
+
+## ADR-036 — Interactive presentation is an Aira-owned application shell
+
+**Status:** accepted · Phase 12 direction change
+
+**Context.** The first Workbench implementation projected the correct native
+state but left Pi's startup help, context blocks, transcript hierarchy,
+composer framing, update card, and direct-shell chrome visible. The result was
+functionally Aira but visually read as stock Pi with a sidebar.
+
+**Decision.** Interactive mode owns a restrained Aira application shell:
+identity header, role-labelled conversation, compact activity/notices, framed
+composer, bottom dock, Engineering Context rail, and one telemetry footer.
+These components wrap or compose the existing Pi-derived runtime surfaces;
+they do not replace editor input semantics, transcript/session data, tool
+execution, extensions, keybindings, queueing, fullscreen behavior, or the
+headless/RPC paths. Default startup hides loaded-resource detail; Ctrl+O
+reveals it through the existing expansion action. Engineering panels remain
+bounded projections of canonical state.
+
+**Consequences.** Aira has a distinct shell at first paint without a parallel
+runtime or state store. Visual ownership is interactive-only and testable at
+the component/layout boundary. Compatibility behavior remains underneath the
+presentation layer, and third-party extension replacement contracts continue
+to apply.

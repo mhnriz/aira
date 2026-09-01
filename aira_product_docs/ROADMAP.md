@@ -459,6 +459,9 @@ engineering interface. Subsystems own state; the UI only projects it.
 - native sidebar: fullscreen HStack split with independent scrolling and a
   regular-mode overlay rail; dynamic panel priority (P0–P3) and progressive
   disclosure;
+- Aira-owned application shell: restrained identity header, explicit
+  conversation roles, compact notices/activity, framed bottom composer,
+  sparse-session dock anchoring, and one telemetry rail;
 - response segment footer with drop ranks and the highest-priority finding;
 - `Ctrl+Shift+O` Workbench toggle (`Ctrl+O` remains tool expansion), `/workbench`
   command, four Workbench settings, `/doctor` workbench/theme/shortcut
@@ -471,6 +474,9 @@ engineering interface. Subsystems own state; the UI only projects it.
 - pending Q&A/authorization rises to P0 (panel + footer);
 - every panel projects its canonical snapshot; rendering consumes zero model
   tokens and stays responsive during streaming;
+- first paint contains no stock Pi onboarding/context card/update card, while
+  editor, transcript, tools, extensions, queueing, session, keybinding,
+  fullscreen, headless, and RPC behavior remain compatible;
 - headless/SDK/RPC/print never instantiate the Workbench; Pi Atelier is
   never loaded; all dogfood cases (default/toggle/narrow/off/LSP/execution/
   browser/verification/goal/agents/permission/Q&A/performance/headless)

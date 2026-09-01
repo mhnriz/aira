@@ -407,6 +407,15 @@ diagnostic detail, distinct TASKS and AGENTS lifecycle projections, and
 actual native-footer drop arbitration. Idle state remains sparse; cold
 `uninitialized` intelligence is suppressed until it carries useful truth.
 
+The Phase 12 direction-change pass also replaces the surrounding stock
+startup presentation with an Aira-owned application shell: compact identity
+header, labelled conversation roles, compact notice/tool/shell activity,
+framed bottom composer, sparse-session dock anchoring, and the single native
+telemetry rail. Loaded resources use Ctrl+O progressive disclosure instead of
+default `[Context]` blocks. This changes presentation only; canonical state,
+runtime, editor, session, extension, queue, headless, and RPC semantics remain
+unchanged (ADR-036).
+
 Carried-forward out of scope (later phases): fullscreen live-resize
 rendering on this dev machine is blocked by a PRE-EXISTING pi TUI crash on
 SIGWINCH (baseline-verified; suggested for the Pi compatibility hardening

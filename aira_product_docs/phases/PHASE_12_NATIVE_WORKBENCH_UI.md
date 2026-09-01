@@ -385,6 +385,11 @@ minus `theme`, so the DEFAULT theme path applies), built bundle
 6. `d8d09d000` fix(coding-agent): visual-parity polish, truthful task/agent and
    intelligence projections, native footer arbitration, semantic shortcut
    preservation, renderer invariants, and regression coverage.
+7. `940c580ae` feat(coding-agent): Aira-owned application shell, compact
+   transcript/activity surfaces, bottom composer geometry, adaptive context
+   density, and regression coverage.
+8. The final local documentation commit records ADR-036, the compatibility
+   boundary, visual comparison, and verification results in the product docs.
 
 ## 14. Visual-parity polish follow-up (2026-09-01)
 
@@ -467,8 +472,78 @@ network and Unix-listener suites failed with sandbox `listen EPERM` errors and
 related timeouts. These failures are outside the Workbench paths; the focused
 regression set above remained green after that run.
 
-## 15. Stopping point
+## 15. Original stopping point
 
-Phase 12 is complete. Next roadmap phase per the renumbered table:
-**Phase 13 — Policy, Hooks, and Trust** (unchanged scope, renumbered).
-No work beyond Phase 12 was started; nothing was pushed or published.
+This stopping point was superseded by the Phase 12 direction change below.
+
+## 16. Aira application-shell direction change (2026-09-01)
+
+### 16.1 Problem and target
+
+The native Workbench was functionally correct, but the first paint still read
+as stock Pi: version/help onboarding, `[Context]` resources, generic transcript
+blocks, a line-only editor, a large update card, and separate status fragments
+surrounded the new sidebar. The approved HTML instead describes one product
+shell: restrained identity, conversation-first hierarchy, compact engineering
+activity, adjacent context, a deliberate composer, and one bottom telemetry
+surface.
+
+The direction-change pass used that product shell as the target while keeping
+the Pi-derived runtime underneath. No backend, goal, orchestration, verifier,
+permission, Q&A, task, tool, session, queue, extension, keybinding, headless,
+or RPC semantics were redesigned.
+
+### 16.2 Replaced presentation surfaces
+
+| Before | Aira-native replacement |
+| --- | --- |
+| version/help onboarding and “Pi can…” copy | three-line `AIRA WORKBENCH` header with mode/session, project/branch, model/thinking |
+| default `[Context]` resource blocks | quiet first paint; existing Ctrl+O expansion reveals details |
+| generic user/assistant blocks | explicit copper `YOU`, `AIRA`, and restrained `THINKING` hierarchy |
+| bordered/general tool and `!bash` cards | compact tool rows and `SHELL $ command` activity |
+| line-only editor | full-width `COMPOSE` frame around the existing editor and dynamic keybinding hints |
+| floating sparse-session input/footer | bottom-anchored dock with a single full-width telemetry rail |
+| large bordered update/status cards | one-line `UPDATE`, `NOTICE`, `ERROR`, or `AIRA` transcript notices |
+| context panels able to consume the full rail | bounded Working Set/Symbol/Changeset summaries with truncation counts, preserving Intelligence and Control visibility |
+
+### 16.3 Ownership and compatibility
+
+`AiraHeaderComponent`, `AiraNoticeComponent`, the Aira-framed `CustomEditor`,
+role-labelled transcript components, compact tool/shell renderers, and
+`AiraTuiMainScreen` dock geometry are interactive presentation components.
+`InteractiveMode` composes them and remains the only shell owner. The
+Engineering Context controller still consumes the pure, token-free projection
+layer. No shell component queries providers, runs Git/LSP/browser work, or
+mutates canonical state during render.
+
+The existing editor implementation remains responsible for input, completion,
+history, paste, submission, and key handling. Existing transcript/session
+entries, tool renderers, extensions, queueing, fullscreen switching, and
+headless/RPC construction boundaries remain intact.
+
+### 16.4 Live comparison and verification
+
+Native 142×40 tmux captures were inspected before and after against the HTML
+target in the in-app browser. Before: stock onboarding/context/update chrome,
+an unframed mid-screen editor, and the Workbench appended at right. After: the
+Aira identity and project telemetry align with the Engineering Context title;
+notices and `SHELL` activity are compact; bounded context summaries leave all
+applicable overview panels visible; the composer and telemetry rail stay at
+the bottom with intentional empty conversation space above.
+
+Focused tests cover header identity, dynamic composer hints/width, notices,
+sparse dock/footer anchoring, transcript roles, tool/shell width, Workbench
+rendering, and startup/rebind behavior. The package build and repository check
+pass; the final focused run passed 65 tests across eight files. The full
+`./test.sh` run was not green in this sandbox: loopback and Unix-socket suites
+failed with `listen EPERM`, while the previously documented Node-25 agent-loop
+timing/model-catalog cluster also failed. The agent, telemetry, TUI, and SQLite
+workspace suites completed green; none of the focused shell regressions
+failed. This matches the environment limitations already recorded in §10 and
+§14 rather than a new shell-path failure.
+
+## 17. Stopping point
+
+Phase 12 is complete after the application-shell direction change. Next
+roadmap phase: **Phase 13 — Policy, Hooks, and Trust**. No work beyond Phase 12
+was started; nothing was pushed or published.
