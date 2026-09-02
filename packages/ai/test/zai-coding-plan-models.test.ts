@@ -41,6 +41,20 @@ it("uses API-equivalent reference costs for Coding Plan models", () => {
 		cacheRead: 0.24,
 		cacheWrite: 0,
 	});
+	// GLM-5.3 gained a matching ZAI API price in the upstream catalog; the
+	// generator maps it to the reference cost like the other Coding Plan models.
+	expect(getBuiltinModel("zai", "glm-5.3").cost).toEqual({
+		input: 1.4,
+		output: 4.4,
+		cacheRead: 0.26,
+		cacheWrite: 0,
+	});
+	expect(getBuiltinModel("zai-coding-cn", "glm-5.3").cost).toEqual({
+		input: 1.4,
+		output: 4.4,
+		cacheRead: 0.26,
+		cacheWrite: 0,
+	});
 });
 
 it("keeps zero costs for Coding Plan models without a matching API price", () => {
@@ -48,6 +62,5 @@ it("keeps zero costs for Coding Plan models without a matching API price", () =>
 
 	for (const provider of ["zai", "zai-coding-cn"] as const) {
 		expect(getBuiltinModel(provider, "glm-5.2-highspeed").cost).toEqual(zeroCost);
-		expect(getBuiltinModel(provider, "glm-5.3").cost).toEqual(zeroCost);
 	}
 });
