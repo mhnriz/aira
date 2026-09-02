@@ -139,7 +139,10 @@ describeReal("Phase 7 — native CDP/Chromium provider against a local fixture",
 		const provider = new CdpBrowserProvider({ profileDir: dir });
 		const availability = await provider.probeAvailability();
 		expect(availability.available).toBe(true);
-		expect(availability.detail).toContain("Chrome");
+		// Detail is the resolved executable path: macOS reports the branded app
+		// ("…/Google Chrome.app/…"), Linux reports /usr/bin/google-chrome or
+		// /usr/bin/chromium. Assert the Chromium-family name case-insensitively.
+		expect(availability.detail?.toLowerCase()).toMatch(/chrome|chromium|edge|brave/);
 
 		const opened = await provider.open({ profileDir: dir, url: baseUrl });
 		expect(opened.ok).toBe(true);
