@@ -158,16 +158,21 @@ This routing remains configurable through the ordinary action bindings. For exam
 |--------|---------|-------------|
 | `app.tools.expand` | `ctrl+o` | Collapse or expand tool output |
 | `app.workbench.toggle` | `ctrl+shift+o` | Toggle the Aira Workbench sidebar |
+| `app.viewport.focusCycle` | `alt+o` | Cycle keyboard viewport focus (conversation ↔ Workbench) |
 | `app.message.copy` | `ctrl+x` | Copy the last assistant message, or the selected message in `/tree` |
 | `app.message.followUp` | `alt+enter` (`ctrl+q` on Windows and WSL) | Queue follow-up message |
 | `app.message.dequeue` | `alt+up` (`alt+q` on Windows and WSL) | Restore queued messages to editor |
 
 > **Workbench binding:** `Ctrl+Shift+O` toggles the native Workbench sidebar
 > (`app.workbench.toggle`). `Ctrl+O` remains tool-output expansion
-> (`app.tools.expand`). User keybindings override defaults and are never
-> overwritten. The session-tree filter cycle (`app.tree.filter.cycleForward`
-> / `cycleBackward`) is context-scoped to the tree selector and unchanged.
-> Run `/doctor` for a truthful binding check.
+> (`app.tools.expand`). `Alt+O` (`app.viewport.focusCycle`) cycles which pane
+> receives unmodified keyboard viewport navigation (PageUp/PageDown, Home/End,
+> line scroll) between the conversation and the Workbench; mouse/trackpad
+> wheel always scrolls the pane under the pointer without changing focus.
+> `Ctrl+A` is not used — it stays editor line-start. User keybindings override
+> defaults and are never overwritten. The session-tree filter cycle
+> (`app.tree.filter.cycleForward` / `cycleBackward`) is context-scoped to the
+> tree selector and unchanged. Run `/doctor` for a truthful binding check.
 
 ### Tree Navigation
 

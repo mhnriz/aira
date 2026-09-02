@@ -940,3 +940,37 @@ runtime or state store. Visual ownership is interactive-only and testable at
 the component/layout boundary. Compatibility behavior remains underneath the
 presentation layer, and third-party extension replacement contracts continue
 to apply.
+
+## ADR-037 — Aira interactive mode is fullscreen-first with native viewports
+
+**Status:** accepted · Phase 12.1
+
+**Context.** Aira's conversation transcript and Engineering Workbench
+previously relied on the host terminal's scrollback for navigation. That
+forces the user out of the application (terminal scrollbar, no per-pane
+state), breaks fixed header/composer/footer geometry, and cannot give the
+Workbench its own scroll position. Pi's existing fullscreen renderer
+(`TuiAltScreen`) already provides an application-owned transcript viewport
+with follow-output, pointer-routed wheel scrolling, per-pane text selection,
+search, prompt-jump, and scrollbars.
+
+**Decision.** Aira's native interactive mode defaults to fullscreen and treats
+Pi's fullscreen viewport as the canonical product shell. The conversation and
+the Workbench are two independent scroll views inside one fixed shell (header,
+composer dock, status rail stay fixed). Regular (terminal-scrollback) mode is
+preserved as the explicit compatibility mode via `tuiMode: "regular"` or
+`--tui-mode regular`; it renders the Workbench as a viewport-fixed rail and
+does not attempt independent panes. Keyboard viewport navigation targets a
+single focused pane (conversation by default, `Alt+O` cycles focus); the
+mouse wheel always targets the pane under the pointer without stealing focus.
+A scrolled-away conversation never yanks back to live output; a one-line
+new-output indicator plus an `LIVE STATE · VIEWING HISTORY` Workbench subtitle
+make the reading posture explicit, and End restores follow and clears the
+indicator.
+
+**Consequences.** Fullscreen becomes Aira's default interactive experience and
+regular mode is a compatibility fallback. Viewport state is interactive-only
+(never in `AiraSessionState`), headless/SDK/RPC are untouched, and rendering
+remains token-free. Existing keyboard contracts are preserved: `Ctrl+A`
+stays editor line-start, `Ctrl+O` stays tool expansion, `Ctrl+Shift+O` stays
+the Workbench toggle, and `Alt+O` is the new pane-focus cycle.

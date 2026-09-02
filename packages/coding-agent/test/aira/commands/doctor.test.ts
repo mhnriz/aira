@@ -126,7 +126,7 @@ describe("Aira /doctor command (Phase 4 scope)", () => {
 		const report = buildAiraDoctorReport(state);
 
 		expect(report.home).toBe(expectedHome);
-		expect(report.checks.length).toBe(18);
+		expect(report.checks.length).toBe(19);
 		for (const check of report.checks) {
 			expect(check.pass, `${check.name} should pass`).toBe(true);
 		}
@@ -155,11 +155,14 @@ describe("Aira /doctor command (Phase 4 scope)", () => {
 		const report = buildAiraDoctorReport(state);
 		const modeCheck = report.checks.find((c) => c.name === "mode shortcut");
 		const thinkingCheck = report.checks.find((c) => c.name === "thinking shortcut");
+		const focusCheck = report.checks.find((c) => c.name === "viewport focus shortcut");
 
 		expect(modeCheck?.pass).toBe(true);
 		expect(modeCheck?.detail).toContain("shift+tab");
 		expect(thinkingCheck?.pass).toBe(true);
 		expect(thinkingCheck?.detail).toContain("ctrl+shift+e");
+		expect(focusCheck?.pass).toBe(true);
+		expect(focusCheck?.detail).toContain("alt+o");
 		disposeAiraSessionState("doctor-3", state);
 	});
 
@@ -320,7 +323,7 @@ describe("Aira /doctor command (Phase 4 scope)", () => {
 		const text = formatAiraDoctorReport(buildAiraDoctorReport(state));
 
 		expect(text).toContain(`home: ${expectedHome}`);
-		expect(text).toContain("summary: 18/18 checks passed");
+		expect(text).toContain("summary: 19/19 checks passed");
 		expect(text).toContain("ok  home:");
 		expect(text).toContain("ok  browser: availability probe pending");
 		disposeAiraSessionState("doctor-5", state);

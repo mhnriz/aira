@@ -106,7 +106,17 @@ export function buildAiraDoctorReport(state: AiraSessionState | undefined): Aira
 		detail: `${WORKBENCH_TOGGLE_KEY}: ${workbenchKeys.join(", ") || "unbound"} | app.tools.expand: ${expandKeys.join(", ") || "unbound"}`,
 	});
 
-	// 4c. Aira default theme resolves (schema-valid built-in).
+	// 4c. Phase 12.1 viewport focus uses a distinct binding and never steals
+	// Ctrl+A (editor line-start) or the Ctrl+O family.
+	const focusKeys = defaultKeysOf("app.viewport.focusCycle");
+	const lineStartKeys = defaultKeysOf("tui.editor.cursorLineStart");
+	checks.push({
+		name: "viewport focus shortcut",
+		pass: focusKeys.includes("alt+o") && !focusKeys.includes("ctrl+a") && lineStartKeys.includes("ctrl+a"),
+		detail: `app.viewport.focusCycle: ${focusKeys.join(", ") || "unbound"} | editor line-start: ${lineStartKeys.join(", ") || "unbound"}`,
+	});
+
+	// 4d. Aira default theme resolves (schema-valid built-in).
 	const airaTheme = getThemeByName("aira-zhr");
 	checks.push({
 		name: "aira-zhr theme",

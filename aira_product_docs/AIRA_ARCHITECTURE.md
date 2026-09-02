@@ -539,6 +539,24 @@ Canonical subsystem snapshots (state.*)
 - Extension chrome conflicts are diagnosed truthfully (`/doctor`); a
   third-party custom footer replaces the native rail per Pi's contract.
 
+### 18.1a Native multi-pane viewports (Phase 12.1, ADR-037)
+
+Interactive mode defaults to the fullscreen viewport shell; the conversation
+and the Workbench are two independent scroll views inside one fixed shell
+(header, composer dock, status rail never move). The header and both pane
+title strips are fixed; only the transcript and the Workbench panels scroll,
+each with its own scrollTop/follow state. Keyboard viewport navigation
+(PageUp/PageDown/Home/End/line scroll) targets one focused pane
+(`viewportFocus`, conversation by default, `Alt+O` cycles), the mouse wheel
+always targets the pane under the pointer without changing focus, and a
+hidden Workbench releases focus to the conversation. A scrolled-away
+conversation never yanks back to live output: a one-line `↓ N new lines`
+indicator and the `LIVE STATE · VIEWING HISTORY` Workbench subtitle make the
+posture explicit, and End restores follow. Viewport state is interactive-only
+UI state, never `AiraSessionState`; regular mode stays the explicit
+terminal-scrollback compatibility UI. Full details: `phases/PHASE_12_1_`
+`NATIVE_VIEWPORTS.md`.
+
 ### 18.2 Aira application shell (Phase 12 direction change)
 
 The Workbench is the context surface inside an Aira-owned application shell,

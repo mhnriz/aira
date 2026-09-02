@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Added `ScrollView.getUnreadLines()` / `maxScrollTop` so hosts can report how much newer output sits below a scrolled-away viewport.
+- Added `TuiAltScreen.setKeyboardScrollTarget()` (declared on `ViewportTUI`): hosts can point unmodified keyboard viewport navigation (PageUp/PageDown, half-page/line scroll, Home/End) at a secondary scroll view; unset targets the primary view. No behavior change when unused.
+
 ## [0.84.3] - 2026-08-24
 
 ### Fixed
