@@ -191,6 +191,7 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 	private activeSearch?: ActiveSearch;
 	private pressedUrl?: string;
 	private selectionDragged = false;
+	private keyboardScrollTarget?: ScrollView;
 	private readonly wheelScrollLines: number;
 	private readonly mouseEnabled: boolean;
 	private readonly searchMatchStyle: (text: string) => string;
@@ -249,6 +250,20 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 
 	private getPrimaryScrollView(): ScrollView {
 		return this.currentLayout?.primaryScrollView ?? this.implicitScrollView;
+	}
+
+	/**
+	 * Scroll view targeted by keyboard viewport navigation (PageUp/PageDown,
+	 * half-page/line scroll, Home/End). When unset, navigation targets the
+	 * primary scroll view (transcript). Aira sets this to the Workbench's
+	 * scroll view while the Workbench pane holds keyboard focus.
+	 */
+	setKeyboardScrollTarget(scrollView: ScrollView | undefined): void {
+		this.keyboardScrollTarget = scrollView;
+	}
+
+	private getKeyboardScrollView(): ScrollView {
+		return this.keyboardScrollTarget ?? this.getPrimaryScrollView();
 	}
 
 	protected override beforeTerminalStart(): void {
@@ -597,30 +612,42 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 		if (this.shouldDeferViewportInputToOverlay()) return undefined;
 		if (keybindings.matches(data, "tui.altScreen.pageUp")) {
 			if (!isRelease) {
-				this.scrollBy(-Math.max(1, this.getPrimaryScrollView().viewportHeight - PAGE_SCROLL_OVERLAP));
+				this.getKeyboardScrollView().scrollBy(
+					-Math.max(1, this.getKeyboardScrollView().viewportHeight - PAGE_SCROLL_OVERLAP),
+				);
 			}
 			return { consume: true };
 		}
 		if (keybindings.matches(data, "tui.altScreen.pageDown")) {
 			if (!isRelease) {
-				this.scrollBy(Math.max(1, this.getPrimaryScrollView().viewportHeight - PAGE_SCROLL_OVERLAP));
+				this.getKeyboardScrollView().scrollBy(
+					Math.max(1, this.getKeyboardScrollView().viewportHeight - PAGE_SCROLL_OVERLAP),
+				);
 			}
 			return { consume: true };
 		}
 		if (keybindings.matches(data, "tui.altScreen.halfPageUp")) {
-			if (!isRelease) this.scrollBy(-Math.max(1, Math.floor(this.getPrimaryScrollView().viewportHeight / 2)));
+			if (!isRelease) {
+				this.getKeyboardScrollView().scrollBy(
+					-Math.max(1, Math.floor(this.getKeyboardScrollView().viewportHeight / 2)),
+				);
+			}
 			return { consume: true };
 		}
 		if (keybindings.matches(data, "tui.altScreen.halfPageDown")) {
-			if (!isRelease) this.scrollBy(Math.max(1, Math.floor(this.getPrimaryScrollView().viewportHeight / 2)));
+			if (!isRelease) {
+				this.getKeyboardScrollView().scrollBy(
+					Math.max(1, Math.floor(this.getKeyboardScrollView().viewportHeight / 2)),
+				);
+			}
 			return { consume: true };
 		}
 		if (keybindings.matches(data, "tui.altScreen.lineUp")) {
-			if (!isRelease) this.scrollBy(-1);
+			if (!isRelease) this.getKeyboardScrollView().scrollBy(-1);
 			return { consume: true };
 		}
 		if (keybindings.matches(data, "tui.altScreen.lineDown")) {
-			if (!isRelease) this.scrollBy(1);
+			if (!isRelease) this.getKeyboardScrollView().scrollBy(1);
 			return { consume: true };
 		}
 		if (keybindings.matches(data, "tui.altScreen.previousPrompt")) {
@@ -632,11 +659,11 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 			return { consume: true };
 		}
 		if (keybindings.matches(data, "tui.altScreen.top")) {
-			if (!isRelease) this.scrollToTop();
+			if (!isRelease) this.getKeyboardScrollView().scrollToStart();
 			return { consume: true };
 		}
 		if (keybindings.matches(data, "tui.altScreen.bottom")) {
-			if (!isRelease) this.scrollToBottom();
+			if (!isRelease) this.getKeyboardScrollView().scrollToEnd();
 			return { consume: true };
 		}
 		return undefined;

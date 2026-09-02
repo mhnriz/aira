@@ -56,6 +56,20 @@ export class ScrollView extends Container {
 		return this.currentScrollTop;
 	}
 
+	/** Maximum scrollTop: the number of content lines above the bottom edge. */
+	get maxScrollTop(): number {
+		return Math.max(0, this.contentHeight - this.currentViewportHeight);
+	}
+
+	/**
+	 * Content lines below the current viewport bottom. 0 when following the
+	 * end (or when content fits the viewport). A viewport that scrolled away
+	 * from live output reports the count needed to return to it.
+	 */
+	getUnreadLines(): number {
+		return Math.max(0, this.maxScrollTop - this.currentScrollTop);
+	}
+
 	get isFollowingEnd(): boolean {
 		return this.followingEnd;
 	}

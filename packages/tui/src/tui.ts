@@ -5,6 +5,7 @@
 import * as os from "node:os";
 import * as path from "node:path";
 import { performance } from "node:perf_hooks";
+import type { ScrollView } from "./components/scroll-view.ts";
 import { isKeyRelease, matchesKey } from "./keys.ts";
 import type { Terminal } from "./terminal.ts";
 import {
@@ -322,6 +323,12 @@ export const VIEWPORT_TUI = Symbol.for("@earendil-works/pi-tui/viewport");
 export interface ViewportTUI extends TUI {
 	readonly [VIEWPORT_TUI]: true;
 	setLayoutRoot(component: Component | undefined): void;
+	/**
+	 * Scroll view targeted by keyboard viewport navigation (PageUp/PageDown,
+	 * half-page/line scroll, Home/End). When unset, navigation targets the
+	 * primary scroll view. Hosts can point this at a secondary pane.
+	 */
+	setKeyboardScrollTarget(scrollView: ScrollView | undefined): void;
 }
 
 export function isViewportTUI(tui: TUI): tui is ViewportTUI {
