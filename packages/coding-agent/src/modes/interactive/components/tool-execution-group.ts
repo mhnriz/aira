@@ -188,6 +188,22 @@ export function dissolveGroupFrom(container: Container, group: ToolExecutionGrou
 }
 
 /**
+ * Add a tool execution row to a chat container, grouping it with the
+ * previous adjacent row when the compact grouping rules allow. Grouping is
+ * presentation-only.
+ */
+export function addToolRowToContainer(
+	container: Container,
+	expanded: boolean,
+	component: ToolExecutionComponent,
+): void {
+	if (!expanded && tryGroupToolComponent(container, component)) {
+		return;
+	}
+	container.addChild(component);
+}
+
+/**
  * After a successful settle, try to fold the component into the previous
  * adjacent group of the same tool. Batches of tool calls are added before
  * any result arrives, so add-time grouping alone misses them; each settle
