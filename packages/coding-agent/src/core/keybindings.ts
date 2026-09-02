@@ -23,6 +23,7 @@ export interface AppKeybindings {
 	"app.model.select": true;
 	"app.tools.expand": true;
 	"app.workbench.toggle": true;
+	"app.viewport.focusCycle": true;
 	"app.thinking.toggle": true;
 	"app.session.toggleNamedFilter": true;
 	"app.editor.external": true;
@@ -124,6 +125,14 @@ export const KEYBINDINGS = {
 		// established tool-output expansion action.
 		defaultKeys: "ctrl+shift+o",
 		description: "Toggle Workbench sidebar",
+	},
+	"app.viewport.focusCycle": {
+		// Cycle keyboard viewport focus between the conversation and the
+		// Workbench pane. Alt+O joins the "O" family (Ctrl+O expands tools,
+		// Ctrl+Shift+O toggles the Workbench) without stealing Ctrl+A
+		// (editor line-start) or either Ctrl+O binding.
+		defaultKeys: "alt+o",
+		description: "Cycle viewport focus (conversation/Workbench)",
 	},
 	"app.thinking.toggle": {
 		defaultKeys: "ctrl+t",

@@ -15,12 +15,12 @@
 
 import {
 	type Component,
-	Container,
 	HStack,
 	type OverlayHandle,
 	type OverlayOptions,
 	ScrollView,
 	type TUI,
+	VStack,
 } from "@earendil-works/pi-tui";
 import type { AiraIntelligenceHandle } from "../../../aira/intelligence/coordinator.ts";
 import type { AiraSessionState } from "../../../aira/state.ts";
@@ -33,7 +33,7 @@ import { MIN_WORKBENCH_MAIN_WIDTH, MIN_WORKBENCH_WIDTH } from "../../../core/set
 import { formatCwdForFooter } from "../components/footer.ts";
 import { theme as workbenchTheme } from "../theme/theme.ts";
 import { AiraTuiMainScreen } from "./tui-rail.ts";
-import { createWorkbenchComponent, type WorkbenchComponent } from "./workbench-component.ts";
+import { createWorkbenchComponent, type WorkbenchComponent, WorkbenchTitleComponent } from "./workbench-component.ts";
 
 export interface WorkbenchControllerOptions {
 	session: AgentSession;
@@ -45,6 +45,10 @@ export interface WorkbenchControllerOptions {
 	getBranch: () => string | undefined;
 	/** Lines the footer occupies (regular-mode rail reserves them). */
 	getFooterLineCount: () => number;
+	/** Whether the transcript viewport is following live output. */
+	getTranscriptFollowing: () => boolean;
+	/** Whether the Workbench pane is the keyboard viewport-scroll target. */
+	getFocused: () => boolean;
 	requestRender: () => void;
 	invalidate: () => void;
 	/** Host rebuilds the fullscreen layout root (layoutChanged). */
@@ -54,12 +58,16 @@ export interface WorkbenchControllerOptions {
 const WORKBENCH_GIT_REFRESH_MS = 400;
 /** Fullscreen scroll height cap for the unbounded sidebar content. */
 const SIDEBAR_UNBOUNDED_HEIGHT = 10_000;
+/** Fixed pane title strip height (title / subtitle / separator). */
+const SIDEBAR_TITLE_LINES = 3;
 
 export class WorkbenchController {
 	private readonly session: AgentSession;
 	private readonly options: WorkbenchControllerOptions;
 	private readonly component: WorkbenchComponent;
-	private readonly container = new Container();
+	private readonly titleComponent: WorkbenchTitleComponent;
+	/** Regular-mode rail: fixed title strip + viewport-fixed panels. */
+	private readonly container: Component;
 	private readonly sidebarScroll: ScrollView;
 	private unsubscribe: Array<() => void> = [];
 	private disposed = false;
@@ -91,12 +99,21 @@ export class WorkbenchController {
 		this.showOnStartup = settings.showOnStartup;
 		this.workbenchEnabled = settings.enabled;
 		this.component = createWorkbenchComponent({
-			getHeight: () => (this.tui?.mode === "fullscreen" ? SIDEBAR_UNBOUNDED_HEIGHT : this.railHeight()),
-			showTitle: true,
+			getHeight: () =>
+				this.tui?.mode === "fullscreen"
+					? SIDEBAR_UNBOUNDED_HEIGHT
+					: Math.max(1, this.railHeight() - SIDEBAR_TITLE_LINES),
 			fillHeight: () => this.tui?.mode !== "fullscreen",
 		});
-		this.container.addChild(this.component as Component);
-		this.sidebarScroll = new ScrollView(this.container, {
+		this.titleComponent = new WorkbenchTitleComponent(() => ({
+			focused: this.options.getFocused() && this.isVisibleNow(),
+			viewingHistory: !this.options.getTranscriptFollowing(),
+		}));
+		this.container = new VStack([
+			{ component: this.titleComponent, basis: "auto", grow: 0, shrink: 0, minSize: 1 },
+			{ component: this.component as Component, basis: "auto", grow: 0, shrink: 1, minSize: 1 },
+		]);
+		this.sidebarScroll = new ScrollView(this.component as Component, {
 			follow: "none",
 			primary: false,
 			overscroll: "contain",
@@ -127,6 +144,11 @@ export class WorkbenchController {
 
 	isEnabled(): boolean {
 		return this.workbenchEnabled;
+	}
+
+	/** The fullscreen sidebar ScrollView (keyboard scroll target when focused). */
+	get scrollView(): ScrollView {
+		return this.sidebarScroll;
 	}
 
 	getExplicitVisible(): boolean | undefined {
@@ -267,6 +289,11 @@ export class WorkbenchController {
 	wrapLayout(mainRoot: Component): Component {
 		if (this.tui?.mode !== "fullscreen") return mainRoot;
 		const width = this.sidebarWidth;
+		// The pane title strip stays fixed; only the panels scroll.
+		const sidebarColumn = new VStack([
+			{ component: this.titleComponent, basis: "auto", grow: 0, shrink: 0, minSize: 1 },
+			{ component: this.sidebarScroll, basis: 0, grow: 1, shrink: 1, minSize: 1 },
+		]);
 		return new HStack([
 			{
 				component: mainRoot,
@@ -276,7 +303,7 @@ export class WorkbenchController {
 				minSize: MIN_WORKBENCH_MAIN_WIDTH,
 			},
 			{
-				component: this.sidebarScroll,
+				component: sidebarColumn,
 				basis: width,
 				grow: 0,
 				shrink: 1,

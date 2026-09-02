@@ -1,6 +1,9 @@
 import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { theme } from "../theme/theme.ts";
 
+/** Which pane receives unmodified keyboard viewport navigation. */
+export type ViewportFocus = "conversation" | "workbench";
+
 export interface AiraHeaderState {
 	mode: string;
 	cwd: string;
@@ -19,6 +22,50 @@ function balancedLine(left: string, right: string, width: number): string {
 	const clippedLeft = truncateToWidth(left, leftWidth, theme.fg("dim", "…"));
 	const gap = " ".repeat(Math.max(1, safeWidth - visibleWidth(clippedLeft) - visibleWidth(clippedRight)));
 	return truncateToWidth(`${clippedLeft}${gap}${clippedRight}`, safeWidth, "");
+}
+
+/**
+ * Aira-owned conversation pane title. A subtle copper focus mark appears next
+ * to the title while the conversation pane is the keyboard scroll target.
+ */
+export class AiraConversationTitleComponent implements Component {
+	private readonly getFocused: () => boolean;
+
+	constructor(getFocused: () => boolean) {
+		this.getFocused = getFocused;
+	}
+
+	invalidate(): void {}
+
+	render(width: number): string[] {
+		const safeWidth = Math.max(1, Math.trunc(width));
+		const title = this.getFocused()
+			? `${theme.bold(theme.fg("text", "CONVERSATION"))} ${theme.fg("copperBright", "●")}`
+			: theme.bold(theme.fg("text", "CONVERSATION"));
+		return [truncateToWidth(title, safeWidth, theme.fg("dim", "…")), theme.fg("borderMuted", "─".repeat(safeWidth))];
+	}
+}
+
+/**
+ * Bottom-of-conversation new-output indicator. Renders zero lines (no layout
+ * space) until the transcript viewport is scrolled away from live output.
+ */
+export class AiraNewOutputIndicatorComponent implements Component {
+	private readonly getUnread: () => number;
+
+	constructor(getUnread: () => number) {
+		this.getUnread = getUnread;
+	}
+
+	invalidate(): void {}
+
+	render(width: number): string[] {
+		const unread = this.getUnread();
+		if (unread <= 0) return [];
+		const safeWidth = Math.max(1, Math.trunc(width));
+		const label = `↓ ${unread} new ${unread === 1 ? "line" : "lines"}`;
+		return [theme.fg("muted", truncateToWidth(label, safeWidth, theme.fg("dim", "…")))];
+	}
 }
 
 /** Aira-owned application header. It replaces the stock startup/help block. */

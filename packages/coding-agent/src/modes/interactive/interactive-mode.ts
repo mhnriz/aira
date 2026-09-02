@@ -137,7 +137,13 @@ import { killTrackedDetachedChildren } from "../../utils/shell.ts";
 import { loadAllHighlightLanguages } from "../../utils/syntax-highlight.ts";
 import { ensureTool, type ToolStatus } from "../../utils/tools-manager.ts";
 import { checkForNewAiraVersion, type LatestPiRelease } from "../../utils/version-check.ts";
-import { AiraHeaderComponent, AiraNoticeComponent } from "./components/aira-shell.ts";
+import {
+	AiraConversationTitleComponent,
+	AiraHeaderComponent,
+	AiraNewOutputIndicatorComponent,
+	AiraNoticeComponent,
+	type ViewportFocus,
+} from "./components/aira-shell.ts";
 import { ArminComponent } from "./components/armin.ts";
 import { AssistantMessageComponent } from "./components/assistant-message.ts";
 import { BashExecutionComponent } from "./components/bash-execution.ts";
@@ -466,6 +472,13 @@ export class InteractiveMode {
 	private documentContainer: Container;
 	private transcriptScrollView: TuiLayouts.ScrollView | undefined;
 	private fullscreenLayoutRoot: Component | undefined;
+	private conversationTitle: Component | undefined;
+	private newOutputIndicator: Component | undefined;
+	/**
+	 * Keyboard viewport-scroll target (UI state only, never AiraSessionState).
+	 * Defaults to the conversation; the Workbench pane when it is focused.
+	 */
+	private viewportFocus: ViewportFocus = "conversation";
 	private pendingMessagesContainer: Container;
 	private statusContainer: Container;
 	private defaultEditor: CustomEditor;
@@ -635,7 +648,9 @@ export class InteractiveMode {
 		this.loadedResourcesContainer = new Container();
 		this.chatContainer = new Container();
 		this.documentContainer = new Container();
-		this.documentContainer.addChild(this.headerContainer);
+		// The Aira header is a fixed application-shell row above the pane split;
+		// only the loaded resources + transcript scroll inside the conversation
+		// viewport. The header is mounted separately for regular mode.
 		this.documentContainer.addChild(this.loadedResourcesContainer);
 		this.documentContainer.addChild(this.chatContainer);
 		this.pendingMessagesContainer = new Container();
@@ -881,6 +896,7 @@ export class InteractiveMode {
 	private rebindWorkbenchForSession(): void {
 		this.setupWorkbench();
 		this.workbench?.bindTui(this.renderer);
+		this.syncViewportFocus();
 	}
 
 	/**
@@ -896,9 +912,11 @@ export class InteractiveMode {
 			dockAnchorComponent: this.pendingMessagesContainer,
 			getBranch: () => this.footerDataProvider.getGitBranch() ?? undefined,
 			getFooterLineCount: () => this.footerRenderedLineCount(),
+			getTranscriptFollowing: () => this.transcriptScrollView?.isFollowingEnd ?? true,
+			getFocused: () => this.workbenchFocused(),
 			requestRender: () => this.ui.requestRender(),
 			invalidate: () => this.ui.invalidate(),
-			layoutChanged: () => this.rebuildWorkbenchLayout(),
+			layoutChanged: () => this.onWorkbenchLayoutChanged(),
 		});
 		this.workbench.attach();
 	}
@@ -908,17 +926,60 @@ export class InteractiveMode {
 		return this.footerDataProvider.getExtensionStatuses().size > 0 ? 2 : 1;
 	}
 
-	/** Main layout: transcript + dock; the sidebar split wraps it in fullscreen. */
+	/**
+	 * Main layout: fixed Aira header, then the conversation/workbench split,
+	 * then the status rail. The header, composer dock, and footer never move
+	 * while either pane scrolls. The sidebar split wraps the conversation
+	 * column in fullscreen.
+	 */
 	private rebuildWorkbenchLayout(): void {
 		if (!this.mainLayoutRoot) return;
 		this.workbenchRoot = this.workbench?.wrapLayout(this.mainLayoutRoot) ?? this.mainLayoutRoot;
 		this.fullscreenLayoutRoot = new TuiLayouts.VStack([
+			{ component: this.headerContainer, basis: "auto", grow: 0, shrink: 0, minSize: 1 },
 			{ component: this.workbenchRoot, basis: 0, grow: 1, shrink: 1, minSize: 1 },
 			{ component: this.footerContainer, basis: "auto", grow: 0, shrink: 1, minSize: 1 },
 		]);
 		if (TuiLayouts.isViewportTUI(this.renderer)) {
 			this.renderer.setLayoutRoot(this.fullscreenLayoutRoot);
 		}
+	}
+
+	/** Layout changed (workbench visibility/settings): rebuild + keep focus valid. */
+	private onWorkbenchLayoutChanged(): void {
+		this.rebuildWorkbenchLayout();
+		this.syncViewportFocus();
+	}
+
+	/** True when the Workbench pane is the keyboard viewport-scroll target. */
+	private workbenchFocused(): boolean {
+		return this.viewportFocus === "workbench" && this.workbench?.isVisibleNow() === true;
+	}
+
+	/** The conversation pane holds focus unless the Workbench pane does. */
+	private conversationFocused(): boolean {
+		return !this.workbenchFocused();
+	}
+
+	/**
+	 * Cycle keyboard viewport focus between conversation and Workbench. A
+	 * hidden Workbench cannot take focus; focus stays on the conversation.
+	 */
+	private cycleViewportFocus(): void {
+		if (!this.workbench?.isVisibleNow()) return;
+		this.viewportFocus = this.viewportFocus === "workbench" ? "conversation" : "workbench";
+		this.syncViewportFocus();
+	}
+
+	/**
+	 * Point keyboard viewport navigation (PageUp/PageDown/Home/End/line scroll)
+	 * at the focused pane and repaint focus marks. Mouse wheel already routes
+	 * to the pane under the pointer inside the fullscreen renderer.
+	 */
+	private syncViewportFocus(): void {
+		if (!TuiLayouts.isViewportTUI(this.renderer)) return;
+		this.renderer.setKeyboardScrollTarget(this.workbenchFocused() ? this.workbench?.scrollView : undefined);
+		this.ui.requestRender();
 	}
 
 	/** Ctrl+Shift+O / app.workbench.toggle: flip the sidebar (session-scoped). */
@@ -990,6 +1051,7 @@ export class InteractiveMode {
 		this.rebuildWorkbenchLayout();
 		this.mountInteractiveTui(nextUi, components);
 		this.workbench?.bindTui(nextUi);
+		this.syncViewportFocus();
 		nextUi.invalidate();
 		nextUi.setFocus(focus);
 		if (!startRenderer) return true;
@@ -1045,13 +1107,23 @@ export class InteractiveMode {
 			{ component: this.editorContainer, shrink: 1, minSize: 3 },
 			{ component: this.widgetContainerBelow, shrink: 1, minSize: 0 },
 		]);
+		// Conversation pane chrome: fixed title strip, scrollable transcript,
+		// transient new-output indicator (0 lines when following), then the
+		// composer dock. The Aira header + status rail live outside this pane.
+		this.conversationTitle = new AiraConversationTitleComponent(() => this.conversationFocused());
+		this.newOutputIndicator = new AiraNewOutputIndicatorComponent(
+			() => this.transcriptScrollView?.getUnreadLines() ?? 0,
+		);
 		this.mainLayoutRoot = new TuiLayouts.VStack([
+			{ component: this.conversationTitle, basis: "auto", grow: 0, shrink: 0, minSize: 1 },
 			{ component: this.transcriptScrollView, basis: 0, grow: 1, shrink: 1, minSize: 1 },
+			{ component: this.newOutputIndicator, basis: "auto", grow: 0, shrink: 0, minSize: 0 },
 			{ component: this.dockContainer, basis: "auto", grow: 0, shrink: 1, minSize: 1 },
 		]);
 		this.setupWorkbench();
 		this.rebuildWorkbenchLayout();
 		this.mountInteractiveTui(this.renderer, [
+			this.headerContainer,
 			this.documentContainer,
 			this.pendingMessagesContainer,
 			this.statusContainer,
@@ -2972,6 +3044,7 @@ export class InteractiveMode {
 		this.defaultEditor.onAction("app.model.select", () => this.showModelSelector());
 		this.defaultEditor.onAction("app.tools.expand", () => this.toggleToolOutputExpansion());
 		this.defaultEditor.onAction("app.workbench.toggle", () => this.toggleWorkbench());
+		this.defaultEditor.onAction("app.viewport.focusCycle", () => this.cycleViewportFocus());
 		this.defaultEditor.onAction("app.thinking.toggle", () => this.toggleThinkingBlockVisibility());
 		this.defaultEditor.onAction("app.editor.external", () => void this.handleOpenExternalEditor());
 		this.defaultEditor.onAction("app.message.copy", () => void this.handleCopyCommand({ flashConfirmation: true }));

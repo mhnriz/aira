@@ -11,7 +11,7 @@
  * mode it sits inside a ScrollView and can scroll independently.
  */
 
-import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { WorkbenchPanel, WorkbenchProjection, WorkbenchRole, WorkbenchRow } from "../../../aira/ui/types.ts";
 import { theme } from "../theme/theme.ts";
 
@@ -99,10 +99,16 @@ function renderProgress(
 export interface WorkbenchComponentOptions {
 	/** Height provider for viewport-fixed rails (regular mode). */
 	getHeight: () => number;
-	/** When true, render the pane title strip (default true). */
-	showTitle?: boolean;
 	/** Fill unused viewport rows so the regular-mode pane edge stays continuous. */
 	fillHeight?: () => boolean;
+}
+
+/** Live state for the pane title strip (focus + transcript reading posture). */
+export interface WorkbenchTitleState {
+	/** The Workbench pane is the keyboard viewport-scroll target. */
+	focused: boolean;
+	/** The transcript viewport is scrolled away from live output. */
+	viewingHistory: boolean;
 }
 
 export interface WorkbenchComponent {
@@ -126,30 +132,36 @@ export function fitPanelCount(panels: readonly WorkbenchPanel[], maxHeight: numb
 	return count;
 }
 
-/** Pure terminal rendering of one pushed projection (exported for visual regression tests). */
-export function renderWorkbenchProjection(
-	next: WorkbenchProjection,
+/** Pure terminal rendering of the pane title strip (title / subtitle / separator). */
+export function renderWorkbenchTitle(
 	width: number,
-	maxHeight: number,
-	showTitle = true,
+	state: WorkbenchTitleState = {
+		focused: false,
+		viewingHistory: false,
+	},
 ): string[] {
 	const safeWidth = Math.max(4, Math.trunc(width));
 	const innerWidth = contentWidth(safeWidth);
-	const fittedCount = fitPanelCount(next.panels, maxHeight, showTitle);
+	const title = state.focused
+		? `${theme.bold(roleColor("text", "ENGINEERING"))} ${theme.bold(roleColor("copper", "CONTEXT"))} ${theme.fg("copperBright", "●")}`
+		: `${theme.bold(roleColor("text", "ENGINEERING"))} ${theme.bold(roleColor("copper", "CONTEXT"))}`;
+	const subtitle = state.viewingHistory ? "LIVE STATE · VIEWING HISTORY" : "CANONICAL STATE · TOKEN-FREE";
+	return [
+		railLine(title, safeWidth),
+		railLine(roleColor("dim", subtitle), safeWidth),
+		railLine(theme.fg("borderMuted", "─".repeat(innerWidth)), safeWidth, "├"),
+	];
+}
+
+/** Pure terminal rendering of the panel list without the pane title strip. */
+export function renderWorkbenchPanels(next: WorkbenchProjection, width: number, maxHeight: number): string[] {
+	const safeWidth = Math.max(4, Math.trunc(width));
+	const innerWidth = contentWidth(safeWidth);
+	const fittedCount = fitPanelCount(next.panels, maxHeight, false);
 	const panels = fittedCount < next.panels.length ? next.panels.slice(0, fittedCount) : next.panels;
 	const lines: string[] = [];
-	if (showTitle) {
-		lines.push(
-			railLine(
-				`${theme.bold(roleColor("text", "ENGINEERING"))} ${theme.bold(roleColor("copper", "CONTEXT"))}`,
-				safeWidth,
-			),
-		);
-		lines.push(railLine(roleColor("dim", "CANONICAL STATE · TOKEN-FREE"), safeWidth));
-		lines.push(railLine(theme.fg("borderMuted", "─".repeat(innerWidth)), safeWidth, "├"));
-	}
 	for (const panel of panels) {
-		if (lines.length > (showTitle ? 3 : 0)) lines.push(railLine("", safeWidth));
+		if (lines.length > 0) lines.push(railLine("", safeWidth));
 		const title = theme.bold(roleColor("text", panel.title.toUpperCase()));
 		const hint = panel.hint ? roleColor("dim", panel.hint) : undefined;
 		lines.push(railLine(spacedRow(title, hint, innerWidth), safeWidth));
@@ -161,10 +173,14 @@ export function renderWorkbenchProjection(
 	return lines.slice(0, Math.max(1, maxHeight));
 }
 
-/** Build the sidebar component (stateless renderer; projection pushed in). */
+/** Title strip + panels (standalone convenience for tests/embedding; the live UI composes them separately). */
+export function renderWorkbenchProjection(next: WorkbenchProjection, width: number, maxHeight: number): string[] {
+	return [...renderWorkbenchTitle(width), ...renderWorkbenchPanels(next, width, maxHeight)];
+}
+
+/** Build the sidebar panels component (stateless renderer; projection pushed in). */
 export function createWorkbenchComponent(options: WorkbenchComponentOptions): WorkbenchComponent {
 	let projection: WorkbenchProjection | undefined;
-	const showTitle = options.showTitle !== false;
 
 	return {
 		setProjection(next: WorkbenchProjection | undefined): void {
@@ -173,7 +189,7 @@ export function createWorkbenchComponent(options: WorkbenchComponentOptions): Wo
 		render(width: number): string[] {
 			if (!projection) return [];
 			const maxHeight = Math.max(1, Math.trunc(options.getHeight()));
-			const lines = renderWorkbenchProjection(projection, width, maxHeight, showTitle);
+			const lines = renderWorkbenchPanels(projection, width, maxHeight);
 			if (options.fillHeight?.()) {
 				while (lines.length < maxHeight) lines.push(railLine("", Math.max(4, Math.trunc(width))));
 			}
@@ -183,4 +199,19 @@ export function createWorkbenchComponent(options: WorkbenchComponentOptions): Wo
 			// Stateless renderer: nothing to invalidate.
 		},
 	};
+}
+
+/** Pane title strip component with live focus + transcript-posture state. */
+export class WorkbenchTitleComponent implements Component {
+	private readonly getState: () => WorkbenchTitleState;
+
+	constructor(getState: () => WorkbenchTitleState) {
+		this.getState = getState;
+	}
+
+	invalidate(): void {}
+
+	render(width: number): string[] {
+		return renderWorkbenchTitle(width, this.getState());
+	}
 }
