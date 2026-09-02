@@ -6,27 +6,27 @@
 <title>Aira Workbench UI Mockup</title>
 <style>
 :root{
-  --bg:#171717;
-  --panel:#202020;
-  --panel2:#262626;
-  --border:#363432;
-  --border2:#2E2C29;
-  --text:#E8E6E3;
-  --muted:#716E6A;
-  --secondary:#AAA6A1;
-  --accent:#D69E72;
+  --bg:#181512;
+  --panel:#211E1B;
+  --panel2:#26221F;
+  --border:#66574F;
+  --border2:#463E37;
+  --text:#E7E1D9;
+  --muted:#8F8C89;
+  --secondary:#B9B3AB;
+  --accent:#D89A72;
   --accent2:#E0AC82;
-  --cyan:#78B8B3;
-  --green:#8DB58B;
-  --yellow:#D3B37E;
-  --red:#D47F7F;
-  --purple:#AA99CF;
-  --blue:#7FA6D8;
-  --code:#D4D1CC;
+  --cyan:#A9BBD3;
+  --green:#82B792;
+  --yellow:#D6AA6C;
+  --red:#D77C78;
+  --purple:#A99BB5;
+  --blue:#7895BC;
+  --code:#D8D2C9;
 }
 *{box-sizing:border-box}
 html,body{
-  height:100%;margin:0;background:#0d0f11;color:var(--text);
+  height:100%;margin:0;background:#14120F;color:var(--text);
   font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono",monospace;
 }
 body{overflow:hidden}
@@ -173,10 +173,10 @@ button{font:inherit}
 .del{background:rgba(255,102,115,.08);color:#f0a0a9}
 .diag{
   padding:7px 8px;
-  border:1px solid #363432;
-  background:#202020;
+  border:1px solid #66574F;
+  background:#211E1B;
   border-radius:6px;
-  color:#D47F7F;
+  color:#D77C78;
   margin-top:6px;
 }
 .input{
@@ -190,7 +190,7 @@ button{font:inherit}
 .cursor{
   width:7px;
   height:14px;
-  background:#e8eaed;
+  background:#E7E1D9;
   animation:blink 1s step-end infinite;
 }
 @keyframes blink{50%{opacity:0}}
@@ -202,22 +202,22 @@ button{font:inherit}
   gap:10px;
   padding:0 10px;
   border-top:1px solid var(--line);
-  background:#101215;
+  background:var(--bg);
   font-size:11px;
   white-space:nowrap;
 }
 .mode{color:var(--green);font-weight:800}
-.sep{color:#555c64}
+.sep{color:#6B6660}
 .footer .grow{flex:1;text-align:center}
 .finding{
-  color:#f3b9bf;
+  color:#D77C78;
   max-width:420px;
   overflow:hidden;
   text-overflow:ellipsis;
 }
 .badge{
-  border:1px solid #363432;
-  background:#202020;
+  border:1px solid #66574F;
+  background:#211E1B;
   border-radius:5px;
   padding:2px 6px;
 }

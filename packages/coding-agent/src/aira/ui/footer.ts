@@ -362,7 +362,9 @@ function modelSegment(model: string, thinking: string | undefined): WorkbenchFoo
 		id: "model",
 		text: thinking ? `${model} · ${thinking}` : model,
 		compact: model,
-		role: "purple",
+		// Restrained informational role (secondary blue): the model name is
+		// metadata, not permission/control state (which stays purple).
+		role: "blue",
 		dropRank: DROP.model,
 		required: true,
 	};

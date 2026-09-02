@@ -200,8 +200,10 @@ function segmentText(segment: WorkbenchFooterSegment): string {
 
 function styleStatusRail(line: string, width: number): string {
 	const clipped = truncateToWidth(line, width, "");
-	const padded = `${clipped}${" ".repeat(Math.max(0, width - visibleWidth(clipped)))}`;
-	return theme.bg("customMessageBg", padded);
+	// The status rail sits directly on the terminal background (no imposed
+	// fill): structure comes from the segment colors and dim separators, not
+	// from a painted strip. Padding keeps every emitted row width-stable.
+	return `${clipped}${" ".repeat(Math.max(0, width - visibleWidth(clipped)))}`;
 }
 
 /** Compose footer segments into one line with left/right balancing. */

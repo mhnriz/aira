@@ -974,3 +974,33 @@ regular mode is a compatibility fallback. Viewport state is interactive-only
 remains token-free. Existing keyboard contracts are preserved: `Ctrl+A`
 stays editor line-start, `Ctrl+O` stays tool expansion, `Ctrl+Shift+O` stays
 the Workbench toggle, and `Alt+O` is the new pane-focus cycle.
+
+## ADR-038 — Aira owns foreground semantics; the terminal owns the canvas
+
+**Status:** accepted · Phase 12.2
+
+**Context.** The Aira shell inherited Pi-era fills for the composer input
+lane and the footer status rail (painted gray strips). On arbitrary dark
+terminal backgrounds those strips read as leftover Pi chrome and broke the
+composition: the Workbench imposed one fixed gray band instead of blending
+with the user's terminal.
+
+**Decision.** `aira-zhr` becomes a background-independent warm-neutral
+semantic palette (`#D89A72` copper, `#7895BC` muted blue, `#A9BBD3` soft
+blue, `#E7E1D9` warm ivory, `#8F8C89` taupe, `#82B792` success, `#D6AA6C`
+warning, `#D77C78` error, `#66574F` border; focused border is copper).
+Aira never paints the main Workbench chrome background: the composer lane and
+footer rail inherit the terminal background, and structure comes from
+borders, separators, and semantic foreground colors. The composer frame is
+copper while focused and muted-subtle otherwise; the footer keeps its
+priority-segment hierarchy (copper mode, blue info/model, warning/error
+traffic lights, taupe metadata). Rendering stays inside the existing theme
+abstraction — components consume semantic roles, never literal colors — and
+explicitly configured or third-party themes still win untouched (they keep
+their own fills and colors).
+
+**Consequences.** The chrome reads as typography on the terminal on any dark
+background (true black, charcoal, warm-dark, blue-black). Semantic roles keep
+working for third-party themes with their classic fallbacks; only the
+built-in default changed. HTML export keeps explicit page/card/info
+backgrounds because exported HTML has no terminal behind it.

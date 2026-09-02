@@ -171,18 +171,41 @@ Every theme must define all 51 required color tokens. The optional tokens preser
 
 ### Aira semantic roles (8 optional; Phase 12)
 
-Aira ships `aira-zhr` as its default dark theme (built-in; the default light theme stays `light`). Unset/detected dark terminals resolve to `aira-zhr`; an explicitly configured theme always wins. The semantic roles color ONLY meaning: healthy state, failure, waiting, permission metadata, active agents, language intelligence, and Aira identity — the Workbench is otherwise neutral.
+Aira ships `aira-zhr` as its default dark theme (built-in; the default light theme stays `light`). Unset/detected dark terminals resolve to `aira-zhr`; an explicitly configured theme always wins.
+
+The roles color ONLY meaning: healthy state, failure, waiting, permission metadata, active agents, language intelligence, and Aira identity — the Workbench is otherwise neutral. Explicitly configured/third-party themes keep their own colors for every surface; the roles only provide Aira-native fallbacks.
+
+**Composer and footer sit directly on the terminal background.** Aira owns the *foreground* semantics (texts, borders, separators, status colors); the *terminal owns the canvas*. Neither the composer input lane nor the footer status rail paints a background fill — on a true-black, charcoal, warm-dark, or blue-black terminal the chrome blends with whatever background is there, and structure comes from borders, separators, and semantic colors, not opaque rectangles.
 
 | Token | Aira meaning | Fallback when absent |
 |-------|--------------|----------------------|
-| `copper` | Aira identity / active mode / primary focus | `accent` |
+| `copper` | Aira identity / active mode / primary focus (also the focused composer border) | `accent` |
 | `copperBright` | Focused border / active selection | `copper` then `borderAccent` |
-| `blue` | Language intelligence / navigation | `mdLink` then `accent` |
+| `blue` | Language intelligence / navigation / model metadata | `mdLink` then `accent` |
 | `cyan` | Active agents / runtime informational | `borderAccent` then `accent` |
 | `green` | Healthy / completed / pass | `success` |
 | `yellow` | Waiting / warning / idle / blocked | `warning` |
 | `red` | Failure / blocking finding / denied | `error` |
-| `purple` | Model / thinking / permission metadata | `customMessageLabel` then `muted` |
+| `purple` | Permission/control metadata | `customMessageLabel` then `muted` |
+
+### `aira-zhr` palette
+
+The default theme is a background-independent warm-neutral semantic palette (copper accents, muted blue info, warm ivory text, taupe muted). It deliberately stays readable on any dark terminal background:
+
+| Semantic | Value | Used for |
+|----------|-------|----------|
+| copper | `#D89A72` | Aira identity, active mode, focused composer border, inline code |
+| muted blue | `#7895BC` | LSP/info, links, model name, types |
+| soft blue | `#A9BBD3` | active agents, secondary active information |
+| warm ivory | `#E7E1D9` | ordinary foreground text |
+| taupe | `#8F8C89` | secondary/inactive metadata, comments, separators' text |
+| success | `#82B792` | healthy/completed/pass, added diffs |
+| warning | `#D6AA6C` | waiting/warning, headings, numbers |
+| error | `#D77C78` | failure/denied, removed diffs, failures |
+| border | `#66574F` | normal borders, separators, code-block fences |
+| focused border | copper | active selection and focused chrome |
+
+Copper stays an accent: it marks identity and the single focused element, while muted blue carries the informational layer.
 
 ### Core UI (11 colors)
 

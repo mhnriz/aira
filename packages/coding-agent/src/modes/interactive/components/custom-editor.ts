@@ -30,18 +30,26 @@ export class CustomEditor extends Editor {
 		this.keybindings = keybindings;
 	}
 
+	/**
+	 * Composer frame edge: copper while the composer is the focused input,
+	 * subtle otherwise. The frame shape is fixed; only the semantic color of
+	 * the edge follows focus (copper accent → focused, muted border → idle).
+	 */
+	private frameEdge(text: string): string {
+		return this.focused ? theme.fg("copper", text) : theme.fg("borderMuted", text);
+	}
+
 	private frameRule(width: number, side: "top" | "bottom", detail: string): string {
 		const left = side === "top" ? "╭─ " : "╰─ ";
 		const right = side === "top" ? "╮" : "╯";
 		const label = side === "top" ? theme.bold(theme.fg("copper", "COMPOSE")) : theme.fg("muted", detail);
 		const reserved = visibleWidth(left) + visibleWidth(label) + 1 + visibleWidth(right);
 		if (reserved >= width) {
-			return theme.fg(
-				"borderAccent",
-				`${side === "top" ? "╭" : "╰"}${"─".repeat(Math.max(0, width - 2))}${side === "top" ? "╮" : "╯"}`,
+			return this.frameEdge(
+				`${side === "top" ? "╭" : "╰"}${"-".repeat(Math.max(0, width - 2))}${side === "top" ? "╮" : "╯"}`,
 			);
 		}
-		return `${theme.fg("borderAccent", left)}${label}${theme.fg("borderAccent", ` ${"─".repeat(width - reserved)}${right}`)}`;
+		return `${this.frameEdge(left)}${label}${this.frameEdge(` ${"-".repeat(width - reserved)}${right}`)}`;
 	}
 
 	private isEditorBorder(line: string): boolean {
@@ -72,10 +80,11 @@ export class CustomEditor extends Editor {
 		for (let index = 1; index < base.length; index += 1) {
 			if (index === bottomBorder) continue;
 			const clipped = truncateToWidth(base[index]!, innerWidth, theme.fg("dim", "…"));
+			// The composer sits directly on the terminal background: the text
+			// row carries no fill, only the frame edge. Padding keeps the row
+			// width-stable so the frame shape and cursor stay put.
 			const padded = `${clipped}${" ".repeat(Math.max(0, innerWidth - visibleWidth(clipped)))}`;
-			lines.push(
-				`${theme.fg("borderAccent", "│")}${theme.bg("userMessageBg", padded)}${theme.fg("borderAccent", "│")}`,
-			);
+			lines.push(`${this.frameEdge("│")}${padded}${this.frameEdge("│")}`);
 		}
 		lines.push(this.frameRule(safeWidth, "bottom", detail));
 		return lines;
