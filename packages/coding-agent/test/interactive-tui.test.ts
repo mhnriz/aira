@@ -1,8 +1,9 @@
-import type { Component, Terminal, TUI } from "@earendil-works/pi-tui";
+import type { Component, ScrollView, Terminal, TUI, ViewportTUI } from "@earendil-works/pi-tui";
 import { Container, isViewportTUI, Text } from "@earendil-works/pi-tui";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { VirtualTerminal } from "../../tui/test/virtual-terminal.ts";
 import type { FullscreenExitOutput, TuiMode } from "../src/core/settings-manager.ts";
+import type { ViewportFocus } from "../src/modes/interactive/components/aira-shell.ts";
 import {
 	createInteractiveTui,
 	createInteractiveTuiReference,
@@ -259,5 +260,89 @@ describe("clear-on-shrink status spacing", () => {
 			expect(dispose).toHaveBeenCalledOnce();
 			expect(context.statusContainer.children).toHaveLength(expectedChildren);
 		}
+	});
+});
+
+type ViewportFocusContext = {
+	viewportFocus: ViewportFocus;
+	workbench: {
+		isVisibleNow: () => boolean;
+		scrollView: ScrollView;
+	};
+	renderer: ReturnType<typeof createInteractiveTui>;
+	ui: TUI;
+	rebuildWorkbenchLayout: () => void;
+};
+
+type ViewportFocusPrototype = {
+	workbenchFocused(this: ViewportFocusContext): boolean;
+	conversationFocused(this: ViewportFocusContext): boolean;
+	cycleViewportFocus(this: ViewportFocusContext): void;
+	onWorkbenchLayoutChanged(this: ViewportFocusContext): void;
+};
+
+const viewportFocusPrototype = InteractiveMode.prototype as unknown as ViewportFocusPrototype;
+
+describe("InteractiveMode viewport focus (Phase 12.1)", () => {
+	it("points keyboard navigation at the focused pane and back", () => {
+		const terminal = new RecordingTerminal();
+		const renderer = createInteractiveTui({
+			tuiMode: "fullscreen",
+			showHardwareCursor: false,
+			logDirectory: "/tmp",
+			terminal,
+		});
+		const setKeyboardScrollTarget = vi.spyOn(renderer as ViewportTUI, "setKeyboardScrollTarget");
+		const scrollView = { scrollBy: () => 0 } as unknown as ScrollView;
+		const context = Object.assign(Object.create(InteractiveMode.prototype) as ViewportFocusContext, {
+			viewportFocus: "conversation",
+			workbench: { isVisibleNow: () => true, scrollView },
+			renderer,
+			ui: createInteractiveTuiReference(() => renderer),
+			rebuildWorkbenchLayout: () => {},
+		});
+
+		// Conversation is focused by default: keyboard navigation stays on the primary.
+		expect(viewportFocusPrototype.workbenchFocused.call(context)).toBe(false);
+		expect(viewportFocusPrototype.conversationFocused.call(context)).toBe(true);
+
+		// Cycling focus points the renderer's keyboard target at the Workbench.
+		viewportFocusPrototype.cycleViewportFocus.call(context);
+		expect(context.viewportFocus).toBe("workbench");
+		expect(viewportFocusPrototype.workbenchFocused.call(context)).toBe(true);
+		expect(setKeyboardScrollTarget).toHaveBeenLastCalledWith(scrollView);
+
+		// Cycling again releases it back to the conversation.
+		viewportFocusPrototype.cycleViewportFocus.call(context);
+		expect(context.viewportFocus).toBe("conversation");
+		expect(setKeyboardScrollTarget).toHaveBeenLastCalledWith(undefined);
+	});
+
+	it("cannot focus a hidden Workbench and resets focus when it auto-hides", () => {
+		const terminal = new RecordingTerminal();
+		const renderer = createInteractiveTui({
+			tuiMode: "fullscreen",
+			showHardwareCursor: false,
+			logDirectory: "/tmp",
+			terminal,
+		});
+		const setKeyboardScrollTarget = vi.spyOn(renderer as ViewportTUI, "setKeyboardScrollTarget");
+		const scrollView = { scrollBy: () => 0 } as unknown as ScrollView;
+		const visible = false;
+		const context = Object.assign(Object.create(InteractiveMode.prototype) as ViewportFocusContext, {
+			viewportFocus: "workbench",
+			workbench: { isVisibleNow: () => visible, scrollView },
+			renderer,
+			ui: createInteractiveTuiReference(() => renderer),
+			rebuildWorkbenchLayout: () => {},
+		});
+
+		// A hidden Workbench cannot be the focus target even if viewportFocus says so.
+		expect(viewportFocusPrototype.workbenchFocused.call(context)).toBe(false);
+
+		// A hidden focused Workbench releases keyboard focus to the conversation.
+		viewportFocusPrototype.onWorkbenchLayoutChanged.call(context);
+		expect(context.viewportFocus).toBe("conversation");
+		expect(setKeyboardScrollTarget).toHaveBeenLastCalledWith(undefined);
 	});
 });

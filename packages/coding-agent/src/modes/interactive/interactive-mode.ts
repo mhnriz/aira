@@ -945,8 +945,15 @@ export class InteractiveMode {
 		}
 	}
 
-	/** Layout changed (workbench visibility/settings): rebuild + keep focus valid. */
+	/**
+	 * Layout changed (workbench visibility/settings): rebuild + keep focus
+	 * valid. A hidden Workbench pane releases keyboard focus to the
+	 * conversation so restoring it cannot trap viewport navigation.
+	 */
 	private onWorkbenchLayoutChanged(): void {
+		if (this.viewportFocus === "workbench" && !this.workbench?.isVisibleNow()) {
+			this.viewportFocus = "conversation";
+		}
 		this.rebuildWorkbenchLayout();
 		this.syncViewportFocus();
 	}
