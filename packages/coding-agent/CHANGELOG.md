@@ -74,6 +74,10 @@
 
 - Added native Aira BUILD / PLAN / REVIEW modes with a `Shift+Tab` cycle (BUILD → PLAN → REVIEW → BUILD), unnamespaced `/mode` and `/doctor` commands, and an always-visible mode indicator in the footer. PLAN is enforced read-only at the host/tool-policy boundary: the mutating built-in tools (`bash`, `powershell`, `edit`, `write`) are blocked and hidden, and the user `!bash` escape hatch is refused, while reading/search/inspection tools stay usable. The default thinking-cycle shortcut moved from `Shift+Tab` to `Ctrl+Shift+E`; existing user keybindings are preserved. `/status` now reflects the native mode.
 
+### Changed
+
+- **Aira**: Versioning policy — Aira's own product version (`AIRA_VERSION`, currently 0.1.0) tracks updates; the Pi base version stays internal for syncing Aira's backend with upstream Pi bug/security fixes. The interactive startup update notice checks Aira's GitHub releases against `AIRA_VERSION` instead of the upstream pi.dev marker, so it no longer reports unrelated upstream Pi versions (e.g. "new version 0.84.4 is available" when the installed Aira build is already current). The notice links to the Aira release page and drops the stale "Run `aira update`" npm instruction.
+
 ### Fixed
 
 - Fixed a fresh-context timeout race in both the Phase 8 verifier and the Phase 9 child runner: `raceWithTimeout` never observed the timeout promise's rejection, so a hanging provider response never settled the run (the manager kept waiting instead of reporting `timed out` after the configured bound). The race now settles on the first of result/error/abort/timeout.

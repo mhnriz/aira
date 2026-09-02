@@ -70,6 +70,7 @@ import {
 	nextAiraMode,
 	parseAiraModeArg,
 } from "../../aira/index.ts";
+import { AIRA_VERSION } from "../../aira/meta.ts";
 import {
 	APP_NAME,
 	APP_TITLE,
@@ -135,7 +136,7 @@ import { getPiUserAgent } from "../../utils/pi-user-agent.ts";
 import { killTrackedDetachedChildren } from "../../utils/shell.ts";
 import { loadAllHighlightLanguages } from "../../utils/syntax-highlight.ts";
 import { ensureTool, type ToolStatus } from "../../utils/tools-manager.ts";
-import { checkForNewPiVersion, type LatestPiRelease } from "../../utils/version-check.ts";
+import { checkForNewAiraVersion, type LatestPiRelease } from "../../utils/version-check.ts";
 import { AiraHeaderComponent, AiraNoticeComponent } from "./components/aira-shell.ts";
 import { ArminComponent } from "./components/armin.ts";
 import { AssistantMessageComponent } from "./components/assistant-message.ts";
@@ -1164,8 +1165,10 @@ export class InteractiveMode {
 				.finally(() => clearTimeout(timeout));
 		}
 
-		// Start version check asynchronously
-		checkForNewPiVersion(this.version).then((newRelease) => {
+		// Start version check asynchronously. Aira tracks its own product version
+		// (AIRA_VERSION) against its GitHub releases; the pi base version is only
+		// used to sync Aira's backend with upstream pi bug/security fixes.
+		checkForNewAiraVersion(AIRA_VERSION).then((newRelease) => {
 			if (newRelease) {
 				this.showNewVersionNotification(newRelease);
 			}
@@ -5070,18 +5073,14 @@ export class InteractiveMode {
 	}
 
 	showNewVersionNotification(release: LatestPiRelease): void {
-		const action = theme.fg("accent", `${APP_NAME} update`);
-		const updateInstruction = theme.fg("muted", `New version ${release.version} is available. Run `) + action;
-		const changelogUrl = "https://pi.dev/changelog";
-		const changelogLink = getCapabilities().hyperlinks
-			? hyperlink(theme.fg("accent", changelogUrl), changelogUrl)
-			: theme.fg("accent", changelogUrl);
-		const changelogLine = theme.fg("muted", "Changelog: ") + changelogLink;
+		const releaseUrl = release.url ?? "https://pi.dev/changelog";
+		const releaseLink = getCapabilities().hyperlinks
+			? hyperlink(theme.fg("accent", releaseUrl), releaseUrl)
+			: theme.fg("accent", releaseUrl);
+		const changelogLine = theme.fg("muted", `New version ${release.version} is available · `) + releaseLink;
 		const note = release.note?.trim().replace(/\s+/g, " ");
 		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(
-			new AiraNoticeComponent(`${updateInstruction}${note ? ` · ${note}` : ""} · ${changelogLine}`, "update"),
-		);
+		this.chatContainer.addChild(new AiraNoticeComponent(`${changelogLine}${note ? ` · ${note}` : ""}`, "update"));
 		this.ui.requestRender();
 	}
 
