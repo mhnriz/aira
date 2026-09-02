@@ -4,10 +4,12 @@ import { constants } from "fs";
 import { access as fsAccess, readFile as fsReadFile, writeFile as fsWriteFile } from "fs/promises";
 import { type Static, Type } from "typebox";
 import { renderDiff } from "../../modes/interactive/components/diff.ts";
+import { keyHint } from "../../modes/interactive/components/keybinding-hints.ts";
 import type { Theme } from "../../modes/interactive/theme/theme.ts";
 import { splitBom } from "../../utils/text.ts";
 import { getExperimentalToolSampling } from "../experimental.ts";
 import type { ToolDefinition } from "../extensions/types.ts";
+import { buildCompactRow, type CompactStatus, diffDelta, formatDiffDeltaParts } from "./compact.ts";
 import {
 	applyEditsToNormalizedContent,
 	computeEditsDiff,
@@ -226,6 +228,17 @@ function formatEditCall(args: RenderableEditArgs | undefined, theme: Theme, cwd:
 	return `${theme.fg("toolTitle", theme.bold("edit"))} ${pathDisplay}`;
 }
 
+/** Compact edit row (path only; the diff is hidden until expanded). */
+function formatCompactEditRow(
+	status: CompactStatus,
+	args: RenderableEditArgs | undefined,
+	theme: Theme,
+	cwd: string,
+): string {
+	const pathDisplay = renderToolPath(str(args?.file_path ?? args?.path), theme, cwd);
+	return buildCompactRow(theme, { status, label: "edit", targetText: pathDisplay });
+}
+
 function formatEditResult(
 	args: RenderableEditArgs | undefined,
 	preview: EditPreview | undefined,
@@ -385,6 +398,8 @@ export function createEditToolDefinition(
 			});
 		},
 		renderCall(args, theme, context) {
+			// The preflight diff machinery also feeds compact rows: preflight
+			// failures surface as an inline error line under the compact row.
 			const component = getEditCallRenderComponent(context.state, context.lastComponent);
 			const previewInput = getRenderablePreviewInput(args as RenderableEditArgs | undefined);
 			const argsKey = previewInput
@@ -409,9 +424,81 @@ export function createEditToolDefinition(
 				});
 			}
 
+			if (!context.expanded) {
+				const text = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
+				if (context.hasResult) {
+					// Compact: the result renderer owns the row once a result exists.
+					text.setText("");
+					return text;
+				}
+				const lines = [
+					formatCompactEditRow(
+						context.isError ? "error" : context.isPartial ? "running" : "success",
+						args as RenderableEditArgs | undefined,
+						theme,
+						context.cwd,
+					),
+				];
+				if (component.preview && "error" in component.preview) {
+					lines.push(theme.fg("error", component.preview.error));
+				}
+				text.setText(lines.join("\n"));
+				return text;
+			}
 			return buildEditCallComponent(component, args, theme, context.cwd);
 		},
-		renderResult(result, _options, theme, context) {
+		renderResult(result, options, theme, context) {
+			if (!context.expanded) {
+				const text = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
+				const rawPath = str(
+					(context.args as RenderableEditArgs | undefined)?.file_path ??
+						(context.args as RenderableEditArgs | undefined)?.path,
+				);
+				if (context.isError) {
+					const errorText = result.content
+						.filter((c) => c.type === "text")
+						.map((c) => c.text || "")
+						.join("\n");
+					const errorLines = errorText.split("\n").map((line) => line.trimEnd());
+					while (errorLines.length > 0 && errorLines[errorLines.length - 1] === "") {
+						errorLines.pop();
+					}
+					const tail = errorLines.slice(-6);
+					const lines = [
+						buildCompactRow(theme, {
+							status: "error",
+							label: "edit",
+							targetText: renderToolPath(rawPath, theme, context.cwd),
+						}),
+					];
+					if (errorLines.length > tail.length) {
+						lines.push(
+							theme.fg("muted", `... (${errorLines.length - tail.length} earlier lines,`) +
+								` ${keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`,
+						);
+					}
+					for (const line of tail) {
+						lines.push(theme.fg("error", line));
+					}
+					text.setText(lines.join("\n"));
+					return text;
+				}
+				const status: CompactStatus = options.isPartial ? "running" : "success";
+				const excerpt: string[] = [];
+				const resultDiff = (result as EditToolResultLike).details?.diff;
+				if (typeof resultDiff === "string") {
+					excerpt.push(...formatDiffDeltaParts(theme, diffDelta(resultDiff)));
+				}
+				text.setText(
+					buildCompactRow(theme, {
+						status,
+						label: "edit",
+						targetText: renderToolPath(rawPath, theme, context.cwd),
+						excerpt,
+					}),
+				);
+				return text;
+			}
 			const callComponent = context.state.callComponent;
 			const previewInput = getRenderablePreviewInput(context.args as RenderableEditArgs | undefined);
 			const argsKey = previewInput

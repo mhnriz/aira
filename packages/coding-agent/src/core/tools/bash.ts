@@ -6,7 +6,7 @@ import { spawn } from "child_process";
 import { type Static, Type } from "typebox";
 import { keyHint } from "../../modes/interactive/components/keybinding-hints.ts";
 import { truncateToVisualLines } from "../../modes/interactive/components/visual-truncate.ts";
-import { theme } from "../../modes/interactive/theme/theme.ts";
+import { type Theme, theme } from "../../modes/interactive/theme/theme.ts";
 import { waitForChildProcess } from "../../utils/child-process.ts";
 import {
 	getShellConfig,
@@ -17,7 +17,19 @@ import {
 	untrackDetachedChildPid,
 } from "../../utils/shell.ts";
 import { getExperimentalToolSampling } from "../experimental.ts";
-import type { ExtensionContext, ToolDefinition, ToolRenderResultOptions } from "../extensions/types.ts";
+import type {
+	ExtensionContext,
+	ToolDefinition,
+	ToolRenderContext,
+	ToolRenderResultOptions,
+} from "../extensions/types.ts";
+import {
+	buildCompactRow,
+	classifyShellCommand,
+	formatCompactDuration,
+	summarizeBashError,
+	summarizeTestOutput,
+} from "./compact.ts";
 import { OutputAccumulator } from "./output-accumulator.ts";
 import { getTextOutput, invalidArgText, str } from "./render-utils.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
@@ -241,6 +253,97 @@ function formatShellCall(args: { command?: string; timeout?: number } | undefine
 	const timeoutSuffix = timeout ? theme.fg("muted", ` (timeout ${timeout}s)`) : "";
 	const commandDisplay = command === null ? invalidArgText(theme) : command ? command : theme.fg("toolOutput", "...");
 	return theme.fg("toolTitle", theme.bold(`${prompt} ${commandDisplay}`)) + timeoutSuffix;
+}
+
+/** Compact shell display target (purpose-aware label is chosen by classifyShellCommand). */
+function shellCompactTarget(command: string | null | undefined): string {
+	const info = classifyShellCommand(command ?? "");
+	if (info.kind === "test" && info.target) return info.target;
+	return info.display || "…";
+}
+
+function shellCompactLabel(command: string | null | undefined): string {
+	return classifyShellCommand(command ?? "").kind;
+}
+
+/**
+ * Compact shell result row: status glyph, purpose label, command target,
+ * bounded excerpt (test counts, duration, failure headline) and, for
+ * failures, a bounded relevant error tail. Routine stdout is not dumped.
+ */
+function buildCompactShellResult(
+	result: {
+		content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
+		details?: BashToolDetails;
+	},
+	options: ToolRenderResultOptions,
+	theme: Theme,
+	context: ToolRenderContext<BashRenderState, BashToolInput>,
+	state: BashRenderState,
+): string {
+	const command = str(context.args?.command);
+	const label = shellCompactLabel(command);
+	const target = shellCompactTarget(context.args?.command);
+	const output = getTextOutput(result as any, context.showImages).trim();
+	const elapsed = state.startedAt !== undefined ? (state.endedAt ?? Date.now()) - state.startedAt : undefined;
+	const duration = elapsed !== undefined ? formatCompactDuration(elapsed) : undefined;
+
+	if (options.isPartial) {
+		// Running: in-place compact row (later updates replace it).
+		const excerpt: string[] = [theme.fg("muted", "running")];
+		if (duration) excerpt.push(theme.fg("muted", duration));
+		return buildCompactRow(theme, { status: "running", label, targetText: target, excerpt });
+	}
+
+	if (context.isError) {
+		const { headline, tail, skipped } = summarizeBashError(output);
+		const counts = label === "test" ? summarizeTestOutput(output) : undefined;
+		const excerpt: string[] = [];
+		if (counts) {
+			excerpt.push(theme.fg("error", counts.text));
+		} else {
+			excerpt.push(theme.fg("error", headline));
+		}
+		if (duration) excerpt.push(theme.fg("muted", duration));
+		const lines = [buildCompactRow(theme, { status: "error", label, targetText: target, excerpt })];
+		if (skipped > 0) {
+			lines.push(
+				theme.fg("muted", `... (${skipped} earlier lines,`) +
+					` ${keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`,
+			);
+		}
+		for (const tailLine of tail) {
+			lines.push(theme.fg("error", tailLine));
+		}
+		return lines.join("\n");
+	}
+
+	const excerpt: string[] = [];
+	if (label === "test") {
+		const counts = summarizeTestOutput(output);
+		if (counts) {
+			excerpt.push(counts.failed > 0 ? theme.fg("error", counts.text) : theme.fg("muted", counts.text));
+		}
+	}
+	if (duration) excerpt.push(theme.fg("muted", duration));
+	const lines = [buildCompactRow(theme, { status: "success", label, targetText: target, excerpt })];
+	const truncation = result.details?.truncation;
+	const fullPath = result.details?.fullOutputPath;
+	if (truncation?.truncated || fullPath) {
+		const warnings: string[] = [];
+		if (fullPath) warnings.push("full output saved");
+		if (truncation?.truncated) {
+			if (truncation.truncatedBy === "lines") {
+				warnings.push(`showing ${truncation.outputLines} of ${truncation.totalLines} lines`);
+			} else {
+				warnings.push(
+					`${truncation.outputLines} lines shown (${formatSize(truncation.maxBytes ?? DEFAULT_MAX_BYTES)} limit)`,
+				);
+			}
+		}
+		lines.push(theme.fg("warning", `[truncated: ${warnings.join(". ")}]`));
+	}
+	return lines.join("\n");
 }
 
 function rebuildBashResultRenderComponent(
@@ -478,17 +581,34 @@ export function createShellToolDefinition(
 				clearUpdateTimer();
 			}
 		},
-		renderCall(args, _theme, context) {
+		renderCall(args, theme, context) {
 			const state = context.state;
 			if (context.executionStarted && state.startedAt === undefined) {
 				state.startedAt = Date.now();
 				state.endedAt = undefined;
 			}
 			const text = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
+			if (!context.expanded) {
+				// In compact mode the result renderer owns the row once a result
+				// exists; until then a pending row renders here.
+				if (context.hasResult) {
+					text.setText("");
+					return text;
+				}
+				const command = str((args as { command?: string } | undefined)?.command);
+				text.setText(
+					buildCompactRow(theme, {
+						status: context.isError ? "error" : context.isPartial ? "running" : "success",
+						label: shellCompactLabel(command),
+						targetText: shellCompactTarget(command),
+					}),
+				);
+				return text;
+			}
 			text.setText(formatShellCall(args, config.prompt));
 			return text;
 		},
-		renderResult(result, options, _theme, context) {
+		renderResult(result, options, theme, context) {
 			const state = context.state;
 			if (state.startedAt !== undefined && options.isPartial && !state.interval) {
 				state.interval = setInterval(() => context.invalidate(), 1000);
@@ -499,6 +619,11 @@ export function createShellToolDefinition(
 					clearInterval(state.interval);
 					state.interval = undefined;
 				}
+			}
+			if (!options.expanded) {
+				const text = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
+				text.setText(buildCompactShellResult(result as any, options, theme, context, state));
+				return text;
 			}
 			const component =
 				(context.lastComponent as BashResultRenderComponent | undefined) ?? new BashResultRenderComponent();

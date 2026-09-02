@@ -1,5 +1,6 @@
 import { Box, type Component, Container, getCapabilities, Image, Spacer, Text, type TUI } from "@earendil-works/pi-tui";
 import type { ToolDefinition, ToolRenderContext } from "../../../core/extensions/types.ts";
+import { buildCompactRow, type CompactStatus } from "../../../core/tools/compact.ts";
 import { createAllToolDefinitions, type ToolName } from "../../../core/tools/index.ts";
 import { getTextOutput as getRenderedTextOutput } from "../../../core/tools/render-utils.ts";
 import { convertToPng } from "../../../utils/image-convert.ts";
@@ -12,6 +13,15 @@ export interface ToolExecutionOptions {
 	showImages?: boolean;
 	imageWidthCells?: number;
 }
+
+export type ToolExecutionStatus = "pending" | "running" | "success" | "error";
+
+const COMPACT_STATUS: Record<ToolExecutionStatus, CompactStatus> = {
+	pending: "running",
+	running: "running",
+	success: "success",
+	error: "error",
+};
 
 export class ToolExecutionComponent extends Container {
 	private contentBox: Box;
@@ -42,6 +52,7 @@ export class ToolExecutionComponent extends Container {
 	};
 	private convertedImages: Map<number, { data: string; mimeType: string }> = new Map();
 	private hideComponent = false;
+	private onError: (() => void) | undefined;
 
 	constructor(
 		toolName: string,
@@ -126,6 +137,13 @@ export class ToolExecutionComponent extends Container {
 			cwd: this.cwd,
 			executionStarted: this.executionStarted,
 			argsComplete: this.argsComplete,
+			// In compact mode the call slot is blanked (the row is owned by the
+			// result renderer) for built-in renderers — i.e. when no definition or
+			// a definition with its own renderCall is active. Definitions that
+			// only supply a custom renderResult keep the stacked call+result model.
+			hasResult:
+				this.result !== undefined &&
+				(this.toolDefinition === undefined || this.toolDefinition.renderCall !== undefined),
 			isPartial: this.isPartial,
 			expanded: this.expanded,
 			showImages: this.showImages,
@@ -133,8 +151,70 @@ export class ToolExecutionComponent extends Container {
 		};
 	}
 
+	getStatus(): ToolExecutionStatus {
+		if (this.result?.isError) return "error";
+		if (this.result && !this.isPartial) return "success";
+		return this.executionStarted ? "running" : "pending";
+	}
+
+	getToolName(): string {
+		return this.toolName;
+	}
+
+	/** Whether the settled result contains inline images (groups hide images while compact). */
+	hasImageResult(): boolean {
+		return (this.result?.content ?? []).some((content) => content.type === "image");
+	}
+
+	/** Raw display target (path / command / pattern) for grouped sub-lines. */
+	getSummaryTarget(): string {
+		const args = this.args as Record<string, unknown> | undefined;
+		if (!args || typeof args !== "object") return "";
+		const path =
+			typeof args.path === "string" ? args.path : typeof args.file_path === "string" ? args.file_path : undefined;
+		switch (this.toolName) {
+			case "read":
+			case "edit":
+			case "write":
+			case "ls":
+				return path ?? "";
+			case "grep":
+			case "find":
+				return typeof args.pattern === "string" ? args.pattern : "";
+			case "bash":
+			case "powershell":
+				return typeof args.command === "string" ? args.command : "";
+			case "process_start": {
+				if (typeof args.command === "string") return args.command;
+				if (typeof args.exe === "string") {
+					const rest = Array.isArray(args.args) ? (args.args as string[]).join(" ") : "";
+					return rest ? `${args.exe} ${rest}` : args.exe;
+				}
+				return "";
+			}
+			case "process_status":
+			case "process_stop":
+			case "process_logs":
+				return typeof args.id === "string" ? args.id : "";
+			default:
+				return "";
+		}
+	}
+
+	/** Hook invoked when a grouped member settles with an error (group dissolves). */
+	setOnError(callback: (() => void) | undefined): void {
+		this.onError = callback;
+	}
+
 	private createCallFallback(): Component {
-		return new Text(theme.fg("toolTitle", theme.bold(this.toolName)), 0, 0);
+		if (this.expanded) {
+			return new Text(theme.fg("toolTitle", theme.bold(this.toolName)), 0, 0);
+		}
+		return new Text(
+			buildCompactRow(theme, { status: COMPACT_STATUS[this.getStatus()], label: this.toolName, targetText: "" }),
+			0,
+			0,
+		);
 	}
 
 	private createResultFallback(): Component | undefined {
@@ -180,6 +260,9 @@ export class ToolExecutionComponent extends Container {
 	): void {
 		this.result = result;
 		this.isPartial = isPartial;
+		if (result.isError) {
+			this.onError?.();
+		}
 		this.updateDisplay();
 		this.maybeConvertImagesForKitty();
 	}
@@ -259,11 +342,15 @@ export class ToolExecutionComponent extends Container {
 	}
 
 	private updateDisplay(): void {
-		const bgFn = this.isPartial
-			? (text: string) => theme.bg("toolPendingBg", text)
-			: this.result?.isError
-				? (text: string) => theme.bg("toolErrorBg", text)
-				: (text: string) => theme.bg("toolSuccessBg", text);
+		// Compact rows render without the shell background blocks; expanded
+		// output keeps the subtle elevated background treatment.
+		const bgFn = this.expanded
+			? this.isPartial
+				? (text: string) => theme.bg("toolPendingBg", text)
+				: this.result?.isError
+					? (text: string) => theme.bg("toolErrorBg", text)
+					: (text: string) => theme.bg("toolSuccessBg", text)
+			: (text: string) => text;
 
 		let hasContent = false;
 		this.hideComponent = false;
@@ -283,7 +370,13 @@ export class ToolExecutionComponent extends Container {
 					const component = callRenderer(this.args, theme, this.getRenderContext(this.callRendererComponent));
 					this.callRendererComponent = component;
 					renderContainer.addChild(component);
-					hasContent = true;
+					if (!this.expanded && this.result !== undefined) {
+						// In compact mode the call slot is blanked once a result
+						// arrives; the result renderer owns the row.
+						hasContent = component.render(120).length > 0;
+					} else {
+						hasContent = true;
+					}
 				} catch {
 					this.callRendererComponent = undefined;
 					renderContainer.addChild(this.createCallFallback());
@@ -309,7 +402,11 @@ export class ToolExecutionComponent extends Container {
 						);
 						this.resultRendererComponent = component;
 						renderContainer.addChild(component);
-						hasContent = true;
+						if (!this.expanded) {
+							hasContent = component.render(120).length > 0;
+						} else {
+							hasContent = true;
+						}
 					} catch {
 						this.resultRendererComponent = undefined;
 						const component = this.createResultFallback();
@@ -371,6 +468,22 @@ export class ToolExecutionComponent extends Container {
 	}
 
 	private formatToolExecution(): string {
+		if (!this.expanded) {
+			const output = this.getTextOutput();
+			const row = buildCompactRow(theme, {
+				status: COMPACT_STATUS[this.getStatus()],
+				label: this.toolName,
+				targetText: "",
+			});
+			const lines = output ? output.split("\n") : [];
+			const preview = lines.slice(0, FALLBACK_PREVIEW_LINES);
+			if (preview.length === 0) {
+				return row;
+			}
+			const remaining = lines.length - preview.length;
+			return `${row}\n${preview.map((line) => theme.fg("toolOutput", line)).join("\n")}${remaining > 0 ? `\n${theme.fg("muted", `... (${remaining} more lines,`)} ${keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}` : ""}`;
+		}
+
 		let text = theme.fg("toolTitle", theme.bold(this.toolName));
 		const content = JSON.stringify(this.args, null, 2);
 		if (content) {

@@ -13,6 +13,7 @@ import { detectSupportedImageMimeTypeFromFile } from "../../utils/mime.ts";
 import { formatPathRelativeToCwdOrAbsolute } from "../../utils/paths.ts";
 import { getExperimentalToolSampling } from "../experimental.ts";
 import type { ToolDefinition, ToolRenderResultOptions } from "../extensions/types.ts";
+import { buildCompactRow, type CompactStatus, compactStatusGlyph } from "./compact.ts";
 import { resolveReadPathAsync, resolveToCwd } from "./path-utils.ts";
 import { getTextOutput, renderToolPath, replaceTabs, str } from "./render-utils.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
@@ -167,6 +168,48 @@ function formatCompactReadCall(
 	);
 }
 
+/**
+ * Compact read row: status glyph + path (or the existing skill/docs/resource
+ * classification format). The full file content is never shown collapsed.
+ */
+function formatCompactReadRow(
+	status: CompactStatus,
+	args: ReadRenderArgs | undefined,
+	theme: Theme,
+	cwd: string,
+): string {
+	const classification = getCompactReadClassification(args, cwd);
+	const glyph = compactStatusGlyph(status, theme);
+	if (classification) {
+		return `${glyph} ${formatCompactReadCall(classification, args, theme)}`;
+	}
+	const rawPath = str(args?.file_path ?? args?.path);
+	const pathDisplay = renderToolPath(rawPath, theme, cwd);
+	const excerpt: string[] = [];
+	const range = formatReadLineRange(args, theme);
+	if (range) excerpt.push(range);
+	return buildCompactRow(theme, {
+		status,
+		label: "read",
+		targetText: pathDisplay,
+		excerpt,
+	});
+}
+
+function formatReadTruncationNotice(truncation: TruncationResult): string[] {
+	if (truncation.firstLineExceedsLimit) {
+		return [`[First line exceeds ${formatSize(truncation.maxBytes ?? DEFAULT_MAX_BYTES)} limit]`];
+	}
+	if (truncation.truncatedBy === "lines") {
+		return [
+			`[Truncated: showing ${truncation.outputLines} of ${truncation.totalLines} lines (${truncation.maxLines ?? DEFAULT_MAX_LINES} line limit)]`,
+		];
+	}
+	return [
+		`[Truncated: ${truncation.outputLines} lines shown (${formatSize(truncation.maxBytes ?? DEFAULT_MAX_BYTES)} limit)]`,
+	];
+}
+
 function formatReadResult(
 	args: ReadRenderArgs | undefined,
 	result: { content: (TextContent | ImageContent)[]; details?: ReadToolDetails },
@@ -195,12 +238,8 @@ function formatReadResult(
 
 	const truncation = result.details?.truncation;
 	if (truncation?.truncated) {
-		if (truncation.firstLineExceedsLimit) {
-			text += `\n${theme.fg("warning", `[First line exceeds ${formatSize(truncation.maxBytes ?? DEFAULT_MAX_BYTES)} limit]`)}`;
-		} else if (truncation.truncatedBy === "lines") {
-			text += `\n${theme.fg("warning", `[Truncated: showing ${truncation.outputLines} of ${truncation.totalLines} lines (${truncation.maxLines ?? DEFAULT_MAX_LINES} line limit)]`)}`;
-		} else {
-			text += `\n${theme.fg("warning", `[Truncated: ${truncation.outputLines} lines shown (${formatSize(truncation.maxBytes ?? DEFAULT_MAX_BYTES)} limit)]`)}`;
+		for (const notice of formatReadTruncationNotice(truncation)) {
+			text += `\n${theme.fg("warning", notice)}`;
 		}
 	}
 	return text;
@@ -335,7 +374,23 @@ export function createReadToolDefinition(
 		},
 		renderCall(args, theme, context) {
 			const text = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
-			const classification = !context.expanded ? getCompactReadClassification(args, context.cwd) : undefined;
+			if (!context.expanded) {
+				// Compact: the result renderer owns the row once a result exists.
+				if (context.hasResult) {
+					text.setText("");
+					return text;
+				}
+				text.setText(
+					formatCompactReadRow(
+						context.isError ? "error" : context.isPartial ? "running" : "success",
+						args as ReadRenderArgs | undefined,
+						theme,
+						context.cwd,
+					),
+				);
+				return text;
+			}
+			const classification = getCompactReadClassification(args, context.cwd);
 			text.setText(
 				classification
 					? formatCompactReadCall(classification, args, theme)
@@ -345,6 +400,38 @@ export function createReadToolDefinition(
 		},
 		renderResult(result, options, theme, context) {
 			const text = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
+			if (!context.expanded) {
+				const status: CompactStatus = context.isError ? "error" : options.isPartial ? "running" : "success";
+				const lines = [
+					formatCompactReadRow(status, context.args as ReadRenderArgs | undefined, theme, context.cwd),
+				];
+				if (context.isError) {
+					const output = getTextOutput(result, context.showImages);
+					const errorLines = output.split("\n").map((line) => line.trimEnd());
+					while (errorLines.length > 0 && errorLines[errorLines.length - 1] === "") {
+						errorLines.pop();
+					}
+					const tail = errorLines.slice(-6);
+					if (errorLines.length > tail.length && tail.length > 0) {
+						lines.push(
+							theme.fg("muted", `... (${errorLines.length - tail.length} earlier lines,`) +
+								` ${keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`,
+						);
+					}
+					for (const line of tail) {
+						lines.push(theme.fg("error", line));
+					}
+				} else if (!options.isPartial) {
+					const truncation = result.details?.truncation;
+					if (truncation?.truncated) {
+						for (const notice of formatReadTruncationNotice(truncation)) {
+							lines.push(theme.fg("warning", notice));
+						}
+					}
+				}
+				text.setText(lines.join("\n"));
+				return text;
+			}
 			text.setText(
 				formatReadResult(context.args, result, options, theme, context.showImages, context.cwd, context.isError),
 			);

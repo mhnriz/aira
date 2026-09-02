@@ -78,6 +78,7 @@ export function createToolHtmlRenderer(deps: ToolHtmlRendererDeps): ToolHtmlRend
 		expanded: boolean,
 		isPartial: boolean,
 		isError: boolean,
+		hasResult: boolean,
 	): ToolRenderContext => {
 		return {
 			args: renderedArgs.get(toolCallId),
@@ -88,6 +89,7 @@ export function createToolHtmlRenderer(deps: ToolHtmlRendererDeps): ToolHtmlRend
 			cwd,
 			executionStarted: true,
 			argsComplete: true,
+			hasResult,
 			isPartial,
 			expanded,
 			showImages: false,
@@ -107,7 +109,9 @@ export function createToolHtmlRenderer(deps: ToolHtmlRendererDeps): ToolHtmlRend
 				const component = toolDef.renderCall(
 					args,
 					theme,
-					createRenderContext(toolCallId, renderedCallComponents.get(toolCallId), false, true, false),
+					// Static export treats the call as settled: the compact row is owned by
+					// the result renderer once a result exists (TUI parity).
+					createRenderContext(toolCallId, renderedCallComponents.get(toolCallId), false, false, false, true),
 				);
 				renderedCallComponents.set(toolCallId, component);
 				const lines = component.render(width);
@@ -144,7 +148,7 @@ export function createToolHtmlRenderer(deps: ToolHtmlRendererDeps): ToolHtmlRend
 					agentToolResult,
 					{ expanded: false, isPartial: false },
 					theme,
-					createRenderContext(toolCallId, renderedResultComponents.get(toolCallId), false, false, isError),
+					createRenderContext(toolCallId, renderedResultComponents.get(toolCallId), false, false, isError, true),
 				);
 				renderedResultComponents.set(toolCallId, collapsedComponent);
 				const collapsed = ansiLinesToHtml(trimRenderedResultLines(collapsedComponent.render(width)));
@@ -154,7 +158,7 @@ export function createToolHtmlRenderer(deps: ToolHtmlRendererDeps): ToolHtmlRend
 					agentToolResult,
 					{ expanded: true, isPartial: false },
 					theme,
-					createRenderContext(toolCallId, renderedResultComponents.get(toolCallId), true, false, isError),
+					createRenderContext(toolCallId, renderedResultComponents.get(toolCallId), true, false, isError, true),
 				);
 				renderedResultComponents.set(toolCallId, expandedComponent);
 				const expanded = ansiLinesToHtml(trimRenderedResultLines(expandedComponent.render(width)));

@@ -435,10 +435,14 @@ export interface ToolRenderContext<TState = any, TArgs = any> {
 	executionStarted: boolean;
 	/** Whether the tool call arguments are complete. */
 	argsComplete: boolean;
+	/** Whether a tool result (partial or final) has arrived. */
+	hasResult: boolean;
 	/** Whether the tool result is partial/streaming. */
 	isPartial: boolean;
 	/** Whether the result view is expanded. */
 	expanded: boolean;
+	/** Whether this tool row is part of a compact tool group. */
+	grouped?: boolean;
 	/** Whether inline images are currently shown in the TUI. */
 	showImages: boolean;
 	/** Whether the current result is an error. */

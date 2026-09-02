@@ -384,6 +384,7 @@ describe("ToolExecutionComponent parity", () => {
 			createFakeTui(),
 			process.cwd(),
 		);
+		component.setExpanded(true);
 		const rendered = stripAnsi(component.render(120).join("\n"));
 		expect(rendered).toContain("one");
 		expect(rendered).toContain("two");
@@ -426,7 +427,9 @@ describe("ToolExecutionComponent parity", () => {
 
 		const rendered = component.render(120).join("\n");
 		expect(stripAnsi(rendered)).toContain(error);
-		expect(rendered).toContain(theme.fg("toolOutput", error));
+		// Compact failure rows render the error tail in the error color, never
+		// syntax-highlighted as code.
+		expect(rendered).toContain(theme.fg("error", error));
 	});
 
 	test("collapses ordinary read results until expanded", () => {

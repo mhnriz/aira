@@ -6,6 +6,7 @@ import { type Static, Type } from "typebox";
 import { keyHint } from "../../modes/interactive/components/keybinding-hints.ts";
 import type { Theme } from "../../modes/interactive/theme/theme.ts";
 import type { ToolDefinition, ToolRenderResultOptions } from "../extensions/types.ts";
+import { buildCompactRow, type CompactStatus, countOutputRows, toolLimitWarnings } from "./compact.ts";
 import { pathExists, resolveToCwd } from "./path-utils.ts";
 import { getTextOutput, renderToolPath, str } from "./render-utils.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
@@ -214,11 +215,63 @@ export function createLsToolDefinition(
 		},
 		renderCall(args, theme, context) {
 			const text = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
+			if (!context.expanded) {
+				// Compact: the result renderer owns the row once a result exists.
+				if (context.hasResult) {
+					text.setText("");
+					return text;
+				}
+				const pathDisplay = renderToolPath(str((args as { path?: string } | undefined)?.path), theme, context.cwd, {
+					emptyFallback: ".",
+				});
+				text.setText(
+					buildCompactRow(theme, {
+						status: context.isError ? "error" : context.isPartial ? "running" : "success",
+						label: "ls",
+						targetText: pathDisplay,
+					}),
+				);
+				return text;
+			}
 			text.setText(formatLsCall(args, theme, context.cwd));
 			return text;
 		},
 		renderResult(result, options, theme, context) {
 			const text = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
+			if (!context.expanded) {
+				const status: CompactStatus = context.isError ? "error" : options.isPartial ? "running" : "success";
+				const pathDisplay = renderToolPath(
+					str((context.args as { path?: string } | undefined)?.path),
+					theme,
+					context.cwd,
+					{ emptyFallback: "." },
+				);
+				if (context.isError) {
+					const errorText = getTextOutput(result as any, context.showImages).trim();
+					const lines = [buildCompactRow(theme, { status, label: "ls", targetText: pathDisplay })];
+					const tail = errorText.split("\n").slice(-6);
+					for (const line of tail) {
+						if (line.trim()) lines.push(theme.fg("error", line));
+					}
+					text.setText(lines.join("\n"));
+					return text;
+				}
+				const excerpt: string[] = [];
+				const output = getTextOutput(result as any, context.showImages).trim();
+				if (output && !options.isPartial) {
+					const count = countOutputRows(output);
+					excerpt.push(theme.fg("muted", `${count} ${count === 1 ? "entry" : "entries"}`));
+				}
+				const lines = [buildCompactRow(theme, { status, label: "ls", targetText: pathDisplay, excerpt })];
+				if (!options.isPartial) {
+					const warnings = toolLimitWarnings(result.details ?? {});
+					if (warnings.length > 0) {
+						lines.push(theme.fg("warning", `[Truncated: ${warnings.join(", ")}]`));
+					}
+				}
+				text.setText(lines.join("\n"));
+				return text;
+			}
 			text.setText(formatLsResult(result as any, options, theme, context.showImages));
 			return text;
 		},

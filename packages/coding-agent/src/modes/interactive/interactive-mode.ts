@@ -182,6 +182,7 @@ import {
 } from "./components/status-indicator.ts";
 import { ThinkingSelectorComponent } from "./components/thinking-selector.ts";
 import { ToolExecutionComponent } from "./components/tool-execution.ts";
+import { forEachToolRow, regroupToolComponent, tryGroupToolComponent } from "./components/tool-execution-group.ts";
 import { TreeSelectorComponent } from "./components/tree-selector.ts";
 import { TrustSelectorComponent } from "./components/trust-selector.ts";
 import { UserMessageComponent } from "./components/user-message.ts";
@@ -3645,7 +3646,7 @@ export class InteractiveMode {
 									this.sessionManager.getCwd(),
 								);
 								component.setExpanded(this.toolOutputExpanded);
-								this.chatContainer.addChild(component);
+								this.addToolComponentToChat(component);
 								this.pendingTools.set(content.id, component);
 							} else {
 								const component = this.pendingTools.get(content.id);
@@ -3719,7 +3720,7 @@ export class InteractiveMode {
 						this.sessionManager.getCwd(),
 					);
 					component.setExpanded(this.toolOutputExpanded);
-					this.chatContainer.addChild(component);
+					this.addToolComponentToChat(component);
 					this.pendingTools.set(event.toolCallId, component);
 				}
 				component.markExecutionStarted();
@@ -3741,6 +3742,9 @@ export class InteractiveMode {
 				if (component) {
 					component.updateResult({ ...event.result, isError: event.isError });
 					this.pendingTools.delete(event.toolCallId);
+					if (!event.isError) {
+						this.maybeRegroupTool(component);
+					}
 					this.ui.requestRender();
 				}
 				break;
@@ -4065,6 +4069,28 @@ export class InteractiveMode {
 		}
 	}
 
+	/**
+	 * Add a tool execution row to the transcript, grouping it with the
+	 * previous adjacent row when the compact grouping rules allow (see
+	 * tool-execution-group.ts). Grouping is presentation-only.
+	 */
+	private addToolComponentToChat(component: ToolExecutionComponent): void {
+		if (!this.toolOutputExpanded && tryGroupToolComponent(this.chatContainer, component)) {
+			return;
+		}
+		this.chatContainer.addChild(component);
+	}
+
+	/**
+	 * After a successful settle, try to fold the row into the previous adjacent
+	 * group of the same tool (batches of calls settle after all call rows were
+	 * added, so add-time grouping alone would miss them).
+	 */
+	private maybeRegroupTool(component: ToolExecutionComponent): void {
+		if (this.toolOutputExpanded) return;
+		regroupToolComponent(this.chatContainer, component);
+	}
+
 	private renderSessionItems(
 		items: readonly RenderSessionItem[],
 		options: { updateFooter?: boolean; populateHistory?: boolean } = {},
@@ -4112,7 +4138,7 @@ export class InteractiveMode {
 							this.sessionManager.getCwd(),
 						);
 						component.setExpanded(this.toolOutputExpanded);
-						this.chatContainer.addChild(component);
+						this.addToolComponentToChat(component);
 
 						if (message.stopReason === "aborted" || message.stopReason === "error") {
 							let errorMessage: string;
@@ -4141,6 +4167,9 @@ export class InteractiveMode {
 				if (component) {
 					component.updateResult(message);
 					renderedPendingTools.delete(message.toolCallId);
+					if (!message.isError) {
+						this.maybeRegroupTool(component);
+					}
 				}
 			} else {
 				// All other messages use standard rendering
@@ -5464,19 +5493,11 @@ export class InteractiveMode {
 					},
 					onShowImagesChange: (enabled) => {
 						this.settingsManager.setShowImages(enabled);
-						for (const child of this.chatContainer.children) {
-							if (child instanceof ToolExecutionComponent) {
-								child.setShowImages(enabled);
-							}
-						}
+						forEachToolRow(this.chatContainer, (child) => child.setShowImages(enabled));
 					},
 					onImageWidthCellsChange: (width) => {
 						this.settingsManager.setImageWidthCells(width);
-						for (const child of this.chatContainer.children) {
-							if (child instanceof ToolExecutionComponent) {
-								child.setImageWidthCells(width);
-							}
-						}
+						forEachToolRow(this.chatContainer, (child) => child.setImageWidthCells(width));
 					},
 					onAutoResizeImagesChange: (enabled) => {
 						this.settingsManager.setImageAutoResize(enabled);

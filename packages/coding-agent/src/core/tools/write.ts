@@ -7,6 +7,7 @@ import { keyHint } from "../../modes/interactive/components/keybinding-hints.ts"
 import { getLanguageFromPath, highlightCode, type Theme } from "../../modes/interactive/theme/theme.ts";
 import { getExperimentalToolSampling } from "../experimental.ts";
 import type { ToolDefinition, ToolRenderResultOptions } from "../extensions/types.ts";
+import { buildCompactRow, type CompactStatus, formatCompactBytes } from "./compact.ts";
 import { withFileMutationQueue } from "./file-mutation-queue.ts";
 import { resolveToCwd } from "./path-utils.ts";
 import { normalizeDisplayText, renderToolPath, replaceTabs, str } from "./render-utils.ts";
@@ -167,6 +168,24 @@ function formatWriteCall(
 	return text;
 }
 
+/** Compact write row (path only; the content preview is expanded-only). */
+function formatCompactWriteRow(status: CompactStatus, rawPath: string | null, theme: Theme, cwd: string): string {
+	return buildCompactRow(theme, {
+		status,
+		label: "write",
+		targetText: renderToolPath(rawPath, theme, cwd),
+	});
+}
+
+function tailLinesOf(text: string, maxLines: number): { tail: string[]; skipped: number } {
+	const lines = text.split("\n").map((line) => line.trimEnd());
+	while (lines.length > 0 && lines[lines.length - 1] === "") {
+		lines.pop();
+	}
+	const tail = lines.slice(-maxLines);
+	return { tail, skipped: Math.max(0, lines.length - tail.length) };
+}
+
 function formatWriteResult(
 	result: { content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>; isError?: boolean },
 	theme: Theme,
@@ -232,6 +251,24 @@ export function createWriteToolDefinition(
 			});
 		},
 		renderCall(args, theme, context) {
+			if (!context.expanded) {
+				const text = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
+				if (context.hasResult) {
+					// Compact: the result renderer owns the row once a result exists.
+					text.setText("");
+					return text;
+				}
+				const renderArgs = args as { path?: string; file_path?: string; content?: string } | undefined;
+				text.setText(
+					formatCompactWriteRow(
+						context.isError ? "error" : context.isPartial ? "running" : "success",
+						str(renderArgs?.file_path ?? renderArgs?.path),
+						theme,
+						context.cwd,
+					),
+				);
+				return text;
+			}
 			const renderArgs = args as { path?: string; file_path?: string; content?: string } | undefined;
 			const rawPath = str(renderArgs?.file_path ?? renderArgs?.path);
 			const fileContent = str(renderArgs?.content);
@@ -255,7 +292,52 @@ export function createWriteToolDefinition(
 			);
 			return component;
 		},
-		renderResult(result, _options, theme, context) {
+		renderResult(result, options, theme, context) {
+			if (!context.expanded) {
+				const text = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
+				const renderArgs = context.args as { path?: string; file_path?: string } | undefined;
+				const rawPath = str(renderArgs?.file_path ?? renderArgs?.path);
+				const textContent = result.content
+					.filter((c) => c.type === "text")
+					.map((c) => c.text || "")
+					.join("\n");
+				if (context.isError) {
+					const { tail, skipped } = tailLinesOf(textContent, 6);
+					const lines = [
+						buildCompactRow(theme, {
+							status: "error",
+							label: "write",
+							targetText: renderToolPath(rawPath, theme, context.cwd),
+						}),
+					];
+					if (skipped > 0) {
+						lines.push(
+							theme.fg("muted", `... (${skipped} earlier lines,`) +
+								` ${keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`,
+						);
+					}
+					for (const line of tail) {
+						lines.push(theme.fg("error", line));
+					}
+					text.setText(lines.join("\n"));
+					return text;
+				}
+				const status: CompactStatus = options.isPartial ? "running" : "success";
+				const excerpt: string[] = [];
+				const bytesMatch = textContent.match(/Successfully wrote (\d+) bytes/);
+				if (bytesMatch) {
+					excerpt.push(theme.fg("muted", formatCompactBytes(Number(bytesMatch[1]))));
+				}
+				text.setText(
+					buildCompactRow(theme, {
+						status,
+						label: "write",
+						targetText: renderToolPath(rawPath, theme, context.cwd),
+						excerpt,
+					}),
+				);
+				return text;
+			}
 			const output = formatWriteResult({ ...result, isError: context.isError }, theme);
 			if (!output) {
 				const component = (context.lastComponent as Container | undefined) ?? new Container();

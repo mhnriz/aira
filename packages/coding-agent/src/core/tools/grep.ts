@@ -9,6 +9,7 @@ import { keyHint } from "../../modes/interactive/components/keybinding-hints.ts"
 import type { Theme } from "../../modes/interactive/theme/theme.ts";
 import { ensureTool } from "../../utils/tools-manager.ts";
 import type { ToolDefinition, ToolRenderResultOptions } from "../extensions/types.ts";
+import { buildCompactRow, type CompactStatus, countOutputRows, toolLimitWarnings } from "./compact.ts";
 import { resolveToCwd } from "./path-utils.ts";
 import { getTextOutput, invalidArgText, shortenPath, str } from "./render-utils.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
@@ -70,10 +71,9 @@ export interface GrepToolOptions {
 	operations?: GrepOperations;
 }
 
-function formatGrepCall(
-	args: { pattern: string; path?: string; glob?: string; limit?: number } | undefined,
-	theme: Theme,
-): string {
+type GrepRenderArgs = { pattern?: string; path?: string; glob?: string; limit?: number };
+
+function formatGrepCall(args: GrepRenderArgs | undefined, theme: Theme): string {
 	const pattern = str(args?.pattern);
 	const rawPath = str(args?.path);
 	const path = rawPath !== null ? shortenPath(rawPath || ".") : null;
@@ -88,6 +88,23 @@ function formatGrepCall(
 	if (glob) text += theme.fg("toolOutput", ` (${glob})`);
 	if (limit !== undefined) text += theme.fg("toolOutput", ` limit ${limit}`);
 	return text;
+}
+
+/** Compact grep row: pattern target with the search path muted. */
+function formatCompactGrepRow(
+	status: CompactStatus,
+	args: GrepRenderArgs | undefined,
+	theme: Theme,
+	excerpt?: readonly string[],
+): string {
+	const pattern = str(args?.pattern);
+	const rawPath = str(args?.path);
+	const path = rawPath !== null ? shortenPath(rawPath || ".") : null;
+	const invalidArg = invalidArgText(theme);
+	const target =
+		(pattern === null ? invalidArg : theme.fg("accent", `/${pattern || ""}/`)) +
+		(path === null ? invalidArg : theme.fg("toolOutput", ` in ${path}`));
+	return buildCompactRow(theme, { status, label: "grep", targetText: target, excerpt });
 }
 
 function formatGrepResult(
@@ -374,11 +391,55 @@ export function createGrepToolDefinition(
 		},
 		renderCall(args, theme, context) {
 			const text = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
+			if (!context.expanded) {
+				// Compact: the result renderer owns the row once a result exists.
+				if (context.hasResult) {
+					text.setText("");
+					return text;
+				}
+				text.setText(
+					formatCompactGrepRow(
+						context.isError ? "error" : context.isPartial ? "running" : "success",
+						args as GrepRenderArgs | undefined,
+						theme,
+					),
+				);
+				return text;
+			}
 			text.setText(formatGrepCall(args, theme));
 			return text;
 		},
 		renderResult(result, options, theme, context) {
 			const text = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
+			if (!context.expanded) {
+				const status: CompactStatus = context.isError ? "error" : options.isPartial ? "running" : "success";
+				const args = context.args as GrepRenderArgs | undefined;
+				if (context.isError) {
+					const errorText = getTextOutput(result as any, context.showImages).trim();
+					const lines = [formatCompactGrepRow(status, args, theme)];
+					const tail = errorText.split("\n").slice(-6);
+					for (const line of tail) {
+						if (line.trim()) lines.push(theme.fg("error", line));
+					}
+					text.setText(lines.join("\n"));
+					return text;
+				}
+				const excerpt: string[] = [];
+				const output = getTextOutput(result as any, context.showImages).trim();
+				if (output && !options.isPartial) {
+					const count = countOutputRows(output);
+					excerpt.push(theme.fg("muted", `${count} ${count === 1 ? "match" : "matches"}`));
+				}
+				const lines = [formatCompactGrepRow(status, args, theme, excerpt)];
+				if (!options.isPartial) {
+					const warnings = toolLimitWarnings(result.details ?? {});
+					if (warnings.length > 0) {
+						lines.push(theme.fg("warning", `[Truncated: ${warnings.join(", ")}]`));
+					}
+				}
+				text.setText(lines.join("\n"));
+				return text;
+			}
 			text.setText(formatGrepResult(result as any, options, theme, context.showImages));
 			return text;
 		},

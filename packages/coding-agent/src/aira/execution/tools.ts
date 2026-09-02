@@ -22,6 +22,7 @@ import { isAbsolute, resolve } from "node:path";
 import { Text } from "@earendil-works/pi-tui";
 import { type Static, Type } from "typebox";
 import type { ToolDefinition } from "../../core/extensions/types.ts";
+import { buildCompactRow, type CompactStatus, formatCompactDuration } from "../../core/tools/compact.ts";
 import { getTextOutput, str } from "../../core/tools/render-utils.ts";
 import type { Theme } from "../../modes/interactive/theme/theme.ts";
 import type { AiraSessionState } from "../state.ts";
@@ -276,6 +277,16 @@ function formatLogsOutput(
 	return lines.join("\n");
 }
 
+/** Display target of a process_start call (command or exe + args). */
+function processStartTarget(args: { command?: string; exe?: string; args?: readonly string[] } | undefined): string {
+	const command = str(args?.command);
+	if (command) return command;
+	const exe = str(args?.exe);
+	if (!exe) return "…";
+	const rest = (args?.args ?? []).join(" ");
+	return rest ? `${exe} ${rest}` : exe;
+}
+
 function formatStopOutput(record: AiraProcessRecord): string {
 	const age = formatDuration((record.exitedAt ?? Date.now()) - record.startedAt);
 	if (record.status === "terminated") {
@@ -291,6 +302,127 @@ function formatStopOutput(record: AiraProcessRecord): string {
 		return `process ${record.id} never started (${record.spawnError ?? "spawn failure"})`;
 	}
 	return `process ${record.id} ${record.status}`;
+}
+
+// =========================================================================
+// Compact (collapsed/summary) process rows
+// =========================================================================
+
+const COMPACT_TAIL_LINES = 6;
+const COMPACT_EXCERPT_LINES = 4;
+
+/** Render state for live process duration polling (backgrounded starts). */
+type ProcessRenderState = {
+	interval: ReturnType<typeof setInterval> | undefined;
+};
+
+/** Bounded error/failure tail of a process output. */
+function compactErrorTail(stderrText: string, stdoutText: string): string[] {
+	const text = stderrText.trim() || stdoutText.trim();
+	const lines = text.split("\n").map((line) => line.trimEnd());
+	while (lines.length > 0 && lines[lines.length - 1] === "") {
+		lines.pop();
+	}
+	return lines.slice(-COMPACT_TAIL_LINES);
+}
+
+/** Compact row for a settled (non-backgrounded) process execution result. */
+function compactSettledProcessRow(
+	result: AiraExecutionResult,
+	theme: Theme,
+): { row: string; tail: string[]; status: CompactStatus } {
+	const excerpt: string[] = [];
+	const duration = theme.fg("muted", formatCompactDuration(result.durationMs));
+	let status: CompactStatus = "success";
+	if (result.status === "exited" && result.ok) {
+		excerpt.push(duration);
+	} else if (result.status === "exited") {
+		status = "error";
+		excerpt.push(theme.fg("error", `exit ${result.exitCode ?? "?"}`), duration);
+	} else if (result.status === "timed-out") {
+		status = "error";
+		excerpt.push(theme.fg("error", "timed out"), duration);
+	} else if (result.status === "terminated") {
+		status = "warning";
+		excerpt.push(theme.fg("warning", "terminated"), duration);
+	} else if (result.status === "cancelled") {
+		status = "warning";
+		excerpt.push(theme.fg("warning", "cancelled"), duration);
+	} else {
+		status = "error";
+		excerpt.push(theme.fg("error", result.reason ?? "failed"));
+	}
+	return {
+		row: buildCompactRow(theme, {
+			status,
+			label: "process",
+			targetText: result.command,
+			excerpt,
+		}),
+		tail: status === "error" ? compactErrorTail(result.stderr.text, result.stdout.text) : [],
+		status,
+	};
+}
+
+/** Managed-process row for a backgrounded start, with live status polling. */
+function compactBackgroundedProcessRow(
+	processId: string | undefined,
+	result: AiraExecutionResult,
+	theme: Theme,
+	manager: AiraProcessToolRuntime,
+	state: ProcessRenderState,
+	invalidate: () => void,
+): { row: string; tail: string[]; status: CompactStatus } {
+	const record = processId !== undefined ? manager.get(processId) : undefined;
+	const excerpt: string[] = [];
+	let status: CompactStatus = "running";
+	if (record?.status === "running") {
+		if (!state.interval) {
+			state.interval = setInterval(() => invalidate(), 1000);
+		}
+		excerpt.push(
+			theme.fg("muted", "running"),
+			theme.fg("muted", formatCompactDuration(Date.now() - (record.startedAt ?? result.startedAt))),
+		);
+		if (record.pid !== undefined) {
+			excerpt.unshift(theme.fg("muted", `pid ${record.pid}`));
+		}
+	} else {
+		if (state.interval) {
+			clearInterval(state.interval);
+			state.interval = undefined;
+		}
+		const age = record && record.exitedAt !== undefined ? record.exitedAt - record.startedAt : result.durationMs;
+		const duration = theme.fg("muted", formatCompactDuration(age));
+		if (record?.exitCode === 0) {
+			status = "success";
+			excerpt.push(duration);
+		} else if (record) {
+			status = record.exitCode !== undefined ? "error" : "warning";
+			excerpt.push(
+				theme.fg(
+					status === "error" ? "error" : "warning",
+					record.exitCode !== undefined ? `exit ${record.exitCode}` : record.status,
+				),
+				duration,
+			);
+		} else {
+			// Record already reaped: fall back to the snapshot at backgrounding time.
+			excerpt.push(theme.fg("muted", "backgrounded"), duration);
+			status = "success";
+		}
+	}
+	return {
+		row: buildCompactRow(theme, { status, label: "process", targetText: result.command, excerpt }),
+		tail:
+			status === "error"
+				? compactErrorTail(
+						record ? record.stderr.text() : result.stderr.text,
+						record ? record.stdout.text() : result.stdout.text,
+					)
+				: [],
+		status,
+	};
 }
 
 // =========================================================================
@@ -311,7 +443,7 @@ export function createAiraProcessToolDefinitions(
 	const startTool: ToolDefinition<
 		typeof processStartSchema,
 		{ processId?: string; result?: AiraExecutionResult },
-		undefined
+		ProcessRenderState
 	> = {
 		name: "process_start",
 		label: "process start",
@@ -348,12 +480,65 @@ export function createAiraProcessToolDefinitions(
 				details: { processId: result.processId, result },
 			};
 		},
-		renderCall(args, theme: Theme) {
-			const command = str(hasExe(args) ? `${args.exe} ${(args.args ?? []).join(" ")}`.trim() : args.command);
+		renderCall(args, theme: Theme, context) {
+			const command = processStartTarget(args);
+			if (!context.expanded) {
+				const text = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
+				if (context.hasResult) {
+					// Compact: the result renderer owns the row once a result exists.
+					text.setText("");
+					return text;
+				}
+				text.setText(
+					buildCompactRow(theme, {
+						status: context.isError ? "error" : context.isPartial ? "running" : "success",
+						label: "process",
+						targetText: command,
+					}),
+				);
+				return text;
+			}
 			return new Text(theme.fg("toolTitle", theme.bold(`start ${command}`)), 0, 0);
 		},
-		renderResult(result: { content: Array<{ type: string; text?: string }> }, options, theme: Theme, context) {
+		renderResult(result, options, theme: Theme, context) {
 			const text = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
+			if (!context.expanded) {
+				const details = (result as { details?: { processId?: string; result?: AiraExecutionResult } }).details;
+				const execResult = details?.result;
+				const command = execResult?.command ?? processStartTarget(context.args);
+				const lines: string[] = [];
+				let tail: string[] = [];
+				if (context.isError || !execResult) {
+					const status: CompactStatus = context.isError ? "error" : options.isPartial ? "running" : "success";
+					lines.push(buildCompactRow(theme, { status, label: "process", targetText: command }));
+					if (context.isError) {
+						tail = getTextOutput(result as any, context.showImages)
+							.trim()
+							.split("\n")
+							.slice(-COMPACT_TAIL_LINES);
+					}
+				} else if (execResult.status === "backgrounded") {
+					const row = compactBackgroundedProcessRow(
+						details.processId,
+						execResult,
+						theme,
+						manager,
+						context.state,
+						context.invalidate,
+					);
+					lines.push(row.row);
+					tail = row.tail;
+				} else {
+					const row = compactSettledProcessRow(execResult, theme);
+					lines.push(row.row);
+					tail = row.tail;
+				}
+				for (const line of tail) {
+					if (line.trim()) lines.push(theme.fg("error", line));
+				}
+				text.setText(lines.join("\n"));
+				return text;
+			}
 			const output = getTextOutput(result as any, context.showImages).trim();
 			const lines = output.split("\n");
 			const maxLines = options.expanded ? lines.length : 20;
@@ -378,11 +563,48 @@ export function createAiraProcessToolDefinitions(
 		async execute(_toolCallId, params) {
 			return { content: [{ type: "text", text: formatStatusOutput(manager, params.id) }], details: undefined };
 		},
-		renderCall(args, theme: Theme) {
+		renderCall(args, theme: Theme, context) {
+			if (!context.expanded) {
+				const text = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
+				if (context.hasResult) {
+					text.setText("");
+					return text;
+				}
+				text.setText(
+					buildCompactRow(theme, {
+						status: context.isError ? "error" : context.isPartial ? "running" : "success",
+						label: "process status",
+						targetText: args.id ?? "all",
+					}),
+				);
+				return text;
+			}
 			return new Text(theme.fg("toolTitle", theme.bold(`status ${args.id ?? ""}`.trim())), 0, 0);
 		},
-		renderResult(result: { content: Array<{ type: string; text?: string }> }, _options, theme: Theme, context) {
+		renderResult(result, options, theme: Theme, context) {
 			const text = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
+			if (!context.expanded) {
+				const output = getTextOutput(result as any, context.showImages).trim();
+				const lines = output.split("\n").map((line) => line.trimEnd());
+				while (lines.length > 0 && lines[lines.length - 1] === "") {
+					lines.pop();
+				}
+				const target = (context.args as { id?: string } | undefined)?.id ?? "all";
+				const status: CompactStatus = context.isError ? "error" : options.isPartial ? "running" : "success";
+				const excerpt: string[] = [];
+				// First data line: "id  status  command  age".
+				const dataLine = lines.find((line) => /^\S+\s{2,}\S+/.test(line));
+				if (dataLine) {
+					const parts = dataLine.trim().split(/\s{2,}/);
+					if (parts.length >= 3 && parts[2]) {
+						excerpt.push(theme.fg("muted", parts[1]), theme.fg("muted", parts[parts.length - 1]));
+					}
+				} else if (lines.length === 0 || lines[0] === "(no managed processes)") {
+					excerpt.push(theme.fg("muted", "none"));
+				}
+				text.setText(buildCompactRow(theme, { status, label: "process status", targetText: target, excerpt }));
+				return text;
+			}
 			text.setText(
 				`\n${getTextOutput(result as any, context.showImages)
 					.trim()
@@ -408,11 +630,59 @@ export function createAiraProcessToolDefinitions(
 				details: undefined,
 			};
 		},
-		renderCall(args, theme: Theme) {
+		renderCall(args, theme: Theme, context) {
+			if (!context.expanded) {
+				const text = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
+				if (context.hasResult) {
+					text.setText("");
+					return text;
+				}
+				text.setText(
+					buildCompactRow(theme, {
+						status: context.isError ? "error" : context.isPartial ? "running" : "success",
+						label: "process logs",
+						targetText: args.id,
+					}),
+				);
+				return text;
+			}
 			return new Text(theme.fg("toolTitle", theme.bold(`logs ${args.id}`)), 0, 0);
 		},
-		renderResult(result: { content: Array<{ type: string; text?: string }> }, _options, theme: Theme, context) {
+		renderResult(result, options, theme: Theme, context) {
 			const text = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
+			if (!context.expanded) {
+				const output = getTextOutput(result as any, context.showImages).trim();
+				const lines: string[] = [];
+				const status: CompactStatus = context.isError ? "error" : options.isPartial ? "running" : "success";
+				lines.push(
+					buildCompactRow(theme, {
+						status,
+						label: "process logs",
+						targetText: (context.args as { id?: string } | undefined)?.id ?? "?",
+					}),
+				);
+				if (context.isError) {
+					for (const line of output.split("\n").slice(-COMPACT_TAIL_LINES)) {
+						if (line.trim()) lines.push(theme.fg("error", line));
+					}
+				} else if (!options.isPartial) {
+					// Bounded newest log excerpt; full logs stay one expand away.
+					const allLines = output.split("\n").map((line) => line.trimEnd());
+					while (allLines.length > 0 && allLines[allLines.length - 1] === "") {
+						allLines.pop();
+					}
+					const excerptLines = allLines.slice(-COMPACT_EXCERPT_LINES);
+					const skipped = allLines.length - excerptLines.length;
+					if (skipped > 0) {
+						lines.push(theme.fg("muted", `... (${skipped} earlier lines)`));
+					}
+					for (const line of excerptLines) {
+						lines.push(theme.fg("toolOutput", line));
+					}
+				}
+				text.setText(lines.join("\n"));
+				return text;
+			}
 			text.setText(
 				`\n${getTextOutput(result as any, context.showImages)
 					.trim()
@@ -438,11 +708,64 @@ export function createAiraProcessToolDefinitions(
 			}
 			return { content: [{ type: "text", text: formatStopOutput(record) }], details: { processId: record.id } };
 		},
-		renderCall(args, theme: Theme) {
+		renderCall(args, theme: Theme, context) {
+			if (!context.expanded) {
+				const text = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
+				if (context.hasResult) {
+					text.setText("");
+					return text;
+				}
+				text.setText(
+					buildCompactRow(theme, {
+						status: context.isError ? "error" : context.isPartial ? "running" : "success",
+						label: "process stop",
+						targetText: args.id,
+					}),
+				);
+				return text;
+			}
 			return new Text(theme.fg("toolTitle", theme.bold(`stop ${args.id}`)), 0, 0);
 		},
-		renderResult(result: { content: Array<{ type: string; text?: string }> }, _options, theme: Theme, context) {
+		renderResult(result, options, theme: Theme, context) {
 			const text = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
+			if (!context.expanded) {
+				const output = getTextOutput(result as any, context.showImages).trim();
+				const firstLine = output.split("\n")[0] ?? "";
+				const status: CompactStatus = context.isError
+					? "error"
+					: options.isPartial
+						? "running"
+						: /never started|no managed process/.test(firstLine)
+							? "error"
+							: "success";
+				const excerpt: string[] = [];
+				const terminatedMatch = firstLine.match(/terminated after (.+)/);
+				if (terminatedMatch) {
+					excerpt.push(theme.fg("muted", "terminated"), theme.fg("muted", terminatedMatch[1]));
+				} else {
+					const exitedMatch = firstLine.match(/already exited \(code (.+)\)/);
+					if (exitedMatch) {
+						excerpt.push(theme.fg("muted", "exited"), theme.fg("muted", `code ${exitedMatch[1]}`));
+					} else if (status === "error") {
+						excerpt.push(theme.fg("error", "not found"));
+					}
+				}
+				const lines = [
+					buildCompactRow(theme, {
+						status,
+						label: "process stop",
+						targetText: (context.args as { id?: string } | undefined)?.id ?? "?",
+						excerpt,
+					}),
+				];
+				if (context.isError) {
+					for (const line of output.split("\n").slice(-COMPACT_TAIL_LINES)) {
+						if (line.trim()) lines.push(theme.fg("error", line));
+					}
+				}
+				text.setText(lines.join("\n"));
+				return text;
+			}
 			text.setText(
 				`\n${getTextOutput(result as any, context.showImages)
 					.trim()
@@ -460,8 +783,4 @@ export function createAiraProcessToolDefinitions(
 		process_logs: logsTool,
 		process_stop: stopTool,
 	};
-}
-
-function hasExe(args: Record<string, unknown>): args is { exe: string; args?: string[] } {
-	return typeof args.exe === "string";
 }
