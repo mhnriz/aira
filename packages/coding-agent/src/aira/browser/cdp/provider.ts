@@ -15,7 +15,7 @@
  * and Aira never attaches to a personal browser.
  */
 import type { ChildProcess } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { trackDetachedChildPid, untrackDetachedChildPid } from "../../../utils/shell.ts";
 import {
@@ -502,11 +502,24 @@ export class CdpBrowserProvider implements AiraBrowserProvider {
 			}
 		}
 		await Promise.allSettled(later);
-		// The profile is Aira-owned and disposable: remove it on close.
-		try {
-			rmSync(this.options.profileDir, { recursive: true, force: true });
-		} catch {
-			// best-effort profile cleanup
+		// The profile is Aira-owned and disposable: remove it on close. A dying
+		// browser's straggler processes may still write into the profile for a
+		// moment after the process exits, so retry the removal briefly instead
+		// of racing it (best-effort beyond the window).
+		const removalDeadline = Date.now() + 2_000;
+		for (;;) {
+			try {
+				rmSync(this.options.profileDir, { recursive: true, force: true });
+				if (!existsSync(this.options.profileDir)) {
+					break;
+				}
+			} catch {
+				// ignore and retry
+			}
+			if (Date.now() >= removalDeadline) {
+				break;
+			}
+			await new Promise((resolve) => setTimeout(resolve, 50));
 		}
 		return okResult("close");
 	}

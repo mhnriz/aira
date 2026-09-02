@@ -13,7 +13,7 @@
  * removed, no orphans).
  */
 
-import { accessSync, constants, existsSync, readFileSync, rmSync } from "node:fs";
+import { accessSync, constants, existsSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -109,6 +109,42 @@ function hasChrome(): boolean {
 			return false;
 		}
 	});
+}
+
+/** Describe what is left of a profile dir (for truthful teardown diagnostics). */
+function residualProfile(dir: string): string {
+	if (!existsSync(dir)) {
+		return "";
+	}
+	const lines: string[] = [];
+	const walk = (base: string, indent: string): void => {
+		let entries: string[] = [];
+		try {
+			entries = readdirSync(base);
+		} catch {
+			lines.push(`${indent}<unreadable>`);
+			return;
+		}
+		if (entries.length === 0) {
+			lines.push(`${indent}<empty>`);
+			return;
+		}
+		for (const entry of entries.slice(0, 12)) {
+			const child = join(base, entry);
+			let isDir = false;
+			try {
+				isDir = statSync(child).isDirectory();
+			} catch {
+				// raced away during the walk
+			}
+			lines.push(`${indent}${entry}${isDir ? "/" : ""}`);
+			if (isDir) {
+				walk(child, `${indent}  `);
+			}
+		}
+	};
+	walk(dir, "");
+	return lines.join("\n");
 }
 
 function profileDir(): string {
@@ -266,8 +302,15 @@ describeReal("Phase 7 — native CDP/Chromium provider against a local fixture",
 	it("closes cleanly: browser process dead, profile removed, no orphans", async () => {
 		const { provider, dir } = connection!;
 		await provider.close();
-		// Aira-owned process must be gone.
-		expect(existsSync(dir)).toBe(false);
+		// Teardown is asynchronous: the process tree drains (graceful, then
+		// forced) and the disposable profile is removed afterwards. Wait
+		// deterministically for the profile to disappear instead of racing it.
+		const deadline = Date.now() + 10_000;
+		while (existsSync(dir) && Date.now() < deadline) {
+			await new Promise((resolve) => setTimeout(resolve, 100));
+		}
+		const residual = residualProfile(dir);
+		expect(residual, `profile dir not removed within 10s of close():\n${residual}`).toBe("");
 	}, 30_000);
 
 	it("works through the manager end-to-end (canonical snapshot + ambient context)", async () => {

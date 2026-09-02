@@ -20,7 +20,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { accessSync, constants, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { getShellEnv } from "../../../utils/shell.ts";
+import { getShellEnv, killProcessTree } from "../../../utils/shell.ts";
 import type { AiraBrowserAvailability } from "../provider.ts";
 
 export const CDP_PROVIDER_ID = "cdp-chromium";
@@ -285,8 +285,13 @@ export async function terminateBrowserProcess(
 	}
 	await waitForExit(child, graceMs);
 	if (child.exitCode === null) {
+		// SIGTERM was not honored in time. Kill the whole process tree (the
+		// browser spawns zygote/renderer/crashpad children that keep the
+		// disposable profile alive and keep writing into it); a bare SIGKILL of
+		// the main pid would orphan them. killProcessTree uses group SIGKILL on
+		// Unix and taskkill /T on Windows.
 		try {
-			child.kill("SIGKILL");
+			killProcessTree(child.pid!);
 		} catch {
 			// already gone
 		}
