@@ -4,6 +4,7 @@
 
 ### Added
 
+- Added `Container.insertAt(index, component)` so hosts can insert children at an explicit position (used by conversation tool grouping).
 - Added `ScrollView.getUnreadLines()` / `maxScrollTop` so hosts can report how much newer output sits below a scrolled-away viewport.
 - Added `TuiAltScreen.setKeyboardScrollTarget()` (declared on `ViewportTUI`): hosts can point unmodified keyboard viewport navigation (PageUp/PageDown, half-page/line scroll, Home/End) at a secondary scroll view; unset targets the primary view. No behavior change when unused.
 

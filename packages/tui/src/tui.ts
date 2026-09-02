@@ -216,6 +216,12 @@ export class Container implements Component {
 		this.children.push(component);
 	}
 
+	/** Insert a child at a specific index (clamped to [0, children.length]). */
+	insertAt(index: number, component: Component): void {
+		const clamped = Math.max(0, Math.min(index, this.children.length));
+		this.children.splice(clamped, 0, component);
+	}
+
 	removeChild(component: Component): void {
 		const index = this.children.indexOf(component);
 		if (index !== -1) {
