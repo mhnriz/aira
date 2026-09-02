@@ -112,6 +112,53 @@ describe("permission controller (Phase 11)", () => {
 		expect(second.reason).toContain("permission prompt cancelled");
 	});
 
+	it("the ASK question carries the deterministic card presentation", async () => {
+		const rig = makeRig({ attachUI: true });
+		const gatePromise = rig.controller.gate("bash", { command: "git push origin main" });
+		const question = rig.interaction.status().question!;
+		expect(question.permission).toBeDefined();
+		const card = question.permission!;
+		expect(card.tool).toBe("bash");
+		expect(card.operation).toBe("Shell command");
+		// The actual command + cwd + deterministic reason, not the question.
+		expect(card.subject).toBe("git push origin main");
+		expect(card.details).toContainEqual({ label: "Working directory", value: "/proj/app" });
+		expect(card.reason).toBe("remote repository operation");
+		expect(card.summary).toBe("git push origin main");
+
+		// The four approval scopes are explained with exact-subject wording.
+		const labels = new Map(question.choices.map((choice) => [choice.id, choice.description]));
+		expect(labels.get("allow-once")).toBe("Run only this request");
+		expect(labels.get("allow-session")).toBe("Approve this exact subject for this session");
+		expect(labels.get("allow-always")).toBe("Persist approval for this exact subject");
+		expect(labels.get("deny")).toBe("Do not execute");
+
+		await rig.interaction.answer(question.interactionId, {
+			resolution: "answered",
+			selections: [],
+			decision: "allow-once",
+		});
+		expect((await gatePromise).block).toBe(false);
+	});
+
+	it("out-of-workspace write ASK carries target + scope + reason", async () => {
+		const rig = makeRig({ attachUI: true });
+		const gatePromise = rig.controller.gate("write", { path: "/tmp/notes.txt" });
+		const card = rig.interaction.status().question!.permission!;
+		expect(card.operation).toBe("Write file");
+		expect(card.subject).toBe("/tmp/notes.txt");
+		expect(card.outsideWorkspace).toBe(true);
+		expect(card.details).toContainEqual({ label: "Scope", value: "outside workspace" });
+		expect(card.reason).toBe("write outside workspace");
+		await rig.interaction.answer(rig.interaction.status().question!.interactionId, {
+			resolution: "answered",
+			selections: [],
+			decision: "deny",
+		});
+		const outcome = await gatePromise;
+		expect(outcome.block).toBe(true);
+	});
+
 	it("allow-session records an EXACT session rule that never broadens", async () => {
 		const rig = makeRig({ attachUI: true });
 		const gatePromise = rig.controller.gate("bash", { command: "git push origin main" });

@@ -189,4 +189,67 @@ describe("AiraInteractionManager (Phase 11)", () => {
 		expect(status.recentClosed.length).toBeLessThanOrEqual(4);
 		expect(status.recentClosed[0]!.prompt.length).toBeLessThanOrEqual(201);
 	});
+
+	it("permission presentation round-trips into the pending projection (UI-only, bounded)", async () => {
+		const { manager } = makeManager();
+		manager.attachUI();
+		const pending = manager.ask({
+			type: "permission",
+			question: "Allow bash to run?",
+			choices: [{ id: "deny", label: "Deny" }],
+			owner: "permission:bash",
+			permission: {
+				tool: "bash",
+				capability: "process",
+				operation: "Shell command",
+				subject: "git push --dry-run origin main",
+				redacted: false,
+				reason: "remote repository operation",
+				details: [{ label: "Working directory", value: "~/proj/aira" }],
+				summary: "git push --dry-run origin main",
+			},
+		});
+		const question = manager.status().question!;
+		expect(question.permission?.subject).toBe("git push --dry-run origin main");
+		expect(question.permission?.operation).toBe("Shell command");
+		expect(question.permission?.reason).toBe("remote repository operation");
+		expect(question.permission?.details).toEqual([{ label: "Working directory", value: "~/proj/aira" }]);
+
+		// The answer carries only the decision — never the presentation.
+		manager.answer(question.interactionId, { resolution: "answered", selections: [], decision: "deny" });
+		const result = await pending;
+		expect(result.decision).toBe("deny");
+		expect(result).not.toHaveProperty("permission");
+		expect(manager.status().pending).toBe(false);
+	});
+
+	it("permission presentation is defensively bounded during normalization", async () => {
+		const { manager } = makeManager();
+		manager.attachUI();
+		const pending = manager.ask({
+			type: "permission",
+			question: "Allow bash to run?",
+			permission: {
+				tool: "x".repeat(500),
+				capability: "process",
+				operation: "o".repeat(500),
+				subject: "s".repeat(2000),
+				redacted: true,
+				reason: "r".repeat(2000),
+				details: Array.from({ length: 9 }, (_, index) => ({ label: `l${index}`, value: `v${index}` })),
+				summary: "m".repeat(2000),
+			},
+		});
+		const question = manager.status().question!.permission!;
+		expect(question.tool.length).toBeLessThanOrEqual(40);
+		expect(question.operation.length).toBeLessThanOrEqual(48);
+		expect(question.subject.length).toBeLessThanOrEqual(400);
+		expect(question.reason.length).toBeLessThanOrEqual(200);
+		expect(question.summary.length).toBeLessThanOrEqual(60);
+		expect(question.details.length).toBeLessThanOrEqual(4);
+		expect(question.redacted).toBe(true);
+		manager.answer(manager.status().question!.interactionId, { resolution: "cancelled", selections: [] });
+		const result = await pending;
+		expect(result.resolution).toBe("cancelled");
+	});
 });
