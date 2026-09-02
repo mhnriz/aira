@@ -144,10 +144,15 @@ function interactionSegment(state: AiraSessionState | undefined): WorkbenchFoote
 	if (!interaction?.pending || !interaction.question) return undefined;
 	const question = interaction.question;
 	const isPermission = question.type === "permission";
-	const prompt = question.prompt.replace(/\s+/g, " ").trim();
+	// Permission questions surface the actual operation/subject, never the
+	// generic question text — the card shows the full detail, the rail keeps
+	// a single compact urgent segment.
+	const subject =
+		isPermission && question.permission ? question.permission.summary || question.permission.operation : undefined;
+	const text = subject ?? question.prompt.replace(/\s+/g, " ").trim();
 	return {
 		id: "interaction",
-		text: `ASK ● ${prompt.length > 42 ? `${prompt.slice(0, 41)}…` : prompt}`,
+		text: `ASK ● ${text.length > 42 ? `${text.slice(0, 41)}…` : text}`,
 		compact: "ASK ●",
 		role: isPermission ? "purple" : "yellow",
 		dropRank: DROP.interaction,

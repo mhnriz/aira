@@ -277,7 +277,73 @@ managed via `/permissions rule add|list|remove` — never project-local.
 - The native Q&A dialog itself: pending interactions render through the
   existing selector/input dialogs (permission: Allow once / Allow session
   / Allow always / Deny; semantic: choices + custom answer + cancel;
-  multi-select pick loop).
+  multi-select pick loop). Since Phase 12.x, permission requests render as
+  the Aira-native permission card (see "Permission card contract" below);
+  semantic questions keep the selector/input dialogs.
+
+## Permission card contract (Phase 12.x)
+
+The interactive permission prompt is an Aira-native card — a PROJECTION
+only. It answers, in one screen: what operation is requested, what exactly
+will happen (the real command/path/subject), where (working directory /
+target), why ASK was triggered (deterministic reason), and what each
+approval scope means. The card never re-evaluates policy and owns no
+permission state; answering maps a choice id through the existing
+interaction bridge (`interaction.answer`), so decision mapping, timeout,
+cancel-as-denial, EXACT-subject non-broadening, PLAN/yolo/strict behavior,
+and headless truthfulness are unchanged.
+
+**Information contract** — `permissions/presentation.ts` builds a bounded,
+redacted, UI-only `AiraPermissionPresentation` from the canonical request +
+evaluation + host facts (cwd, project root, tool args) and attaches it to
+the pending permission interaction (`question.permission`); it is carried
+through the interaction projection, never into model context or tool
+results. Tool-aware formatting:
+
+- process (bash/powershell/process_start): the real command (`$ …`),
+  working directory, foreground/background for process_start;
+- mutating (edit/write): resolved target path + inside/outside workspace
+  scope;
+- browser: target URL/domain + operation kind (observe/navigate/interact/
+  lifecycle);
+- unknown extension tools: exact tool name + up to 3 bounded parameter
+  rows (compactly stringified, truncated) + "unknown extension tool".
+
+**Deterministic reasons** — the reason row uses the canonical evaluation:
+risk-marker classification from the Phase 11 marker table (`remote
+repository operation`, `dependency installation`, `destructive filesystem
+operation`, `pipe remote script to shell`, `credential-adjacent read`, …),
+`write outside workspace`, `browser interaction …`, `unknown extension
+tool`, or the verbatim rule-match reason. No model-based risk scoring.
+
+**Approval scopes** (ids unchanged, descriptions updated): Allow once =
+"Run only this request"; Allow session = "Approve this exact subject for
+this session"; Allow always = "Persist approval for this exact subject";
+Deny = "Do not execute". The exact-subject wording is deliberate: an
+approval never broadens to "all bash" — dialog approvals still record
+EXACT rules only.
+
+**Redaction policy** — subject text and parameter values pass through the
+same `redactVerificationSecrets` helper the verifier uses (private keys,
+authorization headers, cookies, tokens, JWT/credential shapes, URL
+credentials); secret-like parameter KEYS (apiKey, token, password, …) are
+masked outright; secrets in URLs are masked; `presentation.redacted` flags
+the card to show a `(secrets redacted)` note. The display copy is never
+fed back into policy (rule subjects stay unredacted).
+
+**Workbench / footer projection** — the pending Permission panel shows the
+operation + subject (≤ 2 rows, e.g. `? Shell command` / `git push
+--dry-run origin main`); the footer ASK segment shows `ASK ● <subject>` (never the
+generic question text) with the permission mode as a separate `PERM
+<mode>` segment that drops first; the current-finding label also derives
+from the subject, so the question text appears exactly once (in the card)
+while the dialog is open. All projections are token-free and derive only
+from the canonical pending interaction.
+
+**Narrow terminals** — every dynamic card line wraps/truncates to the
+render width with an explicit `…`, the command block is capped at 3 visual
+lines, and choice descriptions collapse to one line per choice, so the
+card stays readable and answerable at ~30 columns.
 
 ## Token / context cost
 

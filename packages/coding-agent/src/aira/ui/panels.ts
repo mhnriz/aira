@@ -58,7 +58,15 @@ export function interactionPanel(state: AiraSessionState): WorkbenchPanel | unde
 	if (!interaction?.pending || !interaction.question) return undefined;
 	const question = interaction.question;
 	const isPermission = question.type === "permission";
-	const rows: WorkbenchRow[] = [{ value: `? ${question.prompt}`, role: isPermission ? "purple" : "yellow" }];
+	const rows: WorkbenchRow[] = [];
+	// Permission asks surface the actual operation + subject (bounded, 1-2
+	// lines) instead of the generic question text.
+	if (isPermission && question.permission) {
+		rows.push({ value: `? ${question.permission.operation}`, role: "purple" });
+		rows.push({ value: question.permission.summary, role: "text" });
+	} else {
+		rows.push({ value: `? ${question.prompt}`, role: isPermission ? "purple" : "yellow" });
+	}
 	if (question.choicesCount > 0) {
 		rows.push({ label: "Choices", value: `${question.choicesCount}`, role: "muted" });
 	} else if (question.freeform) {

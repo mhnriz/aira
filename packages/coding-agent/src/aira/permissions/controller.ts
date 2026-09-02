@@ -23,6 +23,7 @@ import type { AiraInteractionHandle } from "../interaction/manager.ts";
 import { isAiraMutatingTool } from "../modes.ts";
 import type { AiraSessionState } from "../state.ts";
 import { evaluateAiraPermissionRequest, normalizeAiraPermissionMode, resolvePermissionPathSubject } from "./policy.ts";
+import { buildAiraPermissionPresentation } from "./presentation.ts";
 import { createAiraPermissionRuleStore } from "./rules-store.ts";
 import {
 	AIRA_PERMISSION_MAX_SESSION_RULES,
@@ -167,21 +168,33 @@ export class AiraPermissionController implements AiraPermissionControllerHandle 
 				question: `Allow ${toolName} to run?`,
 				context: permissionContext(request),
 				choices: [
-					{ id: "allow-once", label: "Allow once", description: "Approve only this exact request" },
+					{ id: "allow-once", label: "Allow once", description: "Run only this request" },
 					{
 						id: "allow-session",
 						label: "Allow session",
-						description: "Approve this exact request for the rest of the session",
+						description: "Approve this exact subject for this session",
 					},
 					{
 						id: "allow-always",
 						label: "Allow always",
-						description: "Approve this exact request persistently (Aira-owned config)",
+						description: "Persist approval for this exact subject",
 					},
-					{ id: "deny", label: "Deny", description: "Block the request and tell the agent" },
+					{ id: "deny", label: "Deny", description: "Do not execute" },
 				],
 				freeform: false,
 				owner: `permission:${toolName}`,
+				// Deterministic card data: bounded, redacted, UI-only projection of the
+				// canonical request + evaluation. Never policy input, never model context.
+				permission: buildAiraPermissionPresentation({
+					tool: request.tool,
+					capability: request.capability,
+					browserOperation: request.browserOperation,
+					subject: request.subject,
+					args,
+					evaluation,
+					cwd: this.options.cwd,
+					projectRoot: this.projectRoot(),
+				}),
 			},
 			undefined,
 		);

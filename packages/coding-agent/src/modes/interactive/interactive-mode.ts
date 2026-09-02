@@ -53,6 +53,7 @@ import {
 	type AiraInteractionPendingProjection,
 	type AiraMode,
 	type AiraPermissionMode,
+	type AiraPermissionPresentation,
 	airaModeLabel,
 	buildAiraDoctorReport,
 	buildAiraModeReport,
@@ -168,6 +169,7 @@ import {
 	formatAuthSelectorProviderType,
 	OAuthSelectorComponent,
 } from "./components/oauth-selector.ts";
+import { PermissionCardComponent } from "./components/permission-card.ts";
 import { ScopedModelsSelectorComponent } from "./components/scoped-models-selector.ts";
 import { SessionSelectorComponent } from "./components/session-selector.ts";
 import { SettingsSelectorComponent } from "./components/settings-selector.ts";
@@ -576,6 +578,7 @@ export class InteractiveMode {
 	// Extension UI state
 	private extensionSelector: ExtensionSelectorComponent | undefined = undefined;
 	private extensionInput: ExtensionInputComponent | undefined = undefined;
+	private permissionCard: PermissionCardComponent | undefined = undefined;
 	private extensionEditor: ExtensionEditorComponent | undefined = undefined;
 	private extensionTerminalInputSubscriptions = new Set<{
 		handler: (data: string) => { consume?: boolean; data?: string } | undefined;
@@ -2411,6 +2414,9 @@ export class InteractiveMode {
 		if (this.extensionSelector) {
 			this.hideExtensionSelector();
 		}
+		if (this.permissionCard) {
+			this.hidePermissionCard();
+		}
 		if (this.extensionInput) {
 			this.hideExtensionInput();
 		}
@@ -2684,6 +2690,64 @@ export class InteractiveMode {
 			this.ui.setFocus(this.extensionSelector);
 			this.ui.requestRender();
 		});
+	}
+
+	/**
+	 * Show the Aira permission card (Phase 12.x) for a pending permission
+	 * interaction. Renders the deterministic presentation and maps the picked
+	 * choice id back through the interaction bridge. Cancel/abort/timeout
+	 * resolve as undefined (the caller answers as "cancelled" → truthful
+	 * denial) — identical life-cycle semantics to the extension selector.
+	 */
+	private showPermissionCard(
+		presentation: AiraPermissionPresentation,
+		choices: ReadonlyArray<{ id: string; label: string; description?: string }>,
+		opts?: ExtensionUIDialogOptions,
+	): Promise<string | undefined> {
+		return new Promise((resolve) => {
+			if (opts?.signal?.aborted) {
+				resolve(undefined);
+				return;
+			}
+
+			const onAbort = () => {
+				this.hidePermissionCard();
+				resolve(undefined);
+			};
+			opts?.signal?.addEventListener("abort", onAbort, { once: true });
+
+			this.permissionCard = new PermissionCardComponent(
+				presentation,
+				choices,
+				(choiceId) => {
+					opts?.signal?.removeEventListener("abort", onAbort);
+					this.hidePermissionCard();
+					resolve(choiceId);
+				},
+				() => {
+					opts?.signal?.removeEventListener("abort", onAbort);
+					this.hidePermissionCard();
+					resolve(undefined);
+				},
+				{ tui: this.ui, timeout: opts?.timeout, onToggleToolsExpanded: () => this.toggleToolOutputExpansion() },
+			);
+
+			this.disposeActiveSelector();
+			this.editorContainer.clear();
+			this.editorContainer.addChild(this.permissionCard);
+			this.ui.setFocus(this.permissionCard);
+			this.ui.requestRender();
+		});
+	}
+
+	/** Hide the permission card and restore the editor. */
+	private hidePermissionCard(): void {
+		this.permissionCard?.dispose();
+		this.editorContainer.clear();
+		this.editorContainer.addChild(this.editor);
+		this.permissionCard = undefined;
+		this.ui.setFocus(this.editor);
+		this.ui.requestRender();
 	}
 
 	/**
@@ -3454,20 +3518,35 @@ export class InteractiveMode {
 		interaction: NonNullable<AiraInteractionHandle>,
 		opts: ExtensionUIDialogOptions | undefined,
 	): Promise<void> {
-		const labels = ["Allow once", "Allow session", "Allow always", "Deny"] as const;
-		const picked = await this.showExtensionSelector(question.prompt, [...labels], opts);
+		let picked: string | undefined;
+		if (question.permission) {
+			// Aira-native permission card: deterministic presentation + explained
+			// scopes. Falls back per-request when no presentation is attached.
+			picked = await this.showPermissionCard(question.permission, question.choices, opts);
+		} else {
+			const labels = ["Allow once", "Allow session", "Allow always", "Deny"] as const;
+			picked = await this.showExtensionSelector(question.prompt, [...labels], opts);
+		}
 		if (picked === undefined) {
 			interaction.answer(question.interactionId, { resolution: "cancelled", selections: [] });
 			return;
 		}
 		const decision =
-			picked === "Allow once"
+			picked === "allow-once"
 				? "allow-once"
-				: picked === "Allow session"
+				: picked === "allow-session"
 					? "allow-session"
-					: picked === "Allow always"
+					: picked === "allow-always"
 						? "allow-always"
-						: "deny";
+						: picked === "deny"
+							? "deny"
+							: undefined;
+		if (!decision) {
+			// Unknown choice id (defensive): treat as cancel — never invent a
+			// decision or broaden semantics.
+			interaction.answer(question.interactionId, { resolution: "cancelled", selections: [] });
+			return;
+		}
 		interaction.answer(question.interactionId, { resolution: "answered", selections: [], decision });
 	}
 

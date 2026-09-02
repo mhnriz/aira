@@ -39,11 +39,17 @@ export function arbitrateCurrentFinding(state: AiraSessionState | undefined): Wo
 	if (interaction?.pending && interaction.question) {
 		const question = interaction.question;
 		const type = question.type === "permission" ? "authorization" : "question";
+		// Permission asks label the operation/subject, never the generic
+		// question text (prevents duplicating it in the footer finding).
+		const label =
+			question.type === "permission" && question.permission
+				? `${type}: ${(question.permission.summary || question.permission.operation).slice(0, 60)}`
+				: `${type}: ${bound(question.prompt, 60)}`;
 		candidates.push({
 			severity: "wait",
 			source: question.type === "permission" ? "permission" : "ask",
 			priority: 0,
-			label: `${type}: ${bound(question.prompt, 60)}`,
+			label,
 			detail: `${type} · waiting ${Math.max(1, Math.round(question.durationMs / 1000))}s · ${
 				question.choicesCount > 0
 					? `${question.choicesCount} choice(s)`

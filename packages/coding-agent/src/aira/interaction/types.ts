@@ -16,6 +16,8 @@
  * unavailable/cancelled — never a wedged session.
  */
 
+import type { AiraPermissionPresentation } from "../permissions/presentation.ts";
+
 /** What kind of decision the interaction asks for (authorization vs product). */
 export type AiraInteractionType = "permission" | "semantic";
 
@@ -50,6 +52,12 @@ export interface AiraInteractionRequest {
 	owner?: string;
 	/** Optional auto-timeout in milliseconds (0/undefined = no timeout). */
 	timeoutMs?: number;
+	/**
+	 * Host-attached permission card data (type "permission" only). UI-only,
+	 * token-free, NEVER model context: the tool result carries decisions,
+	 * never this projection.
+	 */
+	permission?: AiraPermissionPresentation;
 }
 
 /** The answer delivered to the caller of `ask()`. */
@@ -81,6 +89,11 @@ export interface AiraInteractionPendingProjection {
 	freeform: boolean;
 	/** Owner tag ("permission:bash", "agent", ...). */
 	owner: string | undefined;
+	/**
+	 * Host-attached permission card data (type "permission" only; bounded,
+	 * redacted, token-free — see permissions/presentation.ts).
+	 */
+	permission?: AiraPermissionPresentation;
 	/** When the interaction started waiting. */
 	waitingSince: number;
 	/** Elapsed waiting duration in milliseconds (live-derived). */

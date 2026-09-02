@@ -55,56 +55,56 @@ export const AIRA_PERMISSION_MODE_CHIPS: Record<AiraPermissionMode, string> = {
  * collapsed). Every marker is reviewed in the Phase 11 report/ADR; the list
  * is intentionally small and conservative — routine engineering commands
  * (tests, builds, dev servers, git status/diff/log, editors) never match.
+ *
+ * Markers are grouped by consequence so the permission presentation can
+ * state WHY ASK triggered in plain deterministic wording (the groups below
+ * are the same markers, same order — grouping only adds a label, it never
+ * changes matching).
  */
-const RISK_MARKERS: readonly string[] = [
+const RISK_MARKER_GROUPS: ReadonlyArray<{ markers: readonly string[]; label: string }> = [
 	// git consequences
-	"git push",
-	"git commit",
-	"git reset --hard",
-	"git clean",
-	"git rebase",
-	// dependency installation (mutates manifests/lockfiles, network)
-	"npm install",
-	"npm i ",
-	"npm ci",
-	"npx playwright install",
-	"pnpm add",
-	"pnpm install",
-	"yarn add",
-	"yarn install",
-	"bun add",
-	"bun install",
-	"pip install",
-	"pipx install",
-	"uv pip install",
-	"uv add",
-	"poetry add",
-	// destructive / system-level process behavior
-	"rm -rf",
-	"rm -fr",
-	"rm -r",
-	"rm -f /",
-	"sudo",
-	"dd ",
-	"mkfs",
-	"fdisk",
-	"kill -9",
-	"killall -9",
-	"chmod -r",
-	"chown -r",
-	"curl | sh",
-	"curl | bash",
-	"wget | sh",
-	"wget | bash",
-	"shutdown",
-	"poweroff",
-	"reboot",
-	"npm publish",
-	"pnpm publish",
+	{ markers: ["git push"], label: "remote repository operation" },
+	{
+		markers: ["git commit", "git reset --hard", "git clean", "git rebase"],
+		label: "git history operation",
+	},
+	{
+		// dependency installation (mutates manifests/lockfiles, network)
+		markers: [
+			"npm install",
+			"npm i ",
+			"npm ci",
+			"npx playwright install",
+			"pnpm add",
+			"pnpm install",
+			"yarn add",
+			"yarn install",
+			"bun add",
+			"bun install",
+			"pip install",
+			"pipx install",
+			"uv pip install",
+			"uv add",
+			"poetry add",
+		],
+		label: "dependency installation",
+	},
+	{
+		// destructive / system-level process behavior
+		markers: ["rm -rf", "rm -fr", "rm -r", "rm -f /"],
+		label: "destructive filesystem operation",
+	},
+	{ markers: ["sudo"], label: "privileged command (sudo)" },
+	{ markers: ["dd ", "mkfs", "fdisk"], label: "low-level disk operation" },
+	{ markers: ["kill -9", "killall -9"], label: "forced process termination" },
+	{
+		markers: ["curl | sh", "curl | bash", "wget | sh", "wget | bash"],
+		label: "pipe remote script to shell",
+	},
+	{ markers: ["shutdown", "poweroff", "reboot"], label: "system shutdown" },
+	{ markers: ["npm publish", "pnpm publish"], label: "package publishing" },
 	// secret-adjacent reads (ask; explicit rules decide)
-	"~/.ssh",
-	"id_rsa",
-	"~/.aws",
+	{ markers: ["~/.ssh", "id_rsa", "~/.aws"], label: "credential-adjacent read" },
 ];
 
 function normalizeSubjectForMarkers(value: string): string {
@@ -120,10 +120,31 @@ export function isAiraRiskyCommand(command: string): boolean {
 	if (normalized.length === 0) {
 		return false;
 	}
-	if (RISK_MARKERS.some((marker) => normalized.includes(marker))) {
+	if (RISK_MARKER_GROUPS.some((group) => group.markers.some((marker) => normalized.includes(marker)))) {
 		return true;
 	}
 	return PIPE_TO_SHELL_MARKER.test(normalized);
+}
+
+/**
+ * Friendly deterministic label for the FIRST risk marker group a command
+ * matches (marker-group order = the historical marker order, so this never
+ * changes which commands ask). Returns undefined for routine commands.
+ */
+export function classifyAiraRiskyCommand(command: string): string | undefined {
+	const normalized = normalizeSubjectForMarkers(command);
+	if (normalized.length === 0) {
+		return undefined;
+	}
+	for (const group of RISK_MARKER_GROUPS) {
+		if (group.markers.some((marker) => normalized.includes(marker))) {
+			return group.label;
+		}
+	}
+	if (PIPE_TO_SHELL_MARKER.test(normalized)) {
+		return "pipe remote script to shell";
+	}
+	return undefined;
 }
 
 /** Normalize a raw permission-mode value (unknown → "normal"). */

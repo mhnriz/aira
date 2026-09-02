@@ -19,6 +19,7 @@
  * outcomes carry no selections/text.
  */
 import { randomUUID } from "node:crypto";
+import type { AiraPermissionPresentation } from "../permissions/presentation.ts";
 import type { AiraSessionState } from "../state.ts";
 import type {
 	AiraInteractionAnswer,
@@ -354,6 +355,7 @@ export class AiraInteractionManager implements AiraInteractionHandle {
 				multiSelect: pending.request.multiSelect === true,
 				freeform: pending.request.freeform === true,
 				owner: pending.request.owner,
+				...(pending.request.permission ? { permission: pending.request.permission } : {}),
 				waitingSince: pending.createdAt,
 				durationMs: now - pending.createdAt,
 			},
@@ -404,7 +406,27 @@ export function normalizeAiraInteractionRequest(request: AiraInteractionRequest)
 		...(request.multiSelect === true && choices.length > 0 ? { multiSelect: true } : {}),
 		...(request.freeform === true ? { freeform: true } : {}),
 		...(request.owner ? { owner: boundedText(request.owner, MAX_OWNER_CHARS) } : {}),
+		...(request.permission ? { permission: boundedPermissionPresentation(request.permission) } : {}),
 		...(timeoutMs !== undefined && timeoutMs > 0 ? { timeoutMs: Math.min(86_400_000, Math.floor(timeoutMs)) } : {}),
+	};
+}
+
+/** Defensive bounds on host-attached permission card data (UI-only). */
+function boundedPermissionPresentation(presentation: AiraPermissionPresentation): AiraPermissionPresentation {
+	const details = presentation.details.slice(0, 4).map((row) => ({
+		label: boundedText(row.label, 32),
+		value: boundedText(row.value, 200),
+	}));
+	return {
+		tool: boundedText(presentation.tool, 40),
+		capability: boundedText(presentation.capability, 24),
+		operation: boundedText(presentation.operation, 48),
+		subject: boundedText(presentation.subject, 400),
+		redacted: presentation.redacted === true,
+		reason: boundedText(presentation.reason, 200),
+		details,
+		...(presentation.outsideWorkspace !== undefined ? { outsideWorkspace: presentation.outsideWorkspace } : {}),
+		summary: boundedText(presentation.summary, 60),
 	};
 }
 

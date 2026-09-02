@@ -43,6 +43,8 @@
  * NEVER loaded: a repository cannot silently grant itself privileges.
  */
 
+import type { AiraClassifiedCapability } from "../capabilities.ts";
+
 /** Aira permission modes (small native model; see module doc). */
 export type AiraPermissionMode = "normal" | "permissive" | "strict" | "yolo";
 
@@ -86,7 +88,7 @@ export interface AiraPermissionRequest {
 	/** Tool/action name. */
 	tool: string;
 	/** Capability class of the tool (ADR-022 semantic table). */
-	capability: string;
+	capability: AiraClassifiedCapability;
 	/** Subject derived from tool args (command text / resolved path / name). */
 	subject?: string;
 	/** Browser operation kind for browser-class tools (observe/navigate/interact/lifecycle). */
