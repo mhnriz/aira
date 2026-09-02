@@ -135,9 +135,10 @@ describe("InteractiveMode.showManagedToolStatus", () => {
 		showManagedToolStatus.call(fakeThis, { type: "info", message: "rg downloading" });
 		showManagedToolStatus.call(fakeThis, { type: "warning", message: "rg failed" });
 
+		// Aira-native notices: one leading spacer, then a status/warning notice per update.
 		expect(fakeThis.chatContainer.children).toHaveLength(4);
 		expect(normalizeRenderedOutput(fakeThis.chatContainer)).toBe(
-			"fd downloading\n rg downloading\n Warning: rg failed",
+			"· AIRA fd downloading\n· AIRA rg downloading\n! NOTICE rg failed",
 		);
 	});
 });
@@ -147,6 +148,7 @@ describe("InteractiveMode.setToolsExpanded", () => {
 		const header = { setExpanded: vi.fn() };
 		const loadedResourcesChild = { setExpanded: vi.fn() };
 		const chatChild = { setExpanded: vi.fn() };
+		const showLoadedResources = vi.fn();
 		const fakeThis: any = {
 			toolOutputExpanded: false,
 			customHeader: undefined,
@@ -155,6 +157,7 @@ describe("InteractiveMode.setToolsExpanded", () => {
 			chatContainer: { children: [chatChild] },
 			ui: { requestRender: vi.fn() },
 			showStatus: vi.fn(),
+			showLoadedResources,
 		};
 
 		(InteractiveMode as any).prototype.setToolsExpanded.call(fakeThis, true);
@@ -163,6 +166,8 @@ describe("InteractiveMode.setToolsExpanded", () => {
 		expect(header.setExpanded).toHaveBeenCalledWith(true);
 		expect(loadedResourcesChild.setExpanded).toHaveBeenCalledWith(true);
 		expect(chatChild.setExpanded).toHaveBeenCalledWith(true);
+		// Aira shell: toggling expansion re-renders the loaded-resources listing.
+		expect(showLoadedResources).toHaveBeenCalledWith({ force: true, showDiagnosticsWhenQuiet: true });
 		expect(fakeThis.showStatus).toHaveBeenCalledWith("Tool output: expanded");
 	});
 });
@@ -702,23 +707,23 @@ describe("InteractiveMode.showLoadedResources", () => {
 		];
 	}
 
-	test("shows a compact resource listing by default", () => {
+	test("renders a compact resource listing when tool output is collapsed", () => {
 		const fakeThis = createShowLoadedResourcesThis({
 			quietStartup: false,
 			skills: [{ filePath: "/tmp/skill/SKILL.md", name: "commit" }],
 		});
 
 		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
-			force: false,
+			force: true,
 		});
 
 		const output = renderAll(fakeThis.loadedResourcesContainer);
-		expect(output).toContain("[Skills]");
+		expect(output).toContain("SKILLS");
 		expect(output).toContain("commit");
 		expect(output).not.toContain("resource-list");
 	});
 
-	test("shows full resource listing when expanded", () => {
+	test("renders a full resource listing when expanded", () => {
 		const fakeThis = createShowLoadedResourcesThis({
 			quietStartup: false,
 			toolOutputExpanded: true,
@@ -726,16 +731,16 @@ describe("InteractiveMode.showLoadedResources", () => {
 		});
 
 		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
-			force: false,
+			force: true,
 		});
 
 		const output = renderAll(fakeThis.loadedResourcesContainer);
-		expect(output).toContain("[Skills]");
+		expect(output).toContain("SKILLS");
 		expect(output).toContain("resource-list");
 		expect(output).not.toContain("commit");
 	});
 
-	test("shows full resource listing on verbose startup even when tool output is collapsed", () => {
+	test("renders a full resource listing on verbose startup even when tool output is collapsed", () => {
 		const fakeThis = createShowLoadedResourcesThis({
 			quietStartup: true,
 			verbose: true,
@@ -748,7 +753,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 		});
 
 		const output = renderAll(fakeThis.loadedResourcesContainer);
-		expect(output).toContain("[Skills]");
+		expect(output).toContain("SKILLS");
 		expect(output).toContain("resource-list");
 		expect(output).not.toContain("commit");
 	});
@@ -760,11 +765,11 @@ describe("InteractiveMode.showLoadedResources", () => {
 		});
 
 		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
-			force: false,
+			force: true,
 		});
 
 		const output = renderAll(fakeThis.loadedResourcesContainer);
-		expect(output).toContain("[Extensions]");
+		expect(output).toContain("EXTENSIONS");
 		expect(output).toContain("answer.ts, btw.ts");
 		expect(output).not.toContain("extensions/answer.ts");
 	});
@@ -777,11 +782,11 @@ describe("InteractiveMode.showLoadedResources", () => {
 		});
 
 		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
-			force: false,
+			force: true,
 		});
 
 		expect(normalizeRenderedOutput(fakeThis.loadedResourcesContainer)).toMatchInlineSnapshot(`
-"[Extensions]
+"EXTENSIONS
   @scope/pi-scoped, answer.ts, cli-extension.ts, HazAT/pi-interactive-subagents, HazAT/pi-interactive-subagents:subagents, local-index, pi-markdown-preview, user-index"`);
 	});
 
@@ -823,11 +828,11 @@ describe("InteractiveMode.showLoadedResources", () => {
 		});
 
 		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
-			force: false,
+			force: true,
 		});
 
 		expect(normalizeRenderedOutput(fakeThis.loadedResourcesContainer)).toMatchInlineSnapshot(`
-"[Extensions]
+"EXTENSIONS
   alpha/one, beta/one, gamma/one"`);
 	});
 
@@ -851,11 +856,11 @@ describe("InteractiveMode.showLoadedResources", () => {
 		});
 
 		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
-			force: false,
+			force: true,
 		});
 
 		expect(normalizeRenderedOutput(fakeThis.loadedResourcesContainer)).toMatchInlineSnapshot(`
-"[Extensions]
+"EXTENSIONS
   plan-mode"`);
 	});
 
@@ -879,11 +884,11 @@ describe("InteractiveMode.showLoadedResources", () => {
 		});
 
 		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
-			force: false,
+			force: true,
 		});
 
 		expect(normalizeRenderedOutput(fakeThis.loadedResourcesContainer)).toMatchInlineSnapshot(`
-"[Extensions]
+"EXTENSIONS
   plan-mode"`);
 	});
 
@@ -916,11 +921,11 @@ describe("InteractiveMode.showLoadedResources", () => {
 		});
 
 		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
-			force: false,
+			force: true,
 		});
 
 		expect(normalizeRenderedOutput(fakeThis.loadedResourcesContainer)).toMatchInlineSnapshot(`
-"[Extensions]
+"EXTENSIONS
   plan-mode, webfetch.ts"`);
 	});
 
@@ -953,11 +958,11 @@ describe("InteractiveMode.showLoadedResources", () => {
 		});
 
 		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
-			force: false,
+			force: true,
 		});
 
 		expect(normalizeRenderedOutput(fakeThis.loadedResourcesContainer)).toMatchInlineSnapshot(`
-"[Extensions]
+"EXTENSIONS
   bar, foo"`);
 	});
 
@@ -990,11 +995,11 @@ describe("InteractiveMode.showLoadedResources", () => {
 		});
 
 		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
-			force: false,
+			force: true,
 		});
 
 		expect(normalizeRenderedOutput(fakeThis.loadedResourcesContainer)).toMatchInlineSnapshot(`
-"[Extensions]
+"EXTENSIONS
   alpha/tools, beta/tools"`);
 	});
 
@@ -1018,11 +1023,11 @@ describe("InteractiveMode.showLoadedResources", () => {
 		});
 
 		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
-			force: false,
+			force: true,
 		});
 
 		expect(normalizeRenderedOutput(fakeThis.loadedResourcesContainer)).toMatchInlineSnapshot(`
-"[Extensions]
+"EXTENSIONS
   main.ts"`);
 	});
 
@@ -1049,11 +1054,11 @@ describe("InteractiveMode.showLoadedResources", () => {
 		});
 
 		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
-			force: false,
+			force: true,
 		});
 
 		expect(normalizeRenderedOutput(fakeThis.loadedResourcesContainer)).toMatchInlineSnapshot(`
-"[Extensions]
+"EXTENSIONS
   pi-markdown-preview"`);
 	});
 
@@ -1086,11 +1091,11 @@ describe("InteractiveMode.showLoadedResources", () => {
 		});
 
 		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
-			force: false,
+			force: true,
 		});
 
 		expect(normalizeRenderedOutput(fakeThis.loadedResourcesContainer)).toMatchInlineSnapshot(`
-"[Extensions]
+"EXTENSIONS
   primary-package, primary-package:../sibling-package"`);
 	});
 
@@ -1126,11 +1131,11 @@ describe("InteractiveMode.showLoadedResources", () => {
 		});
 
 		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
-			force: false,
+			force: true,
 		});
 
 		expect(normalizeRenderedOutput(fakeThis.loadedResourcesContainer)).toMatchInlineSnapshot(`
-"[Extensions]
+"EXTENSIONS
   primary-package, primary-package:../sibling-package"`);
 	});
 
@@ -1143,11 +1148,11 @@ describe("InteractiveMode.showLoadedResources", () => {
 		});
 
 		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
-			force: false,
+			force: true,
 		});
 
 		expect(normalizeRenderedOutput(fakeThis.loadedResourcesContainer)).toMatchInlineSnapshot(`
-"[Extensions]
+"EXTENSIONS
   project
     /tmp/project/.aira/extensions/answer.ts
     /tmp/project/.aira/extensions/local-index
@@ -1177,11 +1182,11 @@ describe("InteractiveMode.showLoadedResources", () => {
 		});
 
 		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
-			force: false,
+			force: true,
 		});
 
 		const output = renderAll(fakeThis.loadedResourcesContainer).replace(/\\/g, "/");
-		expect(output).toContain("[Context]");
+		expect(output).toContain("CONTEXT");
 		expect(output).toContain("~/.aira/agent/AGENTS.md, AGENTS.md");
 		expect(output).not.toContain(`${cwd.replace(/\\/g, "/")}/AGENTS.md`);
 	});
@@ -1197,11 +1202,11 @@ describe("InteractiveMode.showLoadedResources", () => {
 		});
 
 		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
-			force: false,
+			force: true,
 		});
 
 		const output = renderAll(fakeThis.loadedResourcesContainer).replace(/\\/g, "/");
-		expect(output).toContain("[Context]");
+		expect(output).toContain("CONTEXT");
 		expect(output).toContain(".aira/SYSTEM.md, .aira/APPEND_SYSTEM.md, AGENTS.md");
 	});
 
@@ -1219,17 +1224,17 @@ describe("InteractiveMode.showLoadedResources", () => {
 		});
 
 		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
-			force: false,
+			force: true,
 		});
 
 		const output = renderAll(fakeThis.loadedResourcesContainer).replace(/\\/g, "/");
-		expect(output).toContain("[Context]");
+		expect(output).toContain("CONTEXT");
 		expect(output).toContain("~/.aira/agent/AGENTS.md");
 		expect(output).toContain("~/Development/pi-mono/AGENTS.md");
 		expect(output).not.toContain("~/.aira/agent/AGENTS.md, AGENTS.md");
 	});
 
-	test("does not show verbose listing on quiet startup during reload", () => {
+	test("does not show a resource listing when not forced or verbose", () => {
 		const fakeThis = createShowLoadedResourcesThis({
 			quietStartup: true,
 			skills: [{ filePath: "/tmp/skill/SKILL.md", name: "commit" }],
@@ -1257,7 +1262,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 		});
 
 		const output = renderAll(fakeThis.loadedResourcesContainer);
-		expect(output).toContain("[Skill conflicts]");
-		expect(output).not.toContain("[Skills]");
+		expect(output).toContain("SKILL CONFLICTS");
+		expect(output).not.toContain("SKILLS");
 	});
 });

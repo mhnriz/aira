@@ -6,7 +6,10 @@ import { initTheme } from "../../../src/modes/interactive/theme/theme.ts";
 import { createHarness } from "../harness.ts";
 
 function render(container: Container): string {
-	return container.children.flatMap((child) => child.render(120)).join("\n");
+	return container.children
+		.flatMap((child) => child.render(120))
+		.join("\n")
+		.replace(/\u001b\[[0-9;]*m/g, "");
 }
 
 describe("issue #7829 invalid settings warning", () => {
@@ -43,8 +46,9 @@ describe("issue #7829 invalid settings warning", () => {
 			void run.call(context);
 
 			await vi.waitFor(() => {
+				// Aira-native warning notice (Phase 12 shell) replaces the old "Warning:" prefix.
 				expect(render(chatContainer)).toContain(
-					"Warning: Invalid settings file /tmp/settings.json: malformed JSON",
+					"! NOTICE Invalid settings file /tmp/settings.json: malformed JSON",
 				);
 			});
 		} finally {
