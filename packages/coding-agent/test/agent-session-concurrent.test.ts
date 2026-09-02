@@ -22,7 +22,7 @@ import { AuthStorage } from "../src/core/auth-storage.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
 import type { BuildSystemPromptOptions } from "../src/core/system-prompt.ts";
-import { createTestExtensionsResult, createTestResourceLoader } from "./utilities.ts";
+import { createAllowFixtureToolStore, createTestExtensionsResult, createTestResourceLoader } from "./utilities.ts";
 
 // Mock stream that mimics AssistantMessageEventStream
 class MockAssistantStream extends EventStream<AssistantMessageEvent, AssistantMessage> {
@@ -431,6 +431,9 @@ describe("AgentSession concurrent prompt guard", () => {
 			modelRuntime: getModelRuntime(modelRegistry),
 			resourceLoader: createTestResourceLoader(),
 			baseToolsOverride: { dummy: tool },
+			airaPermissionOptions: {
+				store: createAllowFixtureToolStore("dummy"),
+			},
 		});
 
 		const snapshots: string[][] = [];

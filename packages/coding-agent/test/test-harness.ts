@@ -391,9 +391,13 @@ async function createHarnessWithResourceLoader(
 	const sessionManager = SessionManager.inMemory();
 	const settingsManager = SettingsManager.create(tempDir, tempDir);
 
-	if (options.settings) {
-		settingsManager.applyOverrides(options.settings);
-	}
+	// Like the suite harness, session-behavior tests default the Phase 11
+	// permission gate off (fixture tools are not permission subjects); pass
+	// settings.permissions explicitly to opt in.
+	settingsManager.applyOverrides({
+		...(options.settings?.permissions === undefined ? { permissions: { enabled: false } } : {}),
+		...options.settings,
+	});
 
 	const authStorage = AuthStorage.inMemory({
 		[model.provider]: { type: "api_key", key: "faux-key" },

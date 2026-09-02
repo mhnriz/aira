@@ -10,6 +10,7 @@ import { Agent } from "@earendil-works/pi-agent-core";
 import type { OAuthCredentials } from "@earendil-works/pi-ai";
 import { getModel, streamSimple } from "@earendil-works/pi-ai/compat";
 import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
+import type { AiraPermissionRule, AiraPermissionStoreHealth } from "../src/aira/permissions/types.ts";
 import { AgentSession } from "../src/core/agent-session.ts";
 import { AuthStorage } from "../src/core/auth-storage.ts";
 import { createEventBus } from "../src/core/event-bus.ts";
@@ -177,6 +178,35 @@ export interface TestSessionContext {
 export interface CreateTestExtensionsResultInput {
 	factory: ExtensionFactory;
 	path?: string;
+}
+
+/**
+ * Aira permissions (Phase 11) gate every tool call by default. Session-behavior
+ * tests that execute fixture tools (echo/dummy/wait) must authorize them
+ * deterministically: this returns an in-memory permission store pre-seeded with
+ * a persistent allow rule for one exact tool. The permission controller seam is
+ * exercised for real; no prompt UI is involved.
+ */
+export function createAllowFixtureToolStore(toolName: string): {
+	load(): { rules: AiraPermissionRule[]; health: AiraPermissionStoreHealth };
+	save(): AiraPermissionStoreHealth;
+} {
+	const rule: AiraPermissionRule = {
+		id: `test-${toolName}-allow`,
+		tool: toolName,
+		subject: toolName,
+		match: "exact",
+		action: "allow",
+		scope: "persistent",
+		createdAt: 0,
+	};
+	return {
+		load: () => ({
+			rules: [rule],
+			health: { status: "ok", path: undefined, error: undefined },
+		}),
+		save: () => ({ status: "ok", path: undefined, error: undefined }),
+	};
 }
 
 type TestExtensionInput = InlineExtension | CreateTestExtensionsResultInput;

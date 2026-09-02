@@ -142,7 +142,14 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 	const extensionRunnerRef: { current?: ExtensionRunner } = {};
 
 	const sessionManager = SessionManager.inMemory();
-	const settingsManager = SettingsManager.inMemory(options.settings);
+	// Core session-behavior tests exercise the agent loop, not the Phase 11
+	// permission seam (it has its own dedicated tests under test/aira/permissions).
+	// Default the gate off so fixture tools (echo/dummy/wait) run; pass
+	// settings.permissions explicitly to opt in.
+	const settingsManager = SettingsManager.inMemory({
+		...(options.settings?.permissions === undefined ? { permissions: { enabled: false } } : {}),
+		...options.settings,
+	});
 
 	const authStorage = AuthStorage.inMemory();
 	if (withConfiguredAuth) {

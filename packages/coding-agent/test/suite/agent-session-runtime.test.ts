@@ -12,6 +12,7 @@ import {
 } from "../../src/core/agent-session-runtime.ts";
 import { AuthStorage } from "../../src/core/auth-storage.ts";
 import { SessionManager } from "../../src/core/session-manager.ts";
+import { SettingsManager } from "../../src/core/settings-manager.ts";
 import type {
 	AgentToolResult,
 	ExtensionAPI,
@@ -91,6 +92,10 @@ describe("AgentSessionRuntime characterization", () => {
 			const services = await createAgentSessionServices({
 				...runtimeOptions,
 				cwd,
+				// Session-settlement characterization, not the Phase 11 permission
+				// seam (dedicated tests under test/aira/permissions): fixture tools
+				// like "block" must run without an interactive prompt.
+				settingsManager: SettingsManager.inMemory({ permissions: { enabled: false } }),
 			});
 			return {
 				...(await createAgentSessionFromServices({
@@ -442,6 +447,10 @@ describe("AgentSessionRuntime characterization", () => {
 			const services = await createAgentSessionServices({
 				...runtimeOptions,
 				cwd,
+				// Session-settlement characterization, not the Phase 11 permission
+				// seam (dedicated tests under test/aira/permissions): fixture tools
+				// like "block" must run without an interactive prompt.
+				settingsManager: SettingsManager.inMemory({ permissions: { enabled: false } }),
 			});
 			return {
 				...(await createAgentSessionFromServices({

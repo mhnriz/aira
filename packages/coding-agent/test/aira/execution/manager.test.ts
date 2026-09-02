@@ -212,7 +212,10 @@ describe("Aira execution process manager (real child processes)", () => {
 		try {
 			const result = await ctx.manager.start(
 				{
-					command: `node -e "for(let i=0;i<200000;i++){console.log('line-'+i)} process.exit(0)"`,
+					// No process.exit(): exiting abruptly drops unflushed async pipe
+					// writes, so the retained tail would not cover the end of the
+					// stream and the assertion below would be timing-dependent.
+					command: `node -e "for(let i=0;i<200000;i++){console.log('line-'+i)}"`,
 					cwd: process.cwd(),
 				},
 				{ timeoutMs: 20_000 },
