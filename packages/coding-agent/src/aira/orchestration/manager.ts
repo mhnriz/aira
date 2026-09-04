@@ -28,6 +28,7 @@ import {
 	MAX_CHILD_FILES,
 	MAX_CHILD_TASK_CHARS,
 } from "./envelope.ts";
+import { type AiraChildEvent, AiraChildEventBuffer, childActivityOf } from "./events.ts";
 import { isAiraChildRoleReadOnly } from "./roles.ts";
 import { type AiraChildOutcome, type AiraChildRuntime, runAiraChild } from "./runner.ts";
 import {
@@ -108,6 +109,18 @@ export interface AiraOrchestrationHandle {
 	get(runId: string): AiraChildRun | undefined;
 	/** Canonical snapshot (token-free). */
 	status(): AiraOrchestrationStatus;
+	/**
+	 * Bounded event transcript for one run (read-only query; Agent Inspector).
+	 * Returns an empty list for unknown/disposed runs (never throws).
+	 */
+	events(runId: string): readonly AiraChildEvent[];
+	/**
+	 * Live per-run event subscription (Agent Inspector tail). The listener
+	 * receives ONE bounded event per model block/tool outcome; the buffer is
+	 * already updated before the listener runs. Returns a no-op unsubscribe
+	 * for unknown/disposed runs. One subscription per viewing UI.
+	 */
+	subscribeEvents(runId: string, listener: (event: AiraChildEvent) => void): () => void;
 	subscribe(listener: (status: AiraOrchestrationStatus) => void): () => void;
 	dispose(): Promise<void>;
 }
@@ -122,6 +135,9 @@ export class AiraOrchestrationManager implements AiraOrchestrationHandle {
 	private readonly options: AiraOrchestrationManagerOptions;
 	private readonly runs = new Map<string, AiraChildRun>();
 	private readonly runAborts = new Map<string, AbortController>();
+	/** Per-run bounded event transcripts (Agent Inspector; orchestration-owned). */
+	private readonly buffers = new Map<string, AiraChildEventBuffer>();
+	private readonly eventListeners = new Map<string, Set<(event: AiraChildEvent) => void>>();
 	private readonly listeners = new Set<(status: AiraOrchestrationStatus) => void>();
 	private readonly activeBatches = new Set<AbortController>();
 	private snapshot: AiraOrchestrationStatus;
@@ -240,6 +256,12 @@ export class AiraOrchestrationManager implements AiraOrchestrationHandle {
 						run.status = "running";
 						run.phase = "running";
 						run.startedAt ??= Date.now();
+						this.recordChildEvent(run.id, {
+							kind: "status",
+							at: Date.now(),
+							status: run.status,
+							phase: run.phase,
+						});
 						this.publish();
 					}
 				},
@@ -250,13 +272,14 @@ export class AiraOrchestrationManager implements AiraOrchestrationHandle {
 						run.phase = "settled";
 						run.completedAt = Date.now();
 						run.durationMs = (run.completedAt ?? 0) - (run.startedAt ?? run.completedAt ?? 0);
-						run.error = {
-							category: batchAbort.signal.aborted ? "cancelled" : "dependency-failed",
-							message: batchAbort.signal.aborted
-								? "cancelled before launch"
-								: `upstream dependency failed: ${reason}`,
-							retryable: false,
-						};
+						const category: AiraChildFailureCategory = batchAbort.signal.aborted
+							? "cancelled"
+							: "dependency-failed";
+						const message = batchAbort.signal.aborted
+							? "cancelled before launch"
+							: `upstream dependency failed: ${reason}`;
+						run.error = { category, message, retryable: false };
+						this.recordChildEvent(run.id, { kind: "failure", at: run.completedAt, category, message });
 						this.publish();
 					}
 				},
@@ -329,6 +352,7 @@ export class AiraOrchestrationManager implements AiraOrchestrationHandle {
 		run.startedAt ??= Date.now();
 		run.status = "running";
 		run.phase = "running";
+		this.recordChildEvent(run.id, { kind: "status", at: Date.now(), status: run.status, phase: run.phase });
 		this.publish();
 
 		try {
@@ -378,6 +402,8 @@ export class AiraOrchestrationManager implements AiraOrchestrationHandle {
 				tools: toolSet.tools,
 				gateTool: this.options.permissionGate,
 				timeoutMs,
+				// Agent Inspector capture: stream/tool events are recorded per run.
+				events: (event: AiraChildEvent) => this.recordChildEvent(run.id, event),
 			};
 			const outcome: AiraChildOutcome = this.options.runner
 				? await this.options.runner(resolved.runtime, runnerOptions, signal)
@@ -434,6 +460,22 @@ export class AiraOrchestrationManager implements AiraOrchestrationHandle {
 		return this.runs.get(runId);
 	}
 
+	events(runId: string): readonly AiraChildEvent[] {
+		return this.buffers.get(runId)?.events() ?? [];
+	}
+
+	subscribeEvents(runId: string, listener: (event: AiraChildEvent) => void): () => void {
+		const listeners = this.eventListeners.get(runId);
+		if (!listeners) {
+			// Unknown or disposed run: stale ids degrade safely (no-op).
+			return () => undefined;
+		}
+		listeners.add(listener);
+		return () => {
+			listeners.delete(listener);
+		};
+	}
+
 	status(): AiraOrchestrationStatus {
 		this.publish();
 		return this.snapshot;
@@ -458,6 +500,8 @@ export class AiraOrchestrationManager implements AiraOrchestrationHandle {
 		this.activeBatches.clear();
 		this.runAborts.clear();
 		this.listeners.clear();
+		this.buffers.clear();
+		this.eventListeners.clear();
 		this.publish();
 	}
 
@@ -467,6 +511,14 @@ export class AiraOrchestrationManager implements AiraOrchestrationHandle {
 
 	private recordRun(run: AiraChildRun): void {
 		this.runs.set(run.id, run);
+		this.buffers.set(run.id, new AiraChildEventBuffer());
+		this.eventListeners.set(run.id, new Set());
+		this.recordChildEvent(run.id, {
+			kind: "status",
+			at: Date.now(),
+			status: run.status,
+			phase: run.phase,
+		});
 		if (this.runs.size <= MAX_MANAGER_RUN_HISTORY) {
 			return;
 		}
@@ -480,6 +532,39 @@ export class AiraOrchestrationManager implements AiraOrchestrationHandle {
 		if (evict && evict !== run) {
 			this.runs.delete(evict.id);
 			this.runAborts.delete(evict.id);
+			this.buffers.delete(evict.id);
+			this.eventListeners.delete(evict.id);
+		}
+	}
+
+	/**
+	 * Record one child event into the run's bounded buffer, derive truthful
+	 * last-activity, and notify the run's live subscribers. Deliberately does
+	 * NOT publish the canonical snapshot: streaming events must never cause
+	 * whole-Workbench rerender storms (publish stays on status transitions).
+	 */
+	private recordChildEvent(runId: string, event: AiraChildEvent): void {
+		const buffer = this.buffers.get(runId);
+		if (!buffer) {
+			return;
+		}
+		buffer.append(event);
+		const activity = childActivityOf(event);
+		if (activity) {
+			const run = this.runs.get(runId);
+			if (run) {
+				run.activity = activity;
+			}
+		}
+		const listeners = this.eventListeners.get(runId);
+		if (listeners) {
+			for (const listener of [...listeners]) {
+				try {
+					listener(event);
+				} catch {
+					// A UI listener must never break orchestration.
+				}
+			}
 		}
 	}
 
@@ -494,6 +579,7 @@ export class AiraOrchestrationManager implements AiraOrchestrationHandle {
 	private failRun(run: AiraChildRun, category: AiraChildFailureCategory, message: string, retryable: boolean): void {
 		const status: AiraChildRunStatus =
 			category === "cancelled" ? "cancelled" : category === "timeout" ? "timed-out" : "failed";
+		this.recordChildEvent(run.id, { kind: "failure", at: Date.now(), category, message });
 		this.settleRun(run, status, category, message, retryable, undefined);
 	}
 
@@ -513,6 +599,12 @@ export class AiraOrchestrationManager implements AiraOrchestrationHandle {
 		if (category !== undefined) {
 			run.error = { category, message: message ?? status, retryable };
 		}
+		this.recordChildEvent(run.id, {
+			kind: "completion",
+			at: run.completedAt,
+			status: status === "completed" ? "completed" : "failed",
+			summary: result?.summary ?? message ?? status,
+		});
 		this.publish();
 	}
 
@@ -607,8 +699,16 @@ function clampChildTimeout(requested: number, settingsDefault: number): number {
 	return Math.min(requested, MAX_CHILD_TIMEOUT_MS);
 }
 
-/** Map a driver error string to a bounded actionable category. */
+/**
+ * Map a driver error string to a bounded actionable category.
+ * Tool-budget exhaustion is a real failure mode ("child exceeded its tool
+ * budget") and surfaces as its own category — never as a generic driver
+ * error that reads as an opaque model/provider stall.
+ */
 function categorizeDriverError(message: string): AiraChildFailureCategory {
+	if (message.includes("tool budget")) {
+		return "tool-budget-exceeded";
+	}
 	if (message.includes("timed out")) {
 		return "timeout";
 	}

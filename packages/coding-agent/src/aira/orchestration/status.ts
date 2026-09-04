@@ -48,6 +48,7 @@ export function toAiraChildSnapshot(run: AiraChildRun): AiraChildSnapshot {
 		task: boundChildText(run.task, MAX_TASK_TEXT_IN_SNAPSHOT),
 		status: run.status,
 		phase: run.phase,
+		...(run.activity ? { activity: run.activity } : {}),
 		model: run.model,
 		elapsedMs: run.durationMs ?? (run.startedAt !== undefined ? Date.now() - run.startedAt : undefined),
 		dependencies: run.dependencies,

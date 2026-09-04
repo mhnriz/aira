@@ -7,12 +7,17 @@
  * the parent conversation, never shared mutable state). This module defines
  * the task contract, the structured child result contract, and the bounded
  * canonical telemetry shapes consumed by `/agents`, `/status`, `/doctor`,
- * and the future Workbench (ADR-005: one canonical state owner).
+ * and the Workbench (ADR-005: one canonical state owner).
  *
  * Everything here is deliberately small: five lightweight roles, one
  * structured result shape, and bounded snapshot lists. No persistent
  * workflow database, no agent catalog, no worker-to-worker messaging.
+ *
+ * Child event/transcript data (Agent Inspector) lives in `events.ts` and is
+ * orchestration-owned only — it never enters `AiraSessionState`.
  */
+
+import type { AiraChildActivity } from "./events.ts";
 
 /** Lightweight task roles (small fixed taxonomy; extensible later). */
 export type AiraChildRole = "explore" | "research" | "review" | "test" | "implement";
@@ -36,6 +41,7 @@ export type AiraChildFailureCategory =
 	| "mode-refused"
 	| "model-unavailable"
 	| "driver"
+	| "tool-budget-exceeded"
 	| "timeout"
 	| "cancelled"
 	| "dependency-failed";
@@ -120,6 +126,11 @@ export interface AiraChildRun {
 	error?: { category: AiraChildFailureCategory; message: string; retryable: boolean };
 	/** Real provider token usage when available. */
 	tokenUsage?: AiraChildTokenUsage;
+	/**
+	 * Last truthful activity while running (derived from captured events;
+	 * undefined until the first event). Feeds "running · tool" style rows.
+	 */
+	activity?: AiraChildActivity;
 }
 
 /** UI-ready child row (bounded; derived from AiraChildRun). */
@@ -131,6 +142,8 @@ export interface AiraChildSnapshot {
 	task: string;
 	status: AiraChildRunStatus;
 	phase: AiraChildPhase;
+	/** Last truthful activity while running (Agent Inspector rows). */
+	activity?: AiraChildActivity;
 	model: string | undefined;
 	elapsedMs?: number;
 	dependencies: string[];

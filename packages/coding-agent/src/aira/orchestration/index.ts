@@ -2,6 +2,7 @@
  * Aira orchestration — public surface.
  */
 export * from "./envelope.ts";
+export * from "./events.ts";
 export * from "./manager.ts";
 export * from "./roles.ts";
 export * from "./runner.ts";

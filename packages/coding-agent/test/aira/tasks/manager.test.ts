@@ -56,6 +56,12 @@ class FakeOrchestration implements AiraOrchestrationHandle {
 	get(): never {
 		throw new Error("not used");
 	}
+	events(): never {
+		throw new Error("not used");
+	}
+	subscribeEvents(): never {
+		throw new Error("not used");
+	}
 	status(): AiraOrchestrationStatus {
 		return orchestrationStatusOf(this.runs);
 	}
