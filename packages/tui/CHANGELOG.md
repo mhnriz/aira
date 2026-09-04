@@ -4,6 +4,9 @@
 
 ### Added
 
+- Added `Editor.atEmptyStart()` so hosts can detect a bare composer (no
+  text, cursor at column 0) for contextual Left-Arrow actions (used by the
+  Aira Agent Inspector) without ever changing normal cursor behavior.
 - Added `Container.insertAt(index, component)` so hosts can insert children at an explicit position (used by conversation tool grouping).
 - Added `ScrollView.getUnreadLines()` / `maxScrollTop` so hosts can report how much newer output sits below a scrolled-away viewport.
 - Added `TuiAltScreen.setKeyboardScrollTarget()` (declared on `ViewportTUI`): hosts can point unmodified keyboard viewport navigation (PageUp/PageDown, half-page/line scroll, Home/End) at a secondary scroll view; unset targets the primary view. No behavior change when unused.

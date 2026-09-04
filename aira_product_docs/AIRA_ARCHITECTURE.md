@@ -702,6 +702,14 @@ Agent / Goal / Orchestration
   child run records; the Task Manager owns manual/model rows and projects
   child runs as read-only rows (patching refused). `blocked` is derived;
   transitions are forward-only; single-task patching only.
+- **Agent Inspector (Phase 12.2)**: per-run structured event buffers are
+  orchestration-owned side state (`orchestration/events.ts` — bounded ring
+  400 events / 100k chars, capture as a stream side-channel) with a
+  read-only query + per-run live subscription seam; full transcripts never
+  enter `AiraSessionState`. Interactive mode swaps the conversation pane's
+  ScrollView per view (root/browser/child) so each view's scroll/follow
+  state survives untouched; the Workbench AGENTS panel marks the inspected
+  child with `>` (pure UI selection). Viewing is read-only, zero-token.
 - **Goal waiting**: structured kinds `user-question` / `permission` /
   `evidence` (never inferred from strings); answer resumes, semantic
   cancel keeps the goal waiting, permission denial resumes the round.

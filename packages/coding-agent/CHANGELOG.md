@@ -3,6 +3,29 @@
 ## [Unreleased]
 
 ### Added
+- **Aira**: Native Agent Inspector (Phase 12.2). A bare Left Arrow on an empty
+  composer (cursor at start, root conversation selected, ≥1 child) opens the
+  Agent Browser: running → waiting → queued → recently settled children with
+  role, bounded task summary, truthful state/activity (`running · tool`),
+  elapsed, and failure category/reason. Enter opens a READ-ONLY child
+  transcript rendered live from per-run orchestration-owned event buffers
+  (thinking, compact tool rows, bounded tool results, permission-denial rows
+  with the policy reason, status/failure/completion) — the composer becomes a
+  hint strip, so no input path into a child exists, and Esc returns DIRECTLY
+  to the root conversation from browser or child view. Each view owns its
+  ScrollView behind the shared conversation pane slot: the root conversation's
+  scroll/follow state survives inspection untouched, and the child view gets
+  independent follow/unread/PageUp/PageDown/Home/End/wheel semantics from the
+  Phase 12.1 engine. The Workbench AGENTS panel marks the inspected child with
+  a copper `>` (UI selection only, never ownership/cancellation) and the
+  footer shows a compact `VIEW <role>` label when room allows. Child event
+  buffers are bounded (≤400 events, ≤100k chars per run; capture is a stream
+  side-channel, one event per model block), evicted with run history, never
+  enter `AiraSessionState`, and viewing consumes ZERO model tokens. Tool-budget
+  exhaustion now surfaces as its own `tool-budget-exceeded` failure category
+  instead of a generic driver error; a run-history eviction growth bug
+  (pending runs sorted first and never evicted) is fixed with a regression
+  test. Headless/SDK/RPC behavior is unchanged.
 - **Aira**: Native permission card UX (Phase 12.x). The permission dialog is now an Aira-native card that shows what is actually being requested: the operation kind, the real command/path/subject, working directory, workspace scope, and a deterministic reason for the ASK (`remote repository operation`, `dependency installation`, `write outside workspace`, `unknown extension tool`, …) — plus a one-line explanation under each approval scope (Allow once / Allow session / Allow always exact-subject wording / Deny). Card data is a bounded, redacted, UI-only projection (`permissions/presentation.ts`) of the canonical Phase 11 request + evaluation — token-free, never model context, never policy input; command text and parameter values pass through the existing verification secret-redaction (private keys, authorization headers, tokens, JWT shapes) and secret-like parameter keys are masked outright, with a `(secrets redacted)` note when masking occurred. Long commands wrap/truncate with an explicit `…` marker and every line bounds to the render width, so narrow terminals stay readable. The pending Workbench Permission panel and the footer ASK segment now show the operation/subject (`ASK ● git push --dry-run origin main`, `? Shell command`) instead of the generic question text, and the current-finding label no longer duplicates it; permission mode stays a separate `PERM normal` segment. Decision semantics, exact-subject non-broadening, PLAN/yolo/strict behavior, headless truthfulness, timeout/cancel handling, and the canonical interaction-manager ownership are unchanged.
 
 - **Aira**: Compact native tool activity rendering in the interactive conversation. Tool calls render as one aira-zhr row by default (`✓ read src/foo.ts`, `✓ edit workbench.ts +42 -11`, `✓ test tui-multipane.test.ts 41 passed · 4.5s`, `● process npm run dev running · 3m12s`, `✕ test agent-session-retry.test.ts 2 failed`) instead of stock command/output blocks: routine stdout is never dumped, shell commands classify by purpose (test/check/build) with bounded test-runner counts, edit deltas and ls/find/grep entry counts are inline, failures show a concise headline plus a bounded error tail, and managed process rows track running/exited/terminated live (pid + duration). Consecutive successful runs of the same quick file tool merge into one row with per-file sub-lines (`✓ read 3 files`), dissolving back into standalone rows on failure so no failure is hidden. `app.tools.expand` (Ctrl+O) still toggles the existing full-output presentation; compaction is presentation-only — results stay in the transcript for the model, verifier, and HTML export untouched.

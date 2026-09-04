@@ -423,3 +423,49 @@ phase); live LSP diagnostics on this machine never publish (Phase 5
 environment issue); a compact density mode beyond the shared spacing
 constants, per-panel configurators, and a third-party panel registry stay
 deferred by design.
+
+---
+
+## B-009 — Agent Inspector (Phase 12.2) — DONE
+
+**Status:** done (see `phases/PHASE_12_2_AGENT_INSPECTOR.md`)
+
+Native child-Agent observability from the root conversation:
+
+- Left Arrow on an EMPTY composer (cursor at start, root selected, ≥1 child)
+  opens the Agent Browser; Enter views a child; Esc returns DIRECTLY to the
+  root conversation (browser or child view).
+- Browser lists running → waiting → queued → recently settled children with
+  role, bounded task summary, truthful state/activity (`running · tool`),
+  elapsed, and failure category/reason (including the new
+  `tool-budget-exceeded` category).
+- Child transcript view renders the run's structured event buffer live:
+  thinking, compact tool rows (`✓ read path`, `✕ bash cmd`), bounded tool
+  results, permission-denial rows with the policy reason, status/failure/
+  completion lines. READ-ONLY: the composer becomes a hint strip, no input
+  path into a child exists.
+- Per-view ScrollViews behind the shared conversation pane slot: root scroll
+  position/follow state survive inspection untouched; child view has
+  independent follow/unread/PageUp/PageDown/Home/End/wheel semantics.
+- Workbench AGENTS rows mark the inspected child with `>` (UI selection
+  only); footer shows a compact `VIEW <role>` label when room allows.
+- Zero model tokens: viewing consumes no provider calls; transcripts are
+  orchestration-owned bounded buffers, never `AiraSessionState`.
+- Tests: `test/aira/agent-inspector.test.ts`,
+  `test/aira/orchestration/events.test.ts`, runner/manager seam tests.
+
+Carried forward (explicitly deferred in v1): steering into children,
+transcript search/filtering, persisted transcript snapshots.
+
+### Backlog — record-only follow-up (NOT implemented this phase)
+
+**Model runtime mode awareness:** in BUILD/PLAN/REVIEW mode the host
+enforcement knows the mode, but the model does not always know its effective
+mode — in PLAN this causes wasted attempts to call mutation tools, perform
+writes, and sometimes delegate implement/write work to a child. Inject the
+smallest invisible backend-side effective-mode/control hint so the model
+knows BUILD/PLAN/REVIEW without exposing it in the visible composer or adding
+unnecessary context. A later context-cost audit should measure ambient token
+overhead from: mode awareness, project context, Goal, browser, verification,
+tasks, orchestration, and other injected runtime context — the Agent
+Inspector itself is zero-token.

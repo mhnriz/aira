@@ -466,6 +466,10 @@ engineering interface. Subsystems own state; the UI only projects it.
 - `Ctrl+Shift+O` Workbench toggle (`Ctrl+O` remains tool expansion), `/workbench`
   command, four Workbench settings, `/doctor` workbench/theme/shortcut
   checks, extension-chrome conflict diagnostics.
+- Phase 12.1 (native multi-pane viewports — done, see
+  `phases/PHASE_12_1_NATIVE_VIEWPORTS.md`) and Phase 12.2 (native Agent
+  Inspector — done, see `phases/PHASE_12_2_AGENT_INSPECTOR.md`): focused UI
+  passes; no new roadmap phase.
 
 ### Exit criteria
 
