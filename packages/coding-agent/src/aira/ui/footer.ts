@@ -333,6 +333,12 @@ function permissionSegment(state: AiraSessionState | undefined): WorkbenchFooter
 	};
 }
 
+/** Agent Inspector compact rail label; opportunistically dropped. */
+function inspectedSegment(inspected: string | undefined): WorkbenchFooterSegment | undefined {
+	if (!inspected) return undefined;
+	return { id: "inspector", text: inspected.toUpperCase(), role: "muted", dropRank: DROP.permission };
+}
+
 function cwdSegment(cwd: string, branch: string | undefined): WorkbenchFooterSegment {
 	const text = branch ? `${cwd} (${branch})` : cwd;
 	const compact = branch ? `${cwd.split("/").pop() ?? cwd} (${branch})` : (cwd.split("/").pop() ?? cwd);
@@ -392,6 +398,8 @@ export function buildFooterSegments(input: {
 	thinkingLevel: string | undefined;
 	/** Opportunistic token/cost telemetry (drops first; set by the footer owner). */
 	usage?: string;
+	/** Agent Inspector view label ("VIEW explore") when a child is inspected. */
+	inspected?: string;
 }): { left: WorkbenchFooterSegment[]; right: WorkbenchFooterSegment[] } {
 	const { state, finding } = input;
 	const left: WorkbenchFooterSegment[] = [
@@ -405,6 +413,7 @@ export function buildFooterSegments(input: {
 		...(goalSegment(state) ? [goalSegment(state)!] : []),
 		...(executionSegment(state) ? [executionSegment(state)!] : []),
 		...(permissionSegment(state) ? [permissionSegment(state)!] : []),
+		...(inspectedSegment(input.inspected) ? [inspectedSegment(input.inspected)!] : []),
 	];
 	const right: WorkbenchFooterSegment[] = [
 		cwdSegment(input.cwd, input.branch),

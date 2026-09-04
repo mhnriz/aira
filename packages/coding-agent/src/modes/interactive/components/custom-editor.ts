@@ -24,6 +24,12 @@ export class CustomEditor extends Editor {
 	public onPasteImage?: () => void;
 	/** Handler for extension-registered shortcuts. Returns true if handled. */
 	public onExtensionShortcut?: (data: string) => boolean;
+	/**
+	 * Contextual bare Left Arrow at the start of an empty composer. The host
+	 * handler returns true when the key press was consumed (e.g. the Agent
+	 * Browser opened); false falls through to normal editor behavior.
+	 */
+	public onContextualLeftArrow?: () => boolean;
 
 	constructor(tui: TUI, theme: EditorTheme, keybindings: KeybindingsManager, options?: EditorOptions) {
 		super(tui, theme, options);
@@ -144,6 +150,17 @@ export class CustomEditor extends Editor {
 		) {
 			super.handleInput(data);
 			return;
+		}
+
+		// Contextual Left Arrow: at the emptiness start of the composer the
+		// host may open the Agent Browser. The check lives inside the native
+		// keybinding architecture (tui.editor.cursorLeft), never a raw escape
+		// sequence, and only fires on an EMPTY editor at column 0, so normal
+		// cursor navigation is untouched everywhere else.
+		if (this.keybindings.matches(data, "tui.editor.cursorLeft") && this.atEmptyStart()) {
+			if (this.onContextualLeftArrow?.()) {
+				return;
+			}
 		}
 
 		// Check all other app actions

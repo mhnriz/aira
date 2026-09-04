@@ -140,6 +140,7 @@ export type WorkbenchFooterSegmentId =
 	| "goal"
 	| "execution"
 	| "permission"
+	| "inspector"
 	| "cwd"
 	| "git"
 	| "context"
@@ -200,6 +201,8 @@ export interface WorkbenchProjectionInput {
 	};
 	/** Explicit user visibility choice (undefined = no explicit choice). */
 	explicitVisible: boolean | undefined;
+	/** Run id whose transcript the Agent Inspector is viewing (UI state only). */
+	inspectedRunId?: string;
 	/** Display path under home for the footer cwd segment. */
 	cwd: string;
 	/** Git branch for the footer cwd segment (from the cached footer seam). */

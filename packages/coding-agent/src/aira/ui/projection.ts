@@ -39,6 +39,7 @@ export function projectWorkbench(input: WorkbenchProjectionInput): WorkbenchProj
 		workingSet: input.workingSet,
 		symbols: input.symbols,
 		finding,
+		inspectedRunId: input.inspectedRunId,
 	});
 
 	// Density + layout shaping (bounded, deterministic).

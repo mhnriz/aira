@@ -54,10 +54,17 @@ export class FooterComponent implements Component {
 	private autoCompactEnabled = true;
 	private session: AgentSession;
 	private footerData: ReadonlyFooterDataProvider;
+	/** Agent Inspector view label ("VIEW explore") while a child is inspected. */
+	private inspectedLabel: string | undefined;
 
 	constructor(session: AgentSession, footerData: ReadonlyFooterDataProvider) {
 		this.session = session;
 		this.footerData = footerData;
+	}
+
+	/** Set the Agent Inspector rail label (undefined at the root conversation). */
+	setInspectedLabel(label: string | undefined): void {
+		this.inspectedLabel = label;
 	}
 
 	setSession(session: AgentSession): void {
@@ -117,6 +124,7 @@ export class FooterComponent implements Component {
 			modelId: model?.id ?? "no-model",
 			thinkingLevel: thinkingLevel === "off" ? undefined : thinkingLevel,
 			usage: this.buildUsageText(),
+			inspected: this.inspectedLabel,
 		});
 
 		const active = new Set(arbitrateFooterSegments(left, right, width));

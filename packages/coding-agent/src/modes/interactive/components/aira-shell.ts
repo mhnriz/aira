@@ -27,18 +27,39 @@ function balancedLine(left: string, right: string, width: number): string {
 /**
  * Aira-owned conversation pane title. A subtle copper focus mark appears next
  * to the title while the conversation pane is the keyboard scroll target.
+ * While the Agent Inspector is open the title is replaced by the inspector
+ * header ("AGENTS" or "AGENT · EXPLORE") plus an optional detail line, so a
+ * child view can never be mistaken for the root conversation.
  */
 export class AiraConversationTitleComponent implements Component {
 	private readonly getFocused: () => boolean;
+	private inspectorHeader: string | undefined;
+	private inspectorDetail: string | undefined;
 
 	constructor(getFocused: () => boolean) {
 		this.getFocused = getFocused;
+	}
+
+	/** Set (or clear) the Agent Inspector header; overrides CONVERSATION. */
+	setInspectorHeader(header: string | undefined, detail?: string): void {
+		this.inspectorHeader = header;
+		this.inspectorDetail = detail;
 	}
 
 	invalidate(): void {}
 
 	render(width: number): string[] {
 		const safeWidth = Math.max(1, Math.trunc(width));
+		if (this.inspectorHeader) {
+			const detail = this.inspectorDetail
+				? ` ${theme.fg("muted", truncateToWidth(this.inspectorDetail, Math.max(8, safeWidth - 24), theme.fg("dim", "…")))}`
+				: "";
+			const title = `${theme.bold(theme.fg("copper", this.inspectorHeader))}${detail}`;
+			return [
+				truncateToWidth(title, safeWidth, theme.fg("dim", "…")),
+				theme.fg("borderMuted", "─".repeat(safeWidth)),
+			];
+		}
 		const title = this.getFocused()
 			? `${theme.bold(theme.fg("text", "CONVERSATION"))} ${theme.fg("copperBright", "●")}`
 			: theme.bold(theme.fg("text", "CONVERSATION"));

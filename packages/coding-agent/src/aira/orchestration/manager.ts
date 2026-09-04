@@ -88,7 +88,15 @@ export interface AiraOrchestrationManagerOptions {
 	/** Runner seam (unit tests inject canned outcomes). */
 	runner?: (
 		runtime: AiraChildRuntime,
-		options: { cwd: string; prompt: string; systemPrompt: string; tools: AgentTool[]; timeoutMs: number },
+		options: {
+			cwd: string;
+			prompt: string;
+			systemPrompt: string;
+			tools: AgentTool[];
+			timeoutMs: number;
+			/** Live event sink (Agent Inspector); the real runner emits through it. */
+			events?: (event: AiraChildEvent) => void;
+		},
 		signal?: AbortSignal,
 	) => Promise<AiraChildOutcome>;
 	/** Max children per batch (tests may lower it). */
@@ -522,10 +530,13 @@ export class AiraOrchestrationManager implements AiraOrchestrationHandle {
 		if (this.runs.size <= MAX_MANAGER_RUN_HISTORY) {
 			return;
 		}
-		// Bounded history: evict the oldest settled run first, then the oldest run.
+		// Bounded history: evict the oldest SETTLED run first. Pending/running
+		// runs sort LAST (the just-created run must never be evicted): a naive
+		// "settledAt ?? 0" sorts the brand-new run first and the history would
+		// never evict under sequential awaited dispatches (growth bug, fixed).
 		const candidates = [...this.runs.values()].sort((a, b) => {
-			const settledA = a.phase === "settled" ? (a.completedAt ?? 0) : 0;
-			const settledB = b.phase === "settled" ? (b.completedAt ?? 0) : 0;
+			const settledA = a.phase === "settled" ? (a.completedAt ?? 0) : Number.MAX_SAFE_INTEGER;
+			const settledB = b.phase === "settled" ? (b.completedAt ?? 0) : Number.MAX_SAFE_INTEGER;
 			return settledA - settledB;
 		});
 		const evict = candidates[0];

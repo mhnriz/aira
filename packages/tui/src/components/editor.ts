@@ -412,6 +412,16 @@ export class Editor implements Component, Focusable {
 		return this.state.lines.length === 1 && this.state.lines[0] === "";
 	}
 
+	/**
+	 * True when the editor holds no text and the cursor sits at the very
+	 * start (line 0, column 0). Hosts use this for contextual actions on a
+	 * bare Left Arrow (e.g. opening the Agent Browser) without ever breaking
+	 * normal cursor navigation.
+	 */
+	atEmptyStart(): boolean {
+		return this.isEditorEmpty() && this.state.cursorLine === 0 && this.state.cursorCol === 0;
+	}
+
 	private isOnFirstVisualLine(): boolean {
 		const visualLines = this.buildVisualLineMap(this.lastWidth);
 		const currentVisualLine = this.findCurrentVisualLine(visualLines);

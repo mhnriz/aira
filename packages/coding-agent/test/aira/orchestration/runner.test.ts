@@ -11,6 +11,7 @@ import { join } from "node:path";
 import {
 	fauxAssistantMessage,
 	fauxText,
+	fauxThinking,
 	fauxToolCall,
 	registerFauxProvider,
 	streamSimple,
@@ -251,5 +252,107 @@ describe("Aira child runner (Phase 9)", () => {
 		if (!outcome.ok) {
 			expect(outcome.driverError).toContain("cancelled");
 		}
+	});
+
+	describe("Agent Inspector event capture (Phase 12.x)", () => {
+		it("captures assistant text, thinking, tool calls, and tool results as structured events", async () => {
+			const root = makeProjectDir();
+			const { runtime, setResponses } = fauxRuntime();
+			writeFileSync(join(root, "src", "player.ts"), "export const seek = 1;\n");
+			setResponses([
+				fauxAssistantMessage([
+					fauxText("Inspecting the player module\u2026"),
+					fauxToolCall("read", { path: "src/player.ts" }),
+				]),
+				fauxAssistantMessage(fauxText(COMPLETED_RESULT)),
+			]);
+			const captured: import("../../../src/aira/orchestration/events.ts").AiraChildEvent[] = [];
+			const outcome = await runAiraChild(runtime, {
+				cwd: root,
+				prompt: "TASK map it",
+				systemPrompt: "Child role",
+				tools: readOnlyTools(root),
+				timeoutMs: 10_000,
+				events: (event) => captured.push(event),
+			});
+			expect(outcome.ok).toBe(true);
+			const kinds = captured.map((event) => event.kind);
+			expect(kinds).toContain("text");
+			expect(kinds).toContain("tool_call");
+			expect(kinds).toContain("tool_result");
+			const textEvent = captured.find((event) => event.kind === "text");
+			expect(textEvent && textEvent.kind === "text" ? textEvent.text : "").toContain("Inspecting");
+			const call = captured.find((event) => event.kind === "tool_call");
+			expect(call && call.kind === "tool_call" ? call.args : "").toContain("src/player.ts");
+			const result = captured.find((event) => event.kind === "tool_result");
+			expect(result && result.kind === "tool_result" ? result.isError : true).toBe(false);
+		});
+
+		it("captures thinking blocks as structured thinking events", async () => {
+			const root = makeProjectDir();
+			const { runtime, setResponses } = fauxRuntime();
+			setResponses([fauxAssistantMessage([fauxThinking("tracing the control flow"), fauxText(COMPLETED_RESULT)])]);
+			const captured: Array<{ kind: string; text?: string }> = [];
+			const outcome = await runAiraChild(runtime, {
+				cwd: root,
+				prompt: "TASK",
+				systemPrompt: "",
+				tools: readOnlyTools(root),
+				timeoutMs: 10_000,
+				events: (event) => captured.push(event),
+			});
+			expect(outcome.ok).toBe(true);
+			const thinking = captured.find((event) => event.kind === "thinking");
+			expect(thinking?.text).toContain("tracing");
+		});
+
+		it("captures permission denials as structured permission events", async () => {
+			const root = makeProjectDir();
+			const { runtime, setResponses } = fauxRuntime();
+			setResponses([
+				fauxAssistantMessage([fauxToolCall("bash", { command: "npm test" })]),
+				fauxAssistantMessage(fauxText(COMPLETED_RESULT)),
+			]);
+			const captured: Array<{ kind: string; tool?: string; reason?: string }> = [];
+			const outcome = await runAiraChild(runtime, {
+				cwd: root,
+				prompt: "TASK",
+				systemPrompt: "",
+				tools: readOnlyTools(root),
+				gateTool: () => ({ block: true, reason: "children cannot prompt for permission; denied" }),
+				timeoutMs: 10_000,
+				events: (event) => captured.push(event),
+			});
+			expect(outcome.ok).toBe(true);
+			const permission = captured.find((event) => event.kind === "permission");
+			expect(permission?.tool).toBe("bash");
+			expect(permission?.reason).toContain("children cannot prompt");
+			// A blocked call records the denial as a permission event; no
+			// tool_result is fabricated for a call that never executed.
+			expect(captured.some((event) => event.kind === "tool_result")).toBe(false);
+		});
+
+		it("bounds tool arguments in captured events", async () => {
+			const root = makeProjectDir();
+			const { runtime, setResponses } = fauxRuntime();
+			const longPath = "x".repeat(2_000);
+			setResponses([
+				fauxAssistantMessage([fauxToolCall("read", { path: longPath })]),
+				fauxAssistantMessage(fauxText(COMPLETED_RESULT)),
+			]);
+			const captured: Array<{ kind: string; args?: string }> = [];
+			const outcome = await runAiraChild(runtime, {
+				cwd: root,
+				prompt: "TASK",
+				systemPrompt: "",
+				tools: readOnlyTools(root),
+				timeoutMs: 10_000,
+				events: (event) => captured.push(event),
+			});
+			expect(outcome.ok).toBe(true);
+			const call = captured.find((event) => event.kind === "tool_call");
+			const args = (call && call.kind === "tool_call" ? call.args : undefined) ?? "";
+			expect(args.length).toBeLessThanOrEqual(400);
+		});
 	});
 });

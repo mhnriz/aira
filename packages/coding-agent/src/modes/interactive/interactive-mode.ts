@@ -138,6 +138,7 @@ import { killTrackedDetachedChildren } from "../../utils/shell.ts";
 import { loadAllHighlightLanguages } from "../../utils/syntax-highlight.ts";
 import { ensureTool, type ToolStatus } from "../../utils/tools-manager.ts";
 import { checkForNewAiraVersion, type LatestPiRelease } from "../../utils/version-check.ts";
+import { AgentInspectorController } from "./agent-inspector/agent-inspector.ts";
 import {
 	AiraConversationTitleComponent,
 	AiraHeaderComponent,
@@ -475,7 +476,7 @@ export class InteractiveMode {
 	private documentContainer: Container;
 	private transcriptScrollView: TuiLayouts.ScrollView | undefined;
 	private fullscreenLayoutRoot: Component | undefined;
-	private conversationTitle: Component | undefined;
+	private conversationTitle: AiraConversationTitleComponent | undefined;
 	private newOutputIndicator: Component | undefined;
 	/**
 	 * Keyboard viewport-scroll target (UI state only, never AiraSessionState).
@@ -498,6 +499,8 @@ export class InteractiveMode {
 	private footerDataProvider: FooterDataProvider;
 	// Phase 12 native Workbench (sidebar + rail + footer projection owner).
 	private workbench: WorkbenchController | undefined;
+	// Agent Inspector (Phase 12.x): left viewport child browser + transcripts.
+	private inspector: AgentInspectorController | undefined;
 	private mainLayoutRoot: Component | undefined;
 	private dockContainer: Component | undefined;
 	private workbenchRoot: Component | undefined;
@@ -633,6 +636,9 @@ export class InteractiveMode {
 			this.resetExtensionUI();
 			this.workbench?.dispose();
 			this.workbench = undefined;
+			this.inspector?.dispose();
+			this.inspector = undefined;
+			this.inspectorActiveScrollView = undefined;
 		});
 		this.runtimeHost.setRebindSession(async () => {
 			await this.rebindCurrentSession({ renderBeforeBind: true });
@@ -918,11 +924,68 @@ export class InteractiveMode {
 			getFooterLineCount: () => this.footerRenderedLineCount(),
 			getTranscriptFollowing: () => this.transcriptScrollView?.isFollowingEnd ?? true,
 			getFocused: () => this.workbenchFocused(),
+			getInspectedRunId: () => this.inspector?.inspectedRunId,
 			requestRender: () => this.ui.requestRender(),
 			invalidate: () => this.ui.invalidate(),
 			layoutChanged: () => this.onWorkbenchLayoutChanged(),
 		});
 		this.workbench.attach();
+	}
+
+	/** The rooted conversation viewport: the transcript, or the inspector's. */
+	private inspectorActiveScrollView: TuiLayouts.ScrollView | undefined;
+
+	/** Conversation viewport currently mounted (inspector view or root). */
+	private conversationScrollView(): TuiLayouts.ScrollView | undefined {
+		return this.inspectorActiveScrollView ?? this.transcriptScrollView;
+	}
+
+	/** Build the conversation pane VStack (root or inspector viewport). */
+	private buildMainLayoutRoot(): Component {
+		return new TuiLayouts.VStack([
+			{ component: this.conversationTitle!, basis: "auto", grow: 0, shrink: 0, minSize: 1 },
+			{ component: this.conversationScrollView()!, basis: 0, grow: 1, shrink: 1, minSize: 1 },
+			{ component: this.newOutputIndicator!, basis: "auto", grow: 0, shrink: 0, minSize: 0 },
+			{ component: this.dockContainer!, basis: "auto", grow: 0, shrink: 1, minSize: 1 },
+		]);
+	}
+
+	/**
+	 * Swap the conversation viewport to an inspector ScrollView (undefined =
+	 * back to the root transcript). Each view keeps its OWN ScrollView, so
+	 * the root conversation's scroll position and follow state survive
+	 * inspection untouched, and the child view gets an independent viewport.
+	 */
+	private swapConversationViewport(active: TuiLayouts.ScrollView | undefined): void {
+		this.inspectorActiveScrollView = active;
+		this.mainLayoutRoot = this.buildMainLayoutRoot();
+		this.rebuildWorkbenchLayout();
+		this.syncViewportFocus();
+		this.ui.requestRender();
+	}
+
+	/**
+	 * Agent Inspector setup (Phase 12.x). Owns the left-viewport browser and
+	 * child transcript views; the Workbench pane stays the root live state.
+	 */
+	private setupAgentInspector(): void {
+		this.inspector?.dispose();
+		this.inspector = new AgentInspectorController({
+			session: this.session,
+			ui: this.ui,
+			document: this.documentContainer,
+			rootChildren: [this.loadedResourcesContainer, this.chatContainer],
+			swapViewport: (active) => this.swapConversationViewport(active),
+			title: this.conversationTitle!,
+			editorContainer: this.editorContainer,
+			editor: this.editor,
+			requestRender: () => this.ui.requestRender(),
+			invalidate: () => this.ui.invalidate(),
+			onInspectedChange: () => {
+				this.footer.setInspectedLabel(this.inspector?.inspectedLabel);
+				this.ui.requestRender();
+			},
+		});
 	}
 
 	/** Footer line count (1 + optional extension-status line). */
@@ -989,7 +1052,9 @@ export class InteractiveMode {
 	 */
 	private syncViewportFocus(): void {
 		if (!TuiLayouts.isViewportTUI(this.renderer)) return;
-		this.renderer.setKeyboardScrollTarget(this.workbenchFocused() ? this.workbench?.scrollView : undefined);
+		this.renderer.setKeyboardScrollTarget(
+			this.workbenchFocused() ? this.workbench?.scrollView : this.conversationScrollView(),
+		);
 		this.ui.requestRender();
 	}
 
@@ -1123,15 +1188,11 @@ export class InteractiveMode {
 		// composer dock. The Aira header + status rail live outside this pane.
 		this.conversationTitle = new AiraConversationTitleComponent(() => this.conversationFocused());
 		this.newOutputIndicator = new AiraNewOutputIndicatorComponent(
-			() => this.transcriptScrollView?.getUnreadLines() ?? 0,
+			() => this.conversationScrollView()?.getUnreadLines() ?? 0,
 		);
-		this.mainLayoutRoot = new TuiLayouts.VStack([
-			{ component: this.conversationTitle, basis: "auto", grow: 0, shrink: 0, minSize: 1 },
-			{ component: this.transcriptScrollView, basis: 0, grow: 1, shrink: 1, minSize: 1 },
-			{ component: this.newOutputIndicator, basis: "auto", grow: 0, shrink: 0, minSize: 0 },
-			{ component: this.dockContainer, basis: "auto", grow: 0, shrink: 1, minSize: 1 },
-		]);
+		this.mainLayoutRoot = this.buildMainLayoutRoot();
 		this.setupWorkbench();
+		this.setupAgentInspector();
 		this.rebuildWorkbenchLayout();
 		this.mountInteractiveTui(this.renderer, [
 			this.headerContainer,
@@ -3110,6 +3171,15 @@ export class InteractiveMode {
 		this.defaultEditor.onAction("app.mode.cycle", () => this.cycleAiraMode());
 		this.defaultEditor.onAction("app.model.cycleForward", () => this.cycleModel("forward"));
 		this.defaultEditor.onAction("app.model.cycleBackward", () => this.cycleModel("backward"));
+
+		// Contextual Left Arrow on an EMPTY composer at the start opens the
+		// Agent Browser when inspectable children exist; everywhere else the
+		// editor keeps its normal cursor behavior (CustomEditor checks the
+		// tui.editor.cursorLeft keybinding — never a raw escape sequence).
+		this.defaultEditor.onContextualLeftArrow = () => {
+			if (!this.inspector) return false;
+			return this.inspector.openBrowser();
+		};
 
 		// Global debug handler on TUI (works regardless of focus)
 		this.ui.onDebug = () => this.handleDebugCommand();
@@ -7587,6 +7657,8 @@ export class InteractiveMode {
 		this.detachAiraInteractionBridge();
 		this.workbench?.dispose();
 		this.workbench = undefined;
+		this.inspector?.dispose();
+		this.inspector = undefined;
 		if (this.settingsManager.getShowTerminalProgress()) {
 			this.ui.terminal.setProgress(false);
 		}

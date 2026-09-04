@@ -286,7 +286,7 @@ export function tasksPanel(state: AiraSessionState): WorkbenchPanel | undefined 
 // P1 — orchestration agents (canonical child lifecycle, no task ownership)
 // ---------------------------------------------------------------------------
 
-export function agentsPanel(state: AiraSessionState): WorkbenchPanel | undefined {
+export function agentsPanel(state: AiraSessionState, inspectedRunId?: string): WorkbenchPanel | undefined {
 	const orchestration = state.orchestration;
 	if (!orchestration) return undefined;
 	const active = orchestration.children.filter((child) => child.status === "running" || child.status === "pending");
@@ -294,11 +294,15 @@ export function agentsPanel(state: AiraSessionState): WorkbenchPanel | undefined
 	const rows: WorkbenchRow[] = active.slice(0, 6).map((child) => {
 		const running = child.status === "running";
 		const waiting = child.phase === "waiting-dependency" ? "dependency" : "capacity";
+		const inspected = child.id === inspectedRunId;
+		const activity = running && child.activity ? ` · ${child.activity}` : "";
 		return {
 			key: child.id,
-			value: `${running ? "●" : "○"} ${child.role}`,
+			// The leading "›" means "transcript currently being viewed" — pure
+			// UI selection state, never ownership/cancellation/priority.
+			value: `${inspected ? "› " : ""}${running ? "●" : "○"} ${child.role}`,
 			role: running ? "cyan" : "yellow",
-			trailing: running ? elapsed(child.elapsedMs) : "queued",
+			trailing: running ? `${elapsed(child.elapsedMs) ?? ""}${activity}`.trim() : "queued",
 			trailingRole: running ? "muted" : "yellow",
 			detail: `${child.task}${running ? "" : ` · waiting ${waiting}`}`,
 		};
@@ -650,6 +654,8 @@ export function buildPanels(input: {
 	workingSet: readonly WorkbenchFileRow[];
 	symbols: readonly WorkbenchSymbolRow[];
 	finding: WorkbenchFinding | undefined;
+	/** Run id whose transcript the inspector is viewing (UI selection state). */
+	inspectedRunId?: string;
 }): WorkbenchPanel[] {
 	const candidates = [
 		interactionPanel(input.state),
@@ -657,7 +663,7 @@ export function buildPanels(input: {
 		verificationPanel(input.state),
 		goalPanel(input.state),
 		tasksPanel(input.state),
-		agentsPanel(input.state),
+		agentsPanel(input.state, input.inspectedRunId),
 		executionPanel(input.state),
 		browserPanel(input.state),
 		workingSetPanel(input.workingSet),

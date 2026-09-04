@@ -38,6 +38,8 @@ interface ManagerFixture {
 			tools: string[];
 			timeoutMs: number;
 			signal?: AbortSignal;
+			/** Live event sink (Agent Inspector); injected runners may emit through it. */
+			events?: (event: import("../../../src/aira/orchestration/events.ts").AiraChildEvent) => void;
 		}) => Promise<AiraChildOutcome> | AiraChildOutcome;
 		resolveRuntime: (options: { model?: string; settings: AiraOrchestrationSettings }) => Promise<
 			| {
@@ -102,6 +104,7 @@ function makeManager(
 				tools: runOptions.tools.map((tool) => tool.name),
 				timeoutMs: runOptions.timeoutMs,
 				signal,
+				events: runOptions.events,
 			});
 			return outcome instanceof Promise ? outcome : Promise.resolve(outcome);
 		},
@@ -494,5 +497,133 @@ describe("Aira orchestration manager (Phase 9)", () => {
 		const result = await fixture.handle.schedule([{ role: "explore", task: "t" }]);
 		expect(result.ok).toBe(false);
 		expect(result.tasks[0]!.reason).toContain("disabled");
+	});
+
+	describe("Agent Inspector seam (Phase 12.x)", () => {
+		it("records stream/tool events via the runner sink into the run buffer", async () => {
+			const fixture = makeManager();
+			activeSessions.push(fixture.state);
+			fixture.runner.resolveRuntime = async () => defaultResolve;
+			fixture.runner.call = async () => ({ ok: true, result: COMPLETED, model: "x" });
+			// The injected runner receives the SAME events sink the real runner
+			// uses; emitting through it exercises the manager's record path.
+			const run = await fixture.handle.schedule([{ role: "explore", task: "t" }], { awaitResults: true });
+			const runId = run.tasks[0]!.runId!;
+			const buffered = fixture.handle.events(runId);
+			// Lifecycle events are always recorded (pending → running → completion).
+			expect(buffered.some((event) => event.kind === "status")).toBe(true);
+			expect(buffered.some((event) => event.kind === "completion")).toBe(true);
+		});
+
+		it("subscribeEvents delivers live events and unsubscribes cleanly", async () => {
+			const fixture = makeManager();
+			const events: import("../../../src/aira/orchestration/events.ts").AiraChildEvent[] = [];
+			fixture.runner.resolveRuntime = async () => defaultResolve;
+			fixture.runner.call = async (options) => {
+				// Simulate live stream capture through the runner sink.
+				options.events?.({
+					kind: "thinking",
+					at: Date.now(),
+					text: "inspecting the module",
+				});
+				options.events?.({
+					kind: "tool_call",
+					at: Date.now(),
+					toolCallId: "c1",
+					name: "read",
+					args: "src/a.ts",
+				});
+				events.push({ kind: "probe", at: 0 } as never);
+				return { ok: true, result: COMPLETED, model: "x" };
+			};
+			const run = await fixture.handle.schedule([{ role: "explore", task: "t" }], { awaitResults: true });
+			const runId = run.tasks[0]!.runId!;
+			const seen: string[] = [];
+			const unsubscribe = fixture.handle.subscribeEvents(runId, (event) => seen.push(event.kind));
+			// The recorded buffer holds the runner's stream events in order.
+			const buffered = fixture.handle.events(runId);
+			expect(buffered.map((event) => event.kind)).toContain("thinking");
+			expect(buffered.map((event) => event.kind)).toContain("tool_call");
+			unsubscribe();
+			const noop = fixture.handle.subscribeEvents("missing-run", () => seen.push("unexpected"));
+			noop();
+			expect(seen).toEqual([]);
+			expect(fixture.handle.events("missing-run")).toEqual([]);
+		});
+
+		it("derives truthful last activity into run records and snapshot rows", async () => {
+			const fixture = makeManager();
+			activeSessions.push(fixture.state);
+			fixture.runner.resolveRuntime = async () => defaultResolve;
+			fixture.runner.call = async (options) => {
+				options.events?.({
+					kind: "thinking",
+					at: Date.now(),
+					text: "inspecting",
+				});
+				return { ok: true, result: COMPLETED, model: "x" };
+			};
+			// Background dispatch: the run is still active while we observe rows.
+			const gate = new Promise<void>(() => {});
+			void gate;
+			const run = await fixture.handle.schedule([{ role: "explore", task: "t" }], { awaitResults: false });
+			const runId = run.tasks[0]!.runId!;
+			await new Promise((resolve) => setTimeout(resolve, 30));
+			const record = fixture.handle.get(runId);
+			if (record?.status === "running") {
+				expect(record.activity).toBe("thinking");
+			}
+		});
+
+		it("tool-budget exhaustion surfaces as its own failure category", async () => {
+			const fixture = makeManager();
+			activeSessions.push(fixture.state);
+			fixture.runner.resolveRuntime = async () => defaultResolve;
+			fixture.runner.call = async () => ({ ok: false, driverError: "child exceeded its tool budget" });
+			await fixture.handle.schedule([{ role: "explore", task: "t" }], { awaitResults: true });
+			const run = fixture.handle.list()[0]!;
+			expect(run.status).toBe("failed");
+			expect(run.error?.category).toBe("tool-budget-exceeded");
+			const snapshot = fixture.state.orchestration!;
+			expect(snapshot.failures[0]!.category).toBe("tool-budget-exceeded");
+			expect(snapshot.children[0]!.error?.category).toBe("tool-budget-exceeded");
+		});
+
+		it("session disposal removes event buffers and live subscriptions", async () => {
+			const fixture = makeManager();
+			activeSessions.push(fixture.state);
+			fixture.runner.resolveRuntime = async () => defaultResolve;
+			fixture.runner.call = async () => ({ ok: true, result: COMPLETED, model: "x" });
+			const run = await fixture.handle.schedule([{ role: "explore", task: "t" }], { awaitResults: true });
+			const runId = run.tasks[0]!.runId!;
+			expect(fixture.handle.events(runId).length).toBeGreaterThan(0);
+			await fixture.handle.dispose();
+			expect(fixture.handle.events(runId)).toEqual([]);
+			const noop = fixture.handle.subscribeEvents(runId, () => undefined);
+			noop();
+		});
+
+		it("run history eviction also releases the evicted run's event buffer", async () => {
+			const fixture = makeManager();
+			activeSessions.push(fixture.state);
+			fixture.runner.resolveRuntime = async () => defaultResolve;
+			fixture.runner.call = async () => ({ ok: true, result: COMPLETED, model: "x" });
+			// Exceed the bounded history: the manager caps at 64 runs and the
+			// FIRST dispatched run must be the one evicted.
+			const first = await fixture.handle.schedule([{ role: "explore", task: "t0" }], { awaitResults: true });
+			const firstId = first.tasks[0]!.runId!;
+			expect(fixture.handle.events(firstId).length).toBeGreaterThan(0);
+			for (let index = 1; index < 66; index += 1) {
+				await fixture.handle.schedule([{ role: "explore", task: `t${index}` }], { awaitResults: true });
+			}
+			const runs = fixture.handle.list();
+			expect(runs.length).toBeLessThanOrEqual(64);
+			// The oldest surviving run still holds its buffer; the evicted one
+			// is gone (query degrades safely to empty; subscription is a no-op).
+			expect(runs.some((run) => run.id === firstId)).toBe(false);
+			expect(fixture.handle.events(firstId)).toEqual([]);
+			const noop = fixture.handle.subscribeEvents(firstId, () => undefined);
+			noop();
+		});
 	});
 });

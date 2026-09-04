@@ -49,6 +49,8 @@ export interface WorkbenchControllerOptions {
 	getTranscriptFollowing: () => boolean;
 	/** Whether the Workbench pane is the keyboard viewport-scroll target. */
 	getFocused: () => boolean;
+	/** Run id whose transcript the Agent Inspector is viewing (UI state only). */
+	getInspectedRunId: () => string | undefined;
 	requestRender: () => void;
 	invalidate: () => void;
 	/** Host rebuilds the fullscreen layout root (layoutChanged). */
@@ -246,6 +248,7 @@ export class WorkbenchController {
 				width: this.sidebarWidth,
 			},
 			explicitVisible: this.explicitVisible,
+			inspectedRunId: this.options.getInspectedRunId(),
 			cwd,
 			branch: this.options.getBranch(),
 			context: {
