@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- Fixed OpenAI-compatible Chat Completions requests ignoring an explicitly requested `toolChoice` when no tools are defined.
+
 ## [0.84.3] - 2026-08-24
 
 ### Breaking Changes
