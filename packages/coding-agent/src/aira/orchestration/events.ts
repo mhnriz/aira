@@ -54,7 +54,7 @@ export type AiraChildEvent =
 			summary: string;
 			detail?: string;
 	  }
-	| { kind: "permission"; at: number; tool: string; reason: string }
+	| { kind: "permission"; at: number; tool: string; reason: string; decision?: "allowed" | "denied" }
 	| { kind: "status"; at: number; status: AiraChildRunStatus; phase: AiraChildPhase; reason?: string }
 	| { kind: "failure"; at: number; category: AiraChildFailureCategory; message: string }
 	| { kind: "completion"; at: number; status: "completed" | "failed"; summary: string };

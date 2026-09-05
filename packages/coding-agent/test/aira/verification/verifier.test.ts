@@ -185,6 +185,28 @@ describe("Aira fresh-context verifier runner (Phase 8)", () => {
 		}
 	});
 
+	it("grants one progress-gated extension and reports it", async () => {
+		const root = makeProjectDir();
+		const { runtime, setResponses } = fauxRuntime();
+		setResponses([
+			fauxAssistantMessage([fauxToolCall("read", { path: "src/player.ts" })]),
+			fauxAssistantMessage([fauxToolCall("grep", { pattern: "seek", path: "src" })]),
+			fauxAssistantMessage(fauxText(PASS_VERDICT)),
+		]);
+		const outcome = await runAiraVerifier(runtime, {
+			cwd: root,
+			envelope: "x",
+			timeoutMs: 5000,
+			maxToolRounds: 1,
+		});
+		expect(outcome.ok).toBe(true);
+		if (outcome.ok) {
+			expect(outcome.toolCallsUsed).toBe(2);
+			expect(outcome.toolBudgetLimit).toBe(6);
+			expect(outcome.toolBudgetExtensions).toBe(1);
+		}
+	});
+
 	it("cancellation settles as a driver error", async () => {
 		const root = makeProjectDir();
 		const { runtime, setResponses } = fauxRuntime();

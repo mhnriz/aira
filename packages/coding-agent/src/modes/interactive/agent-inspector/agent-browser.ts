@@ -63,13 +63,17 @@ export function toBrowserRow(run: AiraChildRun): AgentBrowserRow {
 	const status = inspectorRunStatus(run);
 	const glyph =
 		run.status === "running" ? "●" : run.status === "pending" ? "○" : run.status === "completed" ? "✓" : "✕";
+	const budget =
+		run.toolBudgetUsed !== undefined && run.toolBudgetLimit !== undefined
+			? `tools ${run.toolBudgetUsed}/${run.toolBudgetLimit}${run.toolBudgetExtensions ? ` · +${run.toolBudgetExtensions} ext` : ""}`
+			: undefined;
 	return {
 		runId: run.id,
 		glyph,
 		role: run.role,
 		task: inspectorTaskSummary(run.task),
 		state: status.label,
-		detail: status.detail,
+		detail: [status.detail, budget].filter((part): part is string => part !== undefined).join(" · ") || undefined,
 		// Elapsed only where it is truthful: running (live ticker) and settled
 		// (duration). Waiting rows show their phase, never a misleading 0s.
 		elapsed: run.status === "running" || run.phase === "settled" ? inspectorElapsed(run) : undefined,

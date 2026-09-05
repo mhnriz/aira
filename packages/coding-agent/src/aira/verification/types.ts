@@ -139,6 +139,10 @@ export interface AiraVerificationStatus {
 	lastError?: string;
 	/** Why the last eligible automatic trigger skipped a run (trivial/dedupe), when applicable. */
 	lastSkipReason?: string;
+	/** Host-side verifier tool budget telemetry for the last run. */
+	toolBudgetUsed?: number;
+	toolBudgetLimit?: number;
+	toolBudgetExtensions?: number;
 	startedAt?: number;
 	completedAt?: number;
 	updatedAt: number;

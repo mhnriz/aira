@@ -226,6 +226,8 @@ describe("Agent Inspector browser (Phase 12.x)", () => {
 					phase: "running",
 					startedAt: now - 102_000,
 					activity: "tool",
+					toolBudgetUsed: 3,
+					toolBudgetLimit: 48,
 				}),
 				runOf({
 					id: "r-queued",
@@ -252,6 +254,8 @@ describe("Agent Inspector browser (Phase 12.x)", () => {
 					phase: "settled",
 					completedAt: now - 5_000,
 					durationMs: 12_000,
+					toolBudgetUsed: 48,
+					toolBudgetLimit: 48,
 					error: { category: "tool-budget-exceeded", message: "child exceeded its tool budget", retryable: false },
 				}),
 			],
@@ -269,6 +273,7 @@ describe("Agent Inspector browser (Phase 12.x)", () => {
 		expect(lines).toContain("waiting-dependency");
 		expect(lines).toContain("✕ implement");
 		expect(lines).toContain("tool-budget-exceeded");
+		expect(lines).toContain("tools 3/48");
 		// Header title flips away from CONVERSATION.
 		expect(plain(harness.title.render(40).join("\n"))).toContain("AGENTS");
 		expect(plain(harness.title.render(40).join("\n"))).not.toContain("CONVERSATION");

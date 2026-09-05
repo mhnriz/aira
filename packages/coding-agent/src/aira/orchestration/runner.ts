@@ -47,6 +47,8 @@ export const DEFAULT_CHILD_TIMEOUT_MS = 300_000;
 export const MAX_CHILD_TOOL_ROUNDS = 8;
 export const MAX_CHILD_TOOL_CALLS_PER_ROUND = 4;
 export const MAX_CHILD_OUTPUT_TOKENS = 2_000;
+export const MAX_CHILD_TOOL_EXTENSIONS = 1;
+export const CHILD_TOOL_EXTENSION_CALLS = 8;
 
 export interface AiraChildRuntime {
 	model: Model<any>;
@@ -79,11 +81,27 @@ export interface AiraChildRunnerOptions {
 	 * Optional — plain runs (tests without an inspector) skip capture.
 	 */
 	events?: (event: AiraChildEvent) => void;
+	/** Host callback for successful child edit/write operations. */
+	workspaceMutation?: (path: string) => void;
 }
 
 export type AiraChildOutcome =
-	| { ok: true; result: AiraChildResult; model: string; tokenUsage?: AiraChildTokenUsage }
-	| { ok: false; driverError: string };
+	| {
+			ok: true;
+			result: AiraChildResult;
+			model: string;
+			tokenUsage?: AiraChildTokenUsage;
+			toolCallsUsed?: number;
+			toolBudgetLimit?: number;
+			toolBudgetExtensions?: number;
+	  }
+	| {
+			ok: false;
+			driverError: string;
+			toolCallsUsed?: number;
+			toolBudgetLimit?: number;
+			toolBudgetExtensions?: number;
+	  };
 
 /** Run one fresh-context child (bounded tool loop + structured result). */
 export async function runAiraChild(
@@ -98,6 +116,11 @@ export async function runAiraChild(
 
 	const timeoutMs = options.timeoutMs ?? DEFAULT_CHILD_TIMEOUT_MS;
 	const maxRounds = options.maxToolRounds ?? MAX_CHILD_TOOL_ROUNDS;
+	let allowedRounds = maxRounds;
+	let toolBudgetLimit = maxRounds * MAX_CHILD_TOOL_CALLS_PER_ROUND;
+	let toolCallsUsed = 0;
+	let toolBudgetExtensions = 0;
+	const seenToolCalls = new Set<string>();
 	const baseOptions: SimpleStreamOptions = {
 		maxTokens: MAX_CHILD_OUTPUT_TOKENS,
 		cacheRetention: "none",
@@ -155,14 +178,34 @@ export async function runAiraChild(
 		);
 		accumulateUsage(assistant);
 		let round = 0;
-		while (hasToolCalls(assistant) && round < maxRounds) {
+		let roundHadProgress = false;
+		while (hasToolCalls(assistant)) {
+			if (round >= allowedRounds) {
+				if (toolBudgetExtensions >= MAX_CHILD_TOOL_EXTENSIONS || !roundHadProgress) {
+					return {
+						ok: false,
+						driverError: "child exceeded its tool budget",
+						toolCallsUsed,
+						toolBudgetLimit,
+						toolBudgetExtensions,
+					};
+				}
+				toolBudgetExtensions += 1;
+				allowedRounds += Math.ceil(CHILD_TOOL_EXTENSION_CALLS / MAX_CHILD_TOOL_CALLS_PER_ROUND);
+				toolBudgetLimit += CHILD_TOOL_EXTENSION_CALLS;
+			}
 			round += 1;
+			roundHadProgress = false;
 			const calls = toolCallsOf(assistant).slice(0, MAX_CHILD_TOOL_CALLS_PER_ROUND);
 			if (calls.length === 0) {
 				break;
 			}
 			const results: ToolResultMessage[] = [];
 			for (const call of calls) {
+				toolCallsUsed += 1;
+				const signature = `${call.name}:${JSON.stringify(call.arguments ?? {})}`;
+				const isNewToolCall = !seenToolCalls.has(signature);
+				seenToolCalls.add(signature);
 				const gate = options.gateTool?.(call.name, (call.arguments ?? {}) as Record<string, unknown>);
 				if (gate?.block) {
 					options.events?.({
@@ -170,6 +213,7 @@ export async function runAiraChild(
 						at: Date.now(),
 						tool: call.name,
 						reason: gate.reason ?? "blocked by permission policy",
+						decision: "denied",
 					});
 					results.push(
 						toolResultMessage(
@@ -181,6 +225,11 @@ export async function runAiraChild(
 					continue;
 				}
 				const outcome = await executeChildTool(options.tools, call, signal);
+				if (!outcome.isError && (call.name === "edit" || call.name === "write")) {
+					const path = toolPath(call);
+					if (path) options.workspaceMutation?.(path);
+				}
+				if (isNewToolCall && !outcome.isError) roundHadProgress = true;
 				results.push(outcome.message);
 				options.events?.({
 					kind: "tool_result",
@@ -212,7 +261,13 @@ export async function runAiraChild(
 			accumulateUsage(assistant);
 		}
 		if (hasToolCalls(assistant)) {
-			return { ok: false, driverError: "child exceeded its tool budget" };
+			return {
+				ok: false,
+				driverError: "child exceeded its tool budget",
+				toolCallsUsed,
+				toolBudgetLimit,
+				toolBudgetExtensions,
+			};
 		}
 		if (assistant.stopReason === "error" || assistant.stopReason === "aborted") {
 			return { ok: false, driverError: assistant.errorMessage ?? `child ${assistant.stopReason}` };
@@ -226,12 +281,18 @@ export async function runAiraChild(
 			result: normalizeChildResult(parsed),
 			model: assistant.responseModel ?? assistant.model,
 			...(totalUsage !== undefined ? { tokenUsage: totalUsage } : {}),
+			toolCallsUsed,
+			toolBudgetLimit,
+			toolBudgetExtensions,
 		};
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		return {
 			ok: false,
 			driverError: message === "child timed out" ? `child timed out after ${timeoutMs}ms` : message,
+			toolCallsUsed,
+			toolBudgetLimit,
+			toolBudgetExtensions,
 		};
 	} finally {
 		if (timeoutTimer) {
@@ -429,6 +490,12 @@ async function executeChildTool(
 			summary: failure,
 		};
 	}
+}
+
+function toolPath(call: ToolCall): string | undefined {
+	const args = (call.arguments ?? {}) as Record<string, unknown>;
+	const path = args.path ?? args.file_path;
+	return typeof path === "string" && path.length > 0 ? path : undefined;
 }
 
 function toolResultMessage(call: ToolCall, content: ToolResultMessage["content"], isError: boolean): ToolResultMessage {

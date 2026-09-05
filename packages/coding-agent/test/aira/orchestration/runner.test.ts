@@ -218,6 +218,52 @@ describe("Aira child runner (Phase 9)", () => {
 		}
 	});
 
+	it("grants one extension only when the last budget round made progress", async () => {
+		const root = makeProjectDir();
+		const { runtime, setResponses } = fauxRuntime();
+		setResponses([
+			fauxAssistantMessage([fauxToolCall("read", { path: "src/player.ts" })]),
+			fauxAssistantMessage([fauxToolCall("grep", { pattern: "seek", path: "src" })]),
+			fauxAssistantMessage(fauxText(COMPLETED_RESULT)),
+		]);
+		const outcome = await runAiraChild(runtime, {
+			cwd: root,
+			prompt: "TASK map it",
+			systemPrompt: "",
+			tools: readOnlyTools(root),
+			timeoutMs: 5000,
+			maxToolRounds: 1,
+		});
+		expect(outcome.ok).toBe(true);
+		if (outcome.ok) {
+			expect(outcome.toolCallsUsed).toBe(2);
+			expect(outcome.toolBudgetLimit).toBe(12);
+			expect(outcome.toolBudgetExtensions).toBe(1);
+		}
+	});
+
+	it("does not extend after a failed tool result", async () => {
+		const root = makeProjectDir();
+		const { runtime, setResponses } = fauxRuntime();
+		setResponses([
+			fauxAssistantMessage([fauxToolCall("read", { path: "src/missing.ts" })]),
+			fauxAssistantMessage([fauxToolCall("read", { path: "src/player.ts" })]),
+		]);
+		const outcome = await runAiraChild(runtime, {
+			cwd: root,
+			prompt: "TASK map it",
+			systemPrompt: "",
+			tools: readOnlyTools(root),
+			timeoutMs: 5000,
+			maxToolRounds: 1,
+		});
+		expect(outcome.ok).toBe(false);
+		if (!outcome.ok) {
+			expect(outcome.toolCallsUsed).toBe(1);
+			expect(outcome.toolBudgetExtensions).toBe(0);
+		}
+	});
+
 	it("timeout settles as a driver error", async () => {
 		const root = makeProjectDir();
 		const { runtime, setResponses } = fauxRuntime();

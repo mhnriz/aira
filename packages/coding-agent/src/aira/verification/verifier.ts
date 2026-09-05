@@ -38,10 +38,12 @@ import {
 import type { AiraVerificationResult, AiraVerificationVerdict } from "./types.ts";
 
 export const DEFAULT_VERIFIER_TIMEOUT_MS = 180_000;
-export const MAX_VERIFIER_TOOL_ROUNDS = 4;
+export const MAX_VERIFIER_TOOL_ROUNDS = 8;
 export const MAX_VERIFIER_TOOL_CALLS_PER_ROUND = 2;
 export const MAX_VERIFIER_OUTPUT_TOKENS = 1_200;
 export const MAX_VERIFIER_SUMMARY_CHARS = 600;
+export const MAX_VERIFIER_TOOL_EXTENSIONS = 1;
+export const VERIFIER_TOOL_EXTENSION_CALLS = 4;
 
 export interface AiraVerifierRuntime {
 	model: Model<any>;
@@ -64,8 +66,21 @@ export interface AiraVerifierModelVerdict {
 }
 
 export type AiraVerifierOutcome =
-	| { ok: true; verdict: AiraVerifierModelVerdict; tokenUsage?: AiraChildTokenUsage }
-	| { ok: false; driverError: string };
+	| {
+			ok: true;
+			verdict: AiraVerifierModelVerdict;
+			tokenUsage?: AiraChildTokenUsage;
+			toolCallsUsed?: number;
+			toolBudgetLimit?: number;
+			toolBudgetExtensions?: number;
+	  }
+	| {
+			ok: false;
+			driverError: string;
+			toolCallsUsed?: number;
+			toolBudgetLimit?: number;
+			toolBudgetExtensions?: number;
+	  };
 
 export interface AiraVerifierOptions {
 	cwd: string;
@@ -90,6 +105,11 @@ export async function runAiraVerifier(
 	const tools = createVerifierTools(options.cwd);
 	const timeoutMs = options.timeoutMs ?? DEFAULT_VERIFIER_TIMEOUT_MS;
 	const maxRounds = options.maxToolRounds ?? MAX_VERIFIER_TOOL_ROUNDS;
+	let allowedRounds = maxRounds;
+	let toolBudgetLimit = maxRounds * MAX_VERIFIER_TOOL_CALLS_PER_ROUND;
+	let toolCallsUsed = 0;
+	let toolBudgetExtensions = 0;
+	const seenToolCalls = new Set<string>();
 	const baseOptions: SimpleStreamOptions = {
 		maxTokens: MAX_VERIFIER_OUTPUT_TOKENS,
 		cacheRetention: "none",
@@ -138,15 +158,37 @@ export async function runAiraVerifier(
 		);
 		accumulateUsage(assistant);
 		let round = 0;
-		while (hasToolCalls(assistant) && round < maxRounds) {
+		let roundHadProgress = false;
+		while (hasToolCalls(assistant)) {
+			if (round >= allowedRounds) {
+				if (toolBudgetExtensions >= MAX_VERIFIER_TOOL_EXTENSIONS || !roundHadProgress) {
+					return {
+						ok: false,
+						driverError: "verifier exceeded its read-only tool budget",
+						toolCallsUsed,
+						toolBudgetLimit,
+						toolBudgetExtensions,
+					};
+				}
+				toolBudgetExtensions += 1;
+				allowedRounds += Math.ceil(VERIFIER_TOOL_EXTENSION_CALLS / MAX_VERIFIER_TOOL_CALLS_PER_ROUND);
+				toolBudgetLimit += VERIFIER_TOOL_EXTENSION_CALLS;
+			}
 			round += 1;
+			roundHadProgress = false;
 			const calls = toolCallsOf(assistant).slice(0, MAX_VERIFIER_TOOL_CALLS_PER_ROUND);
 			if (calls.length === 0) {
 				break;
 			}
 			const results: ToolResultMessage[] = [];
 			for (const call of calls) {
-				results.push(await executeVerifierTool(tools, call, signal));
+				toolCallsUsed += 1;
+				const signature = `${call.name}:${JSON.stringify(call.arguments ?? {})}`;
+				const isNewToolCall = !seenToolCalls.has(signature);
+				seenToolCalls.add(signature);
+				const result = await executeVerifierTool(tools, call, signal);
+				if (isNewToolCall && !result.isError) roundHadProgress = true;
+				results.push(result);
 			}
 			messages.push(assistant, ...results);
 			assistant = await raceWithTimeout(
@@ -157,7 +199,13 @@ export async function runAiraVerifier(
 			accumulateUsage(assistant);
 		}
 		if (hasToolCalls(assistant)) {
-			return { ok: false, driverError: "verifier exceeded its read-only tool budget" };
+			return {
+				ok: false,
+				driverError: "verifier exceeded its read-only tool budget",
+				toolCallsUsed,
+				toolBudgetLimit,
+				toolBudgetExtensions,
+			};
 		}
 		if (assistant.stopReason === "error" || assistant.stopReason === "aborted") {
 			return { ok: false, driverError: assistant.errorMessage ?? `verifier ${assistant.stopReason}` };
@@ -170,12 +218,18 @@ export async function runAiraVerifier(
 			ok: true,
 			verdict: normalizeVerifierVerdict(parsed),
 			...(totalUsage !== undefined ? { tokenUsage: totalUsage } : {}),
+			toolCallsUsed,
+			toolBudgetLimit,
+			toolBudgetExtensions,
 		};
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		return {
 			ok: false,
 			driverError: message === "verifier timed out" ? `verifier timed out after ${timeoutMs}ms` : message,
+			toolCallsUsed,
+			toolBudgetLimit,
+			toolBudgetExtensions,
 		};
 	} finally {
 		if (timeoutTimer) {
