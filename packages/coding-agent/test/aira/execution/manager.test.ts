@@ -63,6 +63,146 @@ describe("Aira execution process manager (real child processes)", () => {
 		}
 	});
 
+	it("uses the local interactive bridge without exposing its secret", async () => {
+		const ctx = makeManager();
+		try {
+			const prompts: string[] = [];
+			ctx.manager.attachInteractiveInputBridge?.({
+				requestSecret: async (prompt) => {
+					prompts.push(prompt);
+					return "local-only-secret";
+				},
+			});
+			const result = await ctx.manager.start(
+				{
+					command: `node -e "process.stdin.setEncoding('utf8'); process.stdout.write('Password:'); process.stdin.once('data',()=>{ console.log('authenticated'); process.exit(0) })"`,
+					cwd: process.cwd(),
+				},
+				{ interactive: true, timeoutMs: 5000 },
+			);
+			expect(result.ok, JSON.stringify(result)).toBe(true);
+			expect(result.interactiveAuth).toBe("succeeded");
+			expect(prompts).toEqual(["sudo password"]);
+			expect(result.stdout.text).not.toContain("local-only-secret");
+			expect(result.stderr.text).not.toContain("local-only-secret");
+			expect(ctx.manager.logs(result.processId!)?.stdout.text).not.toContain("local-only-secret");
+			expect(JSON.stringify(ctx.state)).not.toContain("local-only-secret");
+		} finally {
+			await finish(ctx);
+		}
+	});
+
+	it("reports failed local authentication only after the child rejects it", async () => {
+		const ctx = makeManager();
+		try {
+			ctx.manager.attachInteractiveInputBridge?.({
+				requestSecret: async () => "deliberately-invalid-test-secret",
+			});
+			const result = await ctx.manager.start(
+				{
+					command: `node -e "process.stdin.setEncoding('utf8'); process.stdout.write('Password:'); process.stdin.once('data',()=>{ console.error('Sorry, try again'); process.exit(1) })"`,
+					cwd: process.cwd(),
+				},
+				{ interactive: true, timeoutMs: 5000 },
+			);
+			expect(result.status).toBe("exited");
+			expect(result.ok).toBe(false);
+			expect(result.exitCode).toBe(1);
+			expect(result.interactiveAuth).toBe("failed");
+			expect(ctx.manager.get(result.processId!)?.interactiveAuth).toBe("failed");
+			expect(JSON.stringify(ctx.state)).not.toContain("deliberately-invalid-test-secret");
+		} finally {
+			await finish(ctx);
+		}
+	});
+
+	it("forwards ordinary local input through the PTY without model involvement", async () => {
+		const ctx = makeManager();
+		try {
+			let secretRequests = 0;
+			ctx.manager.attachInteractiveInputBridge?.({
+				requestSecret: async () => {
+					secretRequests += 1;
+					return undefined;
+				},
+			});
+			const completion = ctx.manager.start(
+				{
+					command: `node -e "process.stdout.write('READY\\n'); process.stdin.setEncoding('utf8'); process.stdin.once('data',data=>{ process.stdout.write('received:'+data.trim()+'\\n'); process.exit(0) })"`,
+					cwd: process.cwd(),
+				},
+				{ interactive: true, timeoutMs: 5000 },
+			);
+			let processId: string | undefined;
+			for (let attempt = 0; attempt < 20 && processId === undefined; attempt += 1) {
+				processId = ctx.manager.list()[0]?.id;
+				if (processId === undefined) await new Promise((resolve) => setTimeout(resolve, 10));
+			}
+			expect(processId).toBeDefined();
+			expect(ctx.manager.writeInput(processId!, "hello from local input\n")).toBe(true);
+			const result = await completion;
+			expect(result.ok, JSON.stringify(result)).toBe(true);
+			expect(result.stdout.text).toContain("received:hello from local input");
+			expect(secretRequests).toBe(0);
+		} finally {
+			await finish(ctx);
+		}
+	});
+
+	it("returns a truthful unavailable result for interactive headless execution", async () => {
+		const ctx = makeManager();
+		try {
+			const result = await ctx.manager.start(
+				{ command: "echo never-started", cwd: process.cwd() },
+				{ interactive: true },
+			);
+			expect(result.status).toBe("unavailable");
+			expect(result.ok).toBe(false);
+			expect(result.reason).toContain("no local secret-input UI");
+			expect(ctx.manager.list()).toHaveLength(0);
+		} finally {
+			await finish(ctx);
+		}
+	});
+
+	it("cancels an interactive process when local authentication is cancelled", async () => {
+		const ctx = makeManager();
+		try {
+			ctx.manager.attachInteractiveInputBridge?.({
+				requestSecret: async () => undefined,
+			});
+			const result = await ctx.manager.start(
+				{ command: `node -e "process.stdout.write('Password:'); setInterval(()=>{},1000)"`, cwd: process.cwd() },
+				{ interactive: true, timeoutMs: 5000 },
+			);
+			expect(result.status).toBe("cancelled");
+			expect(result.ok).toBe(false);
+			expect(result.interactiveAuth).toBe("cancelled");
+		} finally {
+			await finish(ctx);
+		}
+	});
+
+	it("times out an interactive process without retaining its secret", async () => {
+		const ctx = makeManager();
+		try {
+			ctx.manager.attachInteractiveInputBridge?.({
+				requestSecret: async (_prompt, signal) =>
+					new Promise<string | undefined>((resolve) => {
+						signal.addEventListener("abort", () => resolve(undefined), { once: true });
+					}),
+			});
+			const result = await ctx.manager.start(
+				{ command: `node -e "process.stdout.write('Password:'); setInterval(()=>{},1000)"`, cwd: process.cwd() },
+				{ interactive: true, timeoutMs: 150 },
+			);
+			expect(result.status).toBe("timed-out");
+			expect(JSON.stringify(ctx.state)).not.toContain("secret");
+		} finally {
+			await finish(ctx);
+		}
+	});
+
 	it("reports a non-zero exit truthfully (spawn success is not success)", async () => {
 		const ctx = makeManager();
 		try {
@@ -169,7 +309,9 @@ describe("Aira execution process manager (real child processes)", () => {
 	});
 
 	it("keeps auto mode foreground when the command completes quickly", async () => {
-		const ctx = makeManager();
+		// Leave enough startup headroom for the full repository suite; this test
+		// checks the completed-process branch, not a scheduler race at 300 ms.
+		const ctx = makeManager({ autoBackgroundMs: 2_000 });
 		try {
 			const result = await ctx.manager.start({ command: QUICK_OK, cwd: process.cwd() }, { mode: "auto" });
 			expect(result.status).toBe("exited");

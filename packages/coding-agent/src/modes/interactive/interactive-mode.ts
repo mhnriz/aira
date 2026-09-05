@@ -172,6 +172,7 @@ import {
 } from "./components/oauth-selector.ts";
 import { PermissionCardComponent } from "./components/permission-card.ts";
 import { ScopedModelsSelectorComponent } from "./components/scoped-models-selector.ts";
+import { SecretInputComponent } from "./components/secret-input.ts";
 import { SessionSelectorComponent } from "./components/session-selector.ts";
 import { SettingsSelectorComponent } from "./components/settings-selector.ts";
 import { SkillInvocationMessageComponent } from "./components/skill-invocation-message.ts";
@@ -582,6 +583,7 @@ export class InteractiveMode {
 	private extensionSelector: ExtensionSelectorComponent | undefined = undefined;
 	private extensionInput: ExtensionInputComponent | undefined = undefined;
 	private permissionCard: PermissionCardComponent | undefined = undefined;
+	private secretInput: SecretInputComponent | undefined = undefined;
 	private extensionEditor: ExtensionEditorComponent | undefined = undefined;
 	private extensionTerminalInputSubscriptions = new Set<{
 		handler: (data: string) => { consume?: boolean; data?: string } | undefined;
@@ -2472,6 +2474,9 @@ export class InteractiveMode {
 	}
 
 	private resetExtensionUI(): void {
+		if (this.secretInput) {
+			this.hideAiraSecretInput();
+		}
 		if (this.extensionSelector) {
 			this.hideExtensionSelector();
 		}
@@ -3532,7 +3537,59 @@ export class InteractiveMode {
 		this.unsubscribe = this.session.subscribe(async (event) => {
 			await this.handleEvent(event);
 		});
+		this.attachAiraExecutionBridge();
 		this.attachAiraInteractionBridge();
+	}
+
+	/**
+	 * Attach the dedicated local-only secret path. It is deliberately separate
+	 * from AiraInteractionManager: passwords are not semantic questions and
+	 * must never enter canonical interaction state or model-visible tools.
+	 */
+	private attachAiraExecutionBridge(): void {
+		this.session.airaExecution?.attachInteractiveInputBridge?.({
+			requestSecret: (prompt, signal) => this.showAiraSecretInput(prompt, signal),
+		});
+	}
+
+	private detachAiraExecutionBridge(): void {
+		this.hideAiraSecretInput();
+		this.session.airaExecution?.detachInteractiveInputBridge?.();
+	}
+
+	private showAiraSecretInput(prompt: string, signal: AbortSignal): Promise<string | undefined> {
+		return new Promise((resolve) => {
+			if (signal.aborted) {
+				resolve(undefined);
+				return;
+			}
+			let settled = false;
+			const finish = (value: string | undefined) => {
+				if (settled) return;
+				settled = true;
+				signal.removeEventListener("abort", onAbort);
+				this.hideAiraSecretInput();
+				resolve(value);
+			};
+			const onAbort = () => finish(undefined);
+			signal.addEventListener("abort", onAbort, { once: true });
+			this.secretInput = new SecretInputComponent(this.ui, prompt, finish, () => finish(undefined));
+			this.disposeActiveSelector();
+			this.editorContainer.clear();
+			this.editorContainer.addChild(this.secretInput);
+			this.ui.setFocus(this.secretInput);
+			this.ui.requestRender();
+		});
+	}
+
+	private hideAiraSecretInput(): void {
+		this.secretInput?.dispose();
+		if (!this.secretInput) return;
+		this.secretInput = undefined;
+		this.editorContainer.clear();
+		this.editorContainer.addChild(this.editor);
+		this.ui.setFocus(this.editor);
+		this.ui.requestRender();
 	}
 
 	/**
@@ -3557,6 +3614,7 @@ export class InteractiveMode {
 	}
 
 	private detachAiraInteractionBridge(): void {
+		this.detachAiraExecutionBridge();
 		this.interactionUnsubscribe?.();
 		this.interactionUnsubscribe = undefined;
 		this.session.airaInteraction?.detachUI();
@@ -4912,8 +4970,12 @@ export class InteractiveMode {
 							? `${formatAiraElapsed(Date.now() - run.startedAt)} …`
 							: "";
 				const deps = run.dependencies.length > 0 ? ` · deps [${run.dependencies.join(", ")}]` : "";
+				const budget =
+					run.toolBudgetUsed !== undefined && run.toolBudgetLimit !== undefined
+						? ` · tools ${run.toolBudgetUsed}/${run.toolBudgetLimit}${run.toolBudgetExtensions ? ` · +${run.toolBudgetExtensions} ext` : ""}`
+						: "";
 				lines.push(
-					`- ${run.taskId} [${run.role}] ${run.status}${model ? ` · ${model}` : ""}${elapsed ? ` · ${elapsed}` : ""}${deps}`,
+					`- ${run.taskId} [${run.role}] ${run.status}${model ? ` · ${model}` : ""}${elapsed ? ` · ${elapsed}` : ""}${budget}${deps}`,
 				);
 				if (run.error) {
 					lines.push(`    ${run.error.category}: ${run.error.message}`);
@@ -5056,6 +5118,11 @@ export class InteractiveMode {
 			this.renderTasksLines(formatAiraTasksReport(tasks.status()));
 			return;
 		}
+		if (args === "clear") {
+			const result = tasks.clear();
+			this.showStatus(result.ok ? "tasks: cleared" : `tasks: ${result.message}`);
+			return;
+		}
 		if (args.startsWith("add ")) {
 			const result = tasks.create(args.slice(4).trim(), { source: "user" });
 			this.showStatus(
@@ -5065,7 +5132,7 @@ export class InteractiveMode {
 		}
 		if (args.startsWith("done ")) {
 			const id = args.slice(5).trim();
-			const result = tasks.patch(id, { status: "completed" });
+			const result = tasks.complete(id);
 			this.showStatus(result.ok ? `tasks: completed ${id}` : `tasks: ${result.message}`);
 			return;
 		}
@@ -5092,7 +5159,7 @@ export class InteractiveMode {
 			return;
 		}
 		this.showStatus(
-			`tasks: unknown subcommand "${args}" (use /tasks, /tasks status, /tasks add <title>, /tasks done <id>, /tasks cancel <id>, /tasks get <id>, /tasks remove <id>)`,
+			`tasks: unknown subcommand "${args}" (use /tasks, /tasks status, /tasks add <title>, /tasks done <id>, /tasks cancel <id>, /tasks get <id>, /tasks remove <id>, /tasks clear)`,
 		);
 	}
 
