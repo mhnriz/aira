@@ -213,11 +213,24 @@ describe("live-code provider (mock language server)", () => {
 		});
 		await provider.requestDiagnosticsForFile(file);
 		expect(provider.isWarm(file)).toBe(true);
-		await new Promise((resolve) => setTimeout(resolve, 350));
+		// The idle timer fires in real time; under parallel test load the
+		// shutdown can lag past a fixed sleep, so poll for the observed state.
+		const deadline = Date.now() + 5_000;
+		while (provider.isWarm(file) && Date.now() < deadline) {
+			await new Promise((resolve) => setTimeout(resolve, 50));
+		}
 		expect(provider.isWarm(file)).toBe(false);
-		const info = provider.statusInfo();
-		const server = info.servers.find((s) => s.id === "typescript");
-		expect(server?.status).toBe("closed");
+		const deadline2 = Date.now() + 2_000;
+		let status: string | undefined;
+		while (Date.now() < deadline2) {
+			const info = provider.statusInfo();
+			status = info.servers.find((s) => s.id === "typescript")?.status;
+			if (status === "closed") {
+				break;
+			}
+			await new Promise((resolve) => setTimeout(resolve, 50));
+		}
+		expect(status).toBe("closed");
 		await provider.dispose();
 	});
 

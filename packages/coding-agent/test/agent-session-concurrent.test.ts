@@ -58,6 +58,14 @@ function createAssistantMessage(text: string): AssistantMessage {
 	};
 }
 
+/** Wait (bounded) until the session reports streaming. */
+async function waitForStreaming(session: { isStreaming: boolean }): Promise<void> {
+	const deadline = Date.now() + 2_000;
+	while (!session.isStreaming && Date.now() < deadline) {
+		await new Promise((resolve) => setTimeout(resolve, 10));
+	}
+}
+
 describe("AgentSession concurrent prompt guard", () => {
 	let session: AgentSession;
 	let tempDir: string;
@@ -133,8 +141,12 @@ describe("AgentSession concurrent prompt guard", () => {
 		// Start first prompt (don't await, it will block until abort)
 		const firstPrompt = session.prompt("First message");
 
-		// Wait a tick for isStreaming to be set
-		await new Promise((resolve) => setTimeout(resolve, 10));
+		// Poll until streaming state is reached: the faux provider starts the
+		// stream asynchronously, so a fixed sleep flakes under parallel load.
+		const deadline = Date.now() + 2_000;
+		while (!session.isStreaming && Date.now() < deadline) {
+			await new Promise((resolve) => setTimeout(resolve, 10));
+		}
 
 		// Verify we're streaming
 		expect(session.isStreaming).toBe(true);
@@ -154,7 +166,7 @@ describe("AgentSession concurrent prompt guard", () => {
 
 		// Start first prompt
 		const firstPrompt = session.prompt("First message");
-		await new Promise((resolve) => setTimeout(resolve, 10));
+		await waitForStreaming(session);
 
 		// steer should work while streaming
 		expect(() => session.steer("Steering message")).not.toThrow();
@@ -170,7 +182,7 @@ describe("AgentSession concurrent prompt guard", () => {
 
 		// Start first prompt
 		const firstPrompt = session.prompt("First message");
-		await new Promise((resolve) => setTimeout(resolve, 10));
+		await waitForStreaming(session);
 
 		// followUp should work while streaming
 		expect(() => session.followUp("Follow-up message")).not.toThrow();
@@ -265,7 +277,7 @@ describe("AgentSession concurrent prompt guard", () => {
 		});
 
 		const firstPrompt = session.prompt("First message");
-		await new Promise((resolve) => setTimeout(resolve, 10));
+		await waitForStreaming(session);
 		expect(session.isStreaming).toBe(true);
 
 		const pi = (

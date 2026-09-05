@@ -77,6 +77,12 @@ export interface LiveCodeProviderOptions {
 
 const DEFAULT_MAX_OPEN_DOCUMENTS = 12;
 const DEFAULT_IDLE_TIMEOUT_MS = 90_000;
+/**
+ * Grace added to idle checks so a firing check can never observe a delta
+ * just below the timeout (1ms-adjacent touches/status events used to make
+ * eviction perpetually miss at small timeouts — repair-round finding).
+ */
+const IDLE_CHECK_SLACK_MS = 2;
 const DEFAULT_CRASH_COOLDOWN_MS = 30_000;
 const DEFAULT_DIAGNOSTIC_WAIT_MS = 1200;
 
@@ -466,11 +472,25 @@ export class LiveCodeProvider {
 		}
 		const timer = setTimeout(() => {
 			this.idleTimers.delete(serverKey);
+			const client = this.clients.get(serverKey);
+			// Evict only a running client that was actually touched. Checks
+			// scheduled during the starting handshake (or from a previous
+			// server instance's stale activity) must neither kill a starting
+			// server nor keep a stale timestamp cycling: with no touch the
+			// handshake's own touch schedules the definitive check.
+			if (!client || client.status !== "running") {
+				return;
+			}
 			const last = this.lastActivityAt.get(serverKey) ?? 0;
-			if (Date.now() - last >= this.idleTimeoutMs) {
+			if (last > 0 && Date.now() - last >= this.idleTimeoutMs) {
 				void this.shutdownServer(serverKey).catch(() => undefined);
 			}
-		}, this.idleTimeoutMs);
+			// Slack beyond the timeout makes the delta at firing time at least
+			// the timeout for ANY timer armed at/after the last touch; a check
+			// armed 1ms before a touch can otherwise fire at delta=timeout-1,
+			// miss, and be re-armed by lagging status events indefinitely
+			// (a server that never idle-evicts — repair-round finding).
+		}, this.idleTimeoutMs + IDLE_CHECK_SLACK_MS);
 		timer.unref();
 		this.idleTimers.set(serverKey, timer);
 	}
