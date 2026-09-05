@@ -41,6 +41,7 @@ export type AiraChildFailureCategory =
 	| "mode-refused"
 	| "model-unavailable"
 	| "driver"
+	| "permission-denied"
 	| "tool-budget-exceeded"
 	| "timeout"
 	| "cancelled"
@@ -67,7 +68,11 @@ export interface AiraChildTaskSpec {
 	model?: string;
 	/** Per-task timeout override (bounded; default comes from settings). */
 	timeoutMs?: number;
+	/** Explicit host-checkable capabilities required by this task. */
+	requiredCapabilities?: readonly AiraChildCapabilityRequirement[];
 }
+
+export type AiraChildCapabilityRequirement = "process" | "mutation" | "browser";
 
 /** The structured result a child must return (parsed + normalized). */
 export interface AiraChildResult {
@@ -131,6 +136,12 @@ export interface AiraChildRun {
 	 * undefined until the first event). Feeds "running · tool" style rows.
 	 */
 	activity?: AiraChildActivity;
+	/** Bounded host-side budget telemetry. */
+	toolBudgetUsed?: number;
+	toolBudgetLimit?: number;
+	/** Number of progress-gated budget extensions granted for this run. */
+	toolBudgetExtensions?: number;
+	lastActivityAt?: number;
 }
 
 /** UI-ready child row (bounded; derived from AiraChildRun). */
@@ -144,6 +155,10 @@ export interface AiraChildSnapshot {
 	phase: AiraChildPhase;
 	/** Last truthful activity while running (Agent Inspector rows). */
 	activity?: AiraChildActivity;
+	toolBudgetUsed?: number;
+	toolBudgetLimit?: number;
+	toolBudgetExtensions?: number;
+	lastActivityAt?: number;
 	model: string | undefined;
 	elapsedMs?: number;
 	dependencies: string[];

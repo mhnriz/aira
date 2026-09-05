@@ -218,6 +218,23 @@ describe("Aira orchestration manager (Phase 9)", () => {
 		expect(snapshot.failures[0]!.message).toContain("not configured");
 	});
 
+	it("rejects an explicit capability mismatch before invoking the child provider", async () => {
+		const fixture = makeManager();
+		activeSessions.push(fixture.state);
+		let providerCalls = 0;
+		fixture.runner.resolveRuntime = async () => {
+			providerCalls += 1;
+			return defaultResolve;
+		};
+		const result = await fixture.handle.schedule(
+			[{ role: "explore", task: "run sleep 60", requiredCapabilities: ["process"] }],
+			{ awaitResults: true },
+		);
+		expect(result.ok).toBe(false);
+		expect(result.tasks[0]!.reason).toContain("process execution");
+		expect(providerCalls).toBe(0);
+	});
+
 	it("PLAN refuses mutation-capable roles at dispatch (no loophole)", async () => {
 		const fixture = makeManager({ mode: "plan" });
 		activeSessions.push(fixture.state);
@@ -579,14 +596,26 @@ describe("Aira orchestration manager (Phase 9)", () => {
 			const fixture = makeManager();
 			activeSessions.push(fixture.state);
 			fixture.runner.resolveRuntime = async () => defaultResolve;
-			fixture.runner.call = async () => ({ ok: false, driverError: "child exceeded its tool budget" });
+			fixture.runner.call = async () => ({
+				ok: false,
+				driverError: "child exceeded its tool budget",
+				toolCallsUsed: 48,
+				toolBudgetLimit: 48,
+				toolBudgetExtensions: 0,
+			});
 			await fixture.handle.schedule([{ role: "explore", task: "t" }], { awaitResults: true });
 			const run = fixture.handle.list()[0]!;
 			expect(run.status).toBe("failed");
+			expect(run.toolBudgetUsed).toBe(48);
+			expect(run.toolBudgetLimit).toBe(48);
+			expect(run.toolBudgetExtensions).toBe(0);
 			expect(run.error?.category).toBe("tool-budget-exceeded");
 			const snapshot = fixture.state.orchestration!;
 			expect(snapshot.failures[0]!.category).toBe("tool-budget-exceeded");
 			expect(snapshot.children[0]!.error?.category).toBe("tool-budget-exceeded");
+			expect(snapshot.children[0]!.toolBudgetUsed).toBe(48);
+			expect(snapshot.children[0]!.toolBudgetLimit).toBe(48);
+			expect(snapshot.children[0]!.toolBudgetExtensions).toBe(0);
 		});
 
 		it("session disposal removes event buffers and live subscriptions", async () => {

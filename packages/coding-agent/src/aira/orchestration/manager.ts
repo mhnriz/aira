@@ -29,7 +29,7 @@ import {
 	MAX_CHILD_TASK_CHARS,
 } from "./envelope.ts";
 import { type AiraChildEvent, AiraChildEventBuffer, childActivityOf } from "./events.ts";
-import { isAiraChildRoleReadOnly } from "./roles.ts";
+import { airaChildRoleOf, isAiraChildRoleReadOnly } from "./roles.ts";
 import { type AiraChildOutcome, type AiraChildRuntime, runAiraChild } from "./runner.ts";
 import {
 	type AiraSchedulerRunTask,
@@ -85,6 +85,8 @@ export interface AiraOrchestrationManagerOptions {
 		toolName: string,
 		args: Record<string, unknown>,
 	) => { block: boolean; reason?: string } | undefined;
+	/** Host callback for successful child workspace mutations. */
+	workspaceMutation?: (path: string) => void;
 	/** Runner seam (unit tests inject canned outcomes). */
 	runner?: (
 		runtime: AiraChildRuntime,
@@ -94,8 +96,10 @@ export interface AiraOrchestrationManagerOptions {
 			systemPrompt: string;
 			tools: AgentTool[];
 			timeoutMs: number;
+			maxToolRounds: number;
 			/** Live event sink (Agent Inspector); the real runner emits through it. */
 			events?: (event: AiraChildEvent) => void;
+			workspaceMutation?: (path: string) => void;
 		},
 		signal?: AbortSignal,
 	) => Promise<AiraChildOutcome>;
@@ -199,8 +203,9 @@ export class AiraOrchestrationManager implements AiraOrchestrationHandle {
 		const gatedReasons = new Map<AiraChildTaskSpec, string>();
 		const acceptedSpecs: AiraChildTaskSpec[] = [];
 		for (const spec of specs) {
-			if (mode === "plan" && !isAiraChildRoleReadOnly(spec.role)) {
-				gatedReasons.set(spec, `role ${spec.role} can mutate and is refused in PLAN (read-only enforcement)`);
+			const preflightReason = preflightChildTask(spec, mode);
+			if (preflightReason) {
+				gatedReasons.set(spec, preflightReason);
 			} else {
 				acceptedSpecs.push(spec);
 			}
@@ -246,6 +251,7 @@ export class AiraOrchestrationManager implements AiraOrchestrationHandle {
 				status: "pending",
 				phase: sched.dependencies.length > 0 ? "waiting-dependency" : "waiting-capacity",
 				model: spec.model ?? settings.model,
+				toolBudgetLimit: airaChildRoleOf(spec.role)?.toolBudget ?? 32,
 			};
 			this.recordRun(run);
 		}
@@ -410,13 +416,18 @@ export class AiraOrchestrationManager implements AiraOrchestrationHandle {
 				tools: toolSet.tools,
 				gateTool: this.options.permissionGate,
 				timeoutMs,
+				maxToolRounds: Math.ceil((airaChildRoleOf(spec.role)?.toolBudget ?? 32) / 4),
 				// Agent Inspector capture: stream/tool events are recorded per run.
 				events: (event: AiraChildEvent) => this.recordChildEvent(run.id, event),
+				workspaceMutation: this.options.workspaceMutation,
 			};
 			const outcome: AiraChildOutcome = this.options.runner
 				? await this.options.runner(resolved.runtime, runnerOptions, signal)
 				: await runAiraChild(resolved.runtime, runnerOptions, signal);
 
+			if (outcome.toolCallsUsed !== undefined) run.toolBudgetUsed = outcome.toolCallsUsed;
+			if (outcome.toolBudgetLimit !== undefined) run.toolBudgetLimit = outcome.toolBudgetLimit;
+			if (outcome.toolBudgetExtensions !== undefined) run.toolBudgetExtensions = outcome.toolBudgetExtensions;
 			if (!outcome.ok) {
 				this.failRun(
 					run,
@@ -561,11 +572,10 @@ export class AiraOrchestrationManager implements AiraOrchestrationHandle {
 		}
 		buffer.append(event);
 		const activity = childActivityOf(event);
-		if (activity) {
-			const run = this.runs.get(runId);
-			if (run) {
-				run.activity = activity;
-			}
+		const run = this.runs.get(runId);
+		if (run) {
+			if (activity) run.activity = activity;
+			run.lastActivityAt = event.at;
 		}
 		const listeners = this.eventListeners.get(runId);
 		if (listeners) {
@@ -726,7 +736,30 @@ function categorizeDriverError(message: string): AiraChildFailureCategory {
 	if (message.includes("cancelled")) {
 		return "cancelled";
 	}
+	if (message.toLowerCase().includes("permission") || message.toLowerCase().includes("denied")) {
+		return "permission-denied";
+	}
 	return "driver";
+}
+
+function preflightChildTask(spec: AiraChildTaskSpec, mode: AiraSessionState["mode"]): string | undefined {
+	if (mode === "plan" && !isAiraChildRoleReadOnly(spec.role)) {
+		return `role ${spec.role} is refused in PLAN (read-only enforcement)`;
+	}
+	const role = airaChildRoleOf(spec.role);
+	for (const capability of spec.requiredCapabilities ?? []) {
+		const supported =
+			capability === "mutation"
+				? role?.capabilities.includes("mutating")
+				: capability === "process"
+					? role?.capabilities.includes("process")
+					: false;
+		if (!supported) {
+			return `role ${spec.role} cannot satisfy required capability: ${capability === "process" ? "process execution" : capability}`;
+		}
+		if (mode === "plan") return `PLAN forbids required capability: ${capability}`;
+	}
+	return undefined;
 }
 
 type AiraScheduleRejectionLike = {

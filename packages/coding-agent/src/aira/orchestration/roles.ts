@@ -36,6 +36,8 @@ export interface AiraChildRoleDefinition {
 	resultEmphasis: string;
 	/** Roles that inspect but never mutate (usable in PLAN). */
 	readOnly: boolean;
+	/** Maximum raw tool calls for one child before exhaustion. */
+	toolBudget: number;
 }
 
 /** The canonical role table (small by design; extend here, not in the runtime). */
@@ -49,6 +51,7 @@ export const AIRA_CHILD_ROLES: readonly AiraChildRoleDefinition[] = [
 		resultEmphasis:
 			"Prioritize concrete findings with file/line references. Relevant files are the strongest output of this role.",
 		readOnly: true,
+		toolBudget: 48,
 	},
 	{
 		role: "research",
@@ -59,6 +62,7 @@ export const AIRA_CHILD_ROLES: readonly AiraChildRoleDefinition[] = [
 		resultEmphasis:
 			"Prioritize a structured analysis with evidence references. Findings must name the evidence behind each claim.",
 		readOnly: true,
+		toolBudget: 48,
 	},
 	{
 		role: "review",
@@ -69,6 +73,7 @@ export const AIRA_CHILD_ROLES: readonly AiraChildRoleDefinition[] = [
 		resultEmphasis:
 			"Prioritize findings ordered by severity, each with a concrete location and a suggested remediation.",
 		readOnly: true,
+		toolBudget: 32,
 	},
 	{
 		role: "test",
@@ -79,6 +84,7 @@ export const AIRA_CHILD_ROLES: readonly AiraChildRoleDefinition[] = [
 		resultEmphasis:
 			"Prioritize tests/checks performed with their outcomes and the evidence (commands, exit codes, logs) behind each.",
 		readOnly: false,
+		toolBudget: 40,
 	},
 	{
 		role: "implement",
@@ -89,6 +95,7 @@ export const AIRA_CHILD_ROLES: readonly AiraChildRoleDefinition[] = [
 		resultEmphasis:
 			"Changed files are the strongest output of this role. Report exactly what changed, why, and which checks ran.",
 		readOnly: false,
+		toolBudget: 40,
 	},
 ];
 

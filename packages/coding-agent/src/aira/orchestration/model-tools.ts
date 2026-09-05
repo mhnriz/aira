@@ -44,6 +44,11 @@ const childTaskSchema = Type.Object({
 		Type.String({ description: 'Explicit model "provider/model"; inherits the session model when absent.' }),
 	),
 	timeoutMs: Type.Optional(Type.Number({ description: "Per-task timeout in milliseconds (default from settings)." })),
+	requiredCapabilities: Type.Optional(
+		Type.Array(Type.Union([Type.Literal("process"), Type.Literal("mutation"), Type.Literal("browser")]), {
+			description: "Explicit capabilities required by the task; incompatible roles are rejected before model spend.",
+		}),
+	),
 });
 
 const delegateSchema = Type.Object({
@@ -112,8 +117,12 @@ function renderStatus(status: AiraOrchestrationStatusSnapshot): string {
 		for (const child of status.children) {
 			const model = child.model ? ` · model ${child.model}` : "";
 			const elapsed = child.elapsedMs !== undefined ? ` · ${formatChildDuration(child.elapsedMs)}` : "";
+			const budget =
+				child.toolBudgetUsed !== undefined && child.toolBudgetLimit !== undefined
+					? ` · tools ${child.toolBudgetUsed}/${child.toolBudgetLimit}${child.toolBudgetExtensions ? ` · +${child.toolBudgetExtensions} ext` : ""}`
+					: "";
 			lines.push(
-				`- ${child.taskId} [${child.role}] ${child.status}${child.phase !== "settled" ? ` (${child.phase})` : ""}${model}${elapsed}`,
+				`- ${child.taskId} [${child.role}] ${child.status}${child.phase !== "settled" ? ` (${child.phase})` : ""}${model}${elapsed}${budget}`,
 			);
 		}
 	}
@@ -140,13 +149,14 @@ export function createAiraOrchestrationToolDefinitions(options: {
 		name: "agents_delegate",
 		label: "agents delegate",
 		description:
-			"Dispatch bounded work to isolated child agents. Each child receives ONLY its explicit envelope (task, role, files, context, mode) plus a capability-derived tool set — never the parent conversation. Roles: explore/research/review are read-only; test runs managed tests/checks; implement makes workspace changes. Dependencies are task ids within the same batch (A → B ordering; cycles are rejected). PLAN mode refuses implement/test. Children cannot spawn children. Use for parallelizable or delegable work; for trivial tasks just do them yourself.",
+			"Dispatch bounded work to isolated child agents. Each child receives ONLY its explicit envelope (task, role, files, context, mode) plus a capability-derived tool set — never the parent conversation. Roles: explore/research/review are read-only; test runs managed tests/checks; implement makes workspace changes. Declare requiredCapabilities when the task needs process execution, mutation, or browser interaction; incompatible roles are rejected before provider spend. Dependencies are task ids in this batch. PLAN remains read-only. Children cannot spawn children.",
 		promptSnippet: "Delegate bounded work to isolated child agents",
 		promptGuidelines: [
 			"Keep task text bounded (<= 4000 chars) and self-contained: children do not see the conversation.",
 			"Use dependencies only when ordering matters; prefer parallel dispatch otherwise.",
 			"Prefer await=false for long work, then poll agents_status; await=true blocks until settlement (bounded by per-child timeouts).",
 			"Do not delegate trivial tasks; children consume model tokens.",
+			"Declare requiredCapabilities for obvious execution or mutation work so the host can reject incompatible roles before invoking a child.",
 		],
 		parameters: delegateSchema,
 		async execute(_toolCallId, params) {
@@ -225,6 +235,9 @@ type AiraOrchestrationStatusSnapshot = {
 		phase: string;
 		model?: string;
 		elapsedMs?: number;
+		toolBudgetUsed?: number;
+		toolBudgetLimit?: number;
+		toolBudgetExtensions?: number;
 	}>;
 	failures: Array<{ taskId: string; category: string; message: string }>;
 };
