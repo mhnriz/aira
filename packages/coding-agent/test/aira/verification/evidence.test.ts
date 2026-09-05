@@ -13,6 +13,7 @@ import {
 	trimToBudget,
 	VERIFICATION_BUDGET_CHARS,
 } from "../../../src/aira/verification/evidence.ts";
+import type { AiraWorkspaceOwnershipObservation } from "../../../src/aira/workspace/ownership.ts";
 
 function baseSource(): VerificationEvidenceSource {
 	return {
@@ -85,6 +86,24 @@ const browser: AiraBrowserStatus = {
 };
 
 describe("Aira verification evidence (Phase 8)", () => {
+	it("renders bounded workspace ownership counts and protection semantics", () => {
+		const workspace: AiraWorkspaceOwnershipObservation = {
+			available: true,
+			baseline: [{ path: "user.md", status: "modified", added: 1, deleted: 0 }],
+			owned: [{ path: "goal.ts", status: "modified", added: 2, deleted: 1 }],
+			protected: [{ path: "user.md", status: "modified", added: 1, deleted: 0 }],
+			unowned: [{ path: "external.ts", status: "modified", added: 1, deleted: 0 }],
+			counts: { baseline: 1, owned: 1, protected: 1, unowned: 1 },
+		};
+		const bundle = buildVerificationEvidence({ ...baseSource(), workspace });
+		expect(bundle.text).toContain("WORKSPACE OWNERSHIP");
+		expect(bundle.text).toContain("baseline/pre-existing: 1");
+		expect(bundle.text).toContain("Goal-owned: 1");
+		expect(bundle.text).toContain("protected: 1");
+		expect(bundle.text).toContain("unowned concurrent: 1");
+		expect(bundle.text).toContain("excluded from destructive repair");
+	});
+
 	it("renders every available evidence category and the objective", () => {
 		const bundle = buildVerificationEvidence({ ...baseSource(), intelligence, execution, browser });
 		expect(bundle.objective).toContain("player staying black");

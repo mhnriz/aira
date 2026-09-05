@@ -18,6 +18,7 @@ import type { AiraBrowserStatus } from "../browser/status.ts";
 import type { AiraExecutionStatus } from "../execution/status.ts";
 import type { AiraIntelligenceStatus } from "../intelligence/status.ts";
 import type { AiraMode } from "../state.ts";
+import type { AiraWorkspaceOwnershipObservation } from "../workspace/ownership.ts";
 import type { AiraChangeFile } from "./eligibility.ts";
 import type { AiraVerificationContextBudget } from "./settings.ts";
 
@@ -46,6 +47,8 @@ export interface VerificationEvidenceSource {
 	execution: AiraExecutionStatus | undefined;
 	/** Canonical browser snapshot. */
 	browser: AiraBrowserStatus | undefined;
+	/** Host-side baseline/ownership classification for Goal verification. */
+	workspace?: AiraWorkspaceOwnershipObservation;
 	contextBudget: AiraVerificationContextBudget;
 }
 
@@ -71,11 +74,13 @@ export function buildVerificationEvidence(source: VerificationEvidenceSource): V
 	const diagnosticsSection = renderDiagnosticsSection(source.intelligence, missingEvidence, limitations);
 	const executionSection = renderExecutionSection(source.execution, missingEvidence);
 	const browserSection = renderBrowserSection(source.browser, missingEvidence, limitations);
+	const workspaceSection = renderWorkspaceSection(source.workspace);
 	const sections: VerificationEvidenceBundle["sections"] = [
 		changeSection,
 		diagnosticsSection,
 		executionSection,
 		browserSection,
+		workspaceSection,
 	].filter((section) => section.text.length > 0);
 
 	const budget = VERIFICATION_BUDGET_CHARS[source.contextBudget];
@@ -101,6 +106,26 @@ export function buildVerificationEvidence(source: VerificationEvidenceSource): V
 		limitations: [...new Set(limitations)].slice(0, 6),
 		text,
 	};
+}
+
+function renderWorkspaceSection(workspace: AiraWorkspaceOwnershipObservation | undefined): {
+	category: "repository";
+	label: string;
+	text: string;
+} {
+	if (!workspace) {
+		return { category: "repository", label: "WORKSPACE OWNERSHIP", text: "(not tracked)" };
+	}
+	const { counts } = workspace;
+	const lines = [
+		`baseline/pre-existing: ${counts.baseline}`,
+		`Goal-owned: ${counts.owned}`,
+		`protected: ${counts.protected}`,
+		`unowned concurrent: ${counts.unowned}`,
+	];
+	if (counts.protected > 0) lines.push("Protected workspace changes are excluded from destructive repair.");
+	if (counts.unowned > 0) lines.push("Unowned concurrent changes are not attributed to the Goal.");
+	return { category: "repository", label: "WORKSPACE OWNERSHIP", text: lines.join(" · ") };
 }
 
 function renderChangeSection(
