@@ -370,24 +370,52 @@ A later context-cost audit should measure ambient token overhead from: mode
 awareness, project context, Goal, browser, verification, tasks, orchestration,
 and other injected runtime context — Agent Inspector itself is zero-token.
 
-## 18. DOGFOOD (real built binary)
+## 18. DOGFOOD (real binary, tmux 140×40)
 
-Run with the built binary in tmux per repo procedure. CASE A: two children
-dispatched; Left on empty composer opens the browser with both rows, truthful
-state/role/task/elapsed. CASE B: entering a running child shows live
-reasoning/tool activity with no token cost from the viewer. CASE C: child
-output scrolls independently; Workbench fixed; root position preserved on
-return. CASE D: Esc from child view returns directly to the root conversation.
-CASE E: deterministic child failure shows category in the browser and useful
-last activity in the transcript. CASE F: hitting the child tool budget shows
-`tool-budget-exceeded` (real occurrence during this phase's reference-study
-delegations: three explore children exceeded their budget and previously
-would have looked like an opaque driver error). CASE G: child attempts an
-ASK-worthy action — policy resolves deterministically (deny, truthfully
-explained in the transcript), no invisible dialog, no hang. CASE H: >
-maxConcurrency leaves distinguishably queued children. CASE I: Workbench stays
-root canonical state with the `›` marker on the inspected child. CASE J:
-opening/switching/scrolling repeatedly makes no provider calls.
+Run in tmux with `./pi-test.sh` (the Aira entry) against the live provider.
+
+- CASE A: after "dispatch three explore children (background)", Left on the
+  empty composer opened the Agent Browser: `AGENTS 2 running · 0 queued` with
+  running rows showing `running · tool 43s` and settled rows `completed`.
+- CASE B: Enter on the running child showed its LIVE transcript: Thinking
+  blocks, `✓ ls` / `✓ read` compact tool rows appearing as they executed, the
+  header `AGENT · EXPLORE` + task, status line `running · tool 1m9s` while
+  streaming ticked.
+- CASE C: PageUp on the streaming child scrolled its history; the viewport
+  showed `↓ 27 new lines` and was NOT yanked while the child kept streaming;
+  End/composer behavior intact. The Workbench pane stayed fixed root state.
+- CASE D: Esc from the child view returned DIRECTLY to the root conversation
+  (CONVERSATION title, composer restored, `VIEW EXPLORE` rail label gone).
+- CASE E: a child dispatched with an unavailable model settled as
+  `✕ explore · model-unavailable` in the browser; its transcript reads
+  `✕ model-unavailable — requested child model "doesnotexist/nope" is not
+  configured` and ends with the truthful failure + completion lines.
+- CASE F: three REAL children exceeded their tool budget during dogfood; the
+  browser row reads `✕ explore · tool-budget-exceeded · 24s/4m22s` and the
+  frozen transcript shows the last activity (in-flight `● read` rows) plus
+  the failure line — exactly the "appeared stuck" case now diagnosable.
+- CASE G: an implement child attempted `write /tmp/inspector-perm-test.txt`
+  — the root policy ASK denied deterministically
+  (`write: permission denied — mutating:out-of-scope — children cannot prompt
+  for permission`), no invisible dialog, no hang; the denial is visible both
+  in the child's reasoning and as a structured permission event (rendered in
+  unit tests).
+- CASE H: with maxParallel=2 and a 3-child batch, the browser showed the
+  queued/`waiting-capacity` state; rows distinguish running vs queued vs
+  failed.
+- CASE I: while viewing a child, the Workbench AGENTS panel marked it with
+  `› ● explore 58s · tool` while the pane kept showing root canonical state
+  (GOAL/TASKS/VERIFICATION panels live).
+- CASE J: opening/switching/scrolling/streaming made no provider calls; the
+  zero-call property is enforced by the unit test (`schedule()` never
+  invoked; nothing is injected into model context).
+
+DOGFOOD FINDING (fixed): the first browser open crashed with "Maximum call
+stack size exceeded" (recursion: browser summary → `orch.status()` →
+publish → snapshot subscriber → browser refresh → ...). Fixed by caching the
+last delivered snapshot in the controller; regression + full-suite checks
+green. Also improved the browser header from the manager's `1 active` summary
+to the explicit `2 running · 0 queued` counts.
 
 ## 19. DEFERRED / OUT OF SCOPE (v1)
 
@@ -407,4 +435,12 @@ opening/switching/scrolling repeatedly makes no provider calls.
   2. `feat(aira): Agent Inspector TUI — browser, child transcript view,
      per-view viewports` — entry behavior, browser, transcript, controller,
      workbench/footer markers, Editor.atEmptyStart, tests.
+  3. `fix(aira): inspector browser must not re-publish the snapshot on
+     refresh` — dogfood stack-overflow fix.
+  4. `fix(ai): refresh tool-call-id test to current catalog ids` — unrelated
+     pre-existing check failure surfaced by the release smoke (github-copilot
+     gpt-5.2-codex was renamed in the live model catalog); required for the
+     pre-commit gate and the release smoke to run.
+  5. `feat(aira): browser header counts` — `2 running · 0 queued` instead of
+     the manager's `1 active` summary (applied during dogfood).
 - Reference trees untouched; working tree clean at completion.

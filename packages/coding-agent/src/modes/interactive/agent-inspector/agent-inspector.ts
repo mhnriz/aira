@@ -83,7 +83,14 @@ export class AgentInspectorController {
 		this.options = options;
 		this.browser = new AgentBrowserComponent({
 			getRuns: () => this.runs(),
-			getSummary: () => this.snapshot?.summary,
+			getSummary: () => {
+				const snapshot = this.snapshot;
+				if (!snapshot) return undefined;
+				if (snapshot.runningCount > 0 || snapshot.queuedCount > 0) {
+					return `${snapshot.runningCount} running · ${snapshot.queuedCount} queued`;
+				}
+				return snapshot.summary;
+			},
 			onSelect: (runId) => this.openChild(runId),
 			onCancel: () => this.close(),
 		});
