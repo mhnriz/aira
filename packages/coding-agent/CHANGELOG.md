@@ -4,6 +4,7 @@
 
 ### Fixed
 - Fixed Windows process-tree termination spawning `taskkill` through PATH, which could crash when the child process emitted an unhandled spawn error.
+- Fixed toggling thinking visibility clearing partial output from running Bash tools.
 - Fixed resumed sessions corrupting the next appended entry when their JSONL file lacks a trailing newline.
 
 ### Added

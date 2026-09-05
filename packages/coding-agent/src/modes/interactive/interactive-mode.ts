@@ -5332,8 +5332,19 @@ export class InteractiveMode {
 			this.streamingComponent.updateContent(this.streamingMessage);
 			this.chatContainer.addChild(this.streamingComponent);
 		}
+		this.updateThinkingBlockVisibility();
 
 		this.showStatus(`Thinking blocks: ${this.hideThinkingBlock ? "hidden" : "visible"}`);
+	}
+
+	/** Update rendered assistant messages without rebuilding live tool components. */
+	private updateThinkingBlockVisibility(): void {
+		for (const child of this.chatContainer.children) {
+			if (child instanceof AssistantMessageComponent) {
+				child.setHideThinkingBlock(this.hideThinkingBlock);
+			}
+		}
+		this.ui.requestRender();
 	}
 
 	private async handleOpenExternalEditor(): Promise<void> {
@@ -5754,6 +5765,7 @@ export class InteractiveMode {
 						}
 						this.chatContainer.clear();
 						this.rebuildChatFromMessages();
+						this.updateThinkingBlockVisibility();
 					},
 					onMermaidRenderingModeChange: (mode) => {
 						this.settingsManager.setMermaidRenderingMode(mode);
