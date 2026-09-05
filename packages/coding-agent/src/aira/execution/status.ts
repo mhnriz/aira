@@ -1,3 +1,5 @@
+import type { AiraInteractiveAuthStatus } from "./types.ts";
+
 /**
  * Aira execution — canonical-state snapshot shapes.
  *
@@ -28,6 +30,14 @@ export interface AiraProcessSnapshot {
 	exitReason?: string;
 	/** True when this record was reused instead of launched. */
 	reused?: boolean;
+	/** True when this record has a local terminal input bridge. */
+	interactive?: boolean;
+	/** Non-secret local authentication lifecycle fact. */
+	interactiveAuth?: AiraInteractiveAuthStatus;
+	/** True while the local bridge is collecting input. */
+	interactiveInputPending?: boolean;
+	/** Bounded non-secret prompt label, when input is required. */
+	interactivePrompt?: string;
 }
 
 export interface AiraExecutionResultSummary {

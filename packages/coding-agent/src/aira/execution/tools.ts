@@ -26,7 +26,13 @@ import { buildCompactRow, type CompactStatus, formatCompactDuration } from "../.
 import { getTextOutput, str } from "../../core/tools/render-utils.ts";
 import type { Theme } from "../../modes/interactive/theme/theme.ts";
 import type { AiraSessionState } from "../state.ts";
-import type { AiraExecutionResult, AiraProcessRecord, AiraProcessRequest, AiraStartOptions } from "./types.ts";
+import type {
+	AiraExecutionResult,
+	AiraInteractiveAuthStatus,
+	AiraProcessRecord,
+	AiraProcessRequest,
+	AiraStartOptions,
+} from "./types.ts";
 import { displayCommand } from "./types.ts";
 
 /** The slice of the execution manager the tools need (host handle satisfies it). */
@@ -73,6 +79,12 @@ const processStartSchema = Type.Object({
 		Type.Union([Type.Literal("new"), Type.Literal("reuse"), Type.Literal("restart")], {
 			description:
 				"new = always launch (default). reuse = return the still-running managed dev process with the same command+cwd if one exists. restart = terminate a matching one first, then launch.",
+		}),
+	),
+	interactive: Type.Optional(
+		Type.Boolean({
+			description:
+				"Run through a local PTY and allow the attached local UI to answer password-like prompts; unavailable in headless mode.",
 		}),
 	),
 });
@@ -138,13 +150,19 @@ export function formatProcessLine(record: {
 	exitedAt?: number;
 	exitCode?: number | null;
 	pid?: number;
+	interactive?: boolean;
+	interactiveInputPending?: boolean;
+	interactiveAuth?: AiraInteractiveAuthStatus;
 }): string {
 	const age =
 		record.exitedAt !== undefined
 			? formatDuration(record.exitedAt - record.startedAt)
 			: formatDuration(Date.now() - record.startedAt);
 	const code = record.exitCode !== undefined && record.exitCode !== null ? ` code ${record.exitCode}` : "";
-	return `${record.id}  ${record.status.padEnd(9)}  ${record.command}  ${age}${code}`;
+	const input = record.interactive
+		? `  interactive${record.interactiveInputPending ? " · awaiting local input" : record.interactiveAuth ? ` · auth ${record.interactiveAuth}` : ""}`
+		: "";
+	return `${record.id}  ${record.status.padEnd(9)}  ${record.command}  ${age}${code}${input}`;
 }
 
 function processLineOf(record: AiraProcessRecord): {
@@ -155,6 +173,9 @@ function processLineOf(record: AiraProcessRecord): {
 	exitedAt?: number;
 	exitCode?: number | null;
 	pid?: number;
+	interactive?: boolean;
+	interactiveInputPending?: boolean;
+	interactiveAuth?: AiraInteractiveAuthStatus;
 } {
 	return {
 		id: record.id,
@@ -164,6 +185,9 @@ function processLineOf(record: AiraProcessRecord): {
 		exitedAt: record.exitedAt,
 		exitCode: record.exitCode,
 		pid: record.pid,
+		interactive: record.interactive,
+		interactiveInputPending: record.interactiveInputPending,
+		interactiveAuth: record.interactiveAuth,
 	};
 }
 
@@ -197,6 +221,9 @@ export function formatStartResult(result: AiraExecutionResult): string {
 		lines.push(`exit code 0 · ${duration}`);
 	} else {
 		lines.push(`Command failed: exit code ${result.exitCode ?? "?"} · ${duration}`);
+	}
+	if (result.interactiveAuth) {
+		lines.push(`local authentication: ${result.interactiveAuth}`);
 	}
 	const stdout = result.stdout.text.trim();
 	const stderr = result.stderr.text.trim();
@@ -454,6 +481,7 @@ export function createAiraProcessToolDefinitions(
 			"Use background + purpose dev for development servers; reuse with reuse=reuse so a compatible running server is reused instead of spawned again.",
 			"Prefer foreground for short verification (tests, builds, checks); set timeout only when a bound is needed.",
 			"Use background=auto when a command may be either quick or long-running: it stays foreground if it finishes quickly and becomes a managed background process if it outlives ~20s.",
+			"Use interactive=true only when the command requires a local terminal; secrets are collected by the local UI and never returned to the model.",
 			"process_start never times out by itself: it runs until the process exits (or timeout is given).",
 		],
 		parameters: processStartSchema,
@@ -471,6 +499,7 @@ export function createAiraProcessToolDefinitions(
 				purpose: params.purpose ?? undefined,
 				mode: params.background === true ? "background" : params.background === "auto" ? "auto" : "foreground",
 				reuse: params.reuse ?? "new",
+				interactive: params.interactive === true,
 				timeoutMs: resolveTimeoutMs(params.timeout),
 				signal,
 			};

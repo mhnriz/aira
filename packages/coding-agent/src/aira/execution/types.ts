@@ -20,6 +20,9 @@ export type AiraProcessMode = "foreground" | "background";
 /** Lifecycle truth of a process record. */
 export type AiraProcessStatus = "running" | "exited" | "terminated" | "spawn-failed";
 
+/** Bounded lifecycle fact for local interactive authentication. */
+export type AiraInteractiveAuthStatus = "requested" | "succeeded" | "failed" | "cancelled" | "unavailable";
+
 /** Why a process stopped being running. */
 export type AiraExitReason =
 	| "exit"
@@ -76,6 +79,8 @@ export interface AiraExecutionResult {
 	reused?: boolean;
 	/** True when a previous matching process was restarted. */
 	restarted?: boolean;
+	/** Non-secret local authentication lifecycle fact, when applicable. */
+	interactiveAuth?: AiraInteractiveAuthStatus;
 }
 
 /** Options for `start()` (how the manager should run the request). */
@@ -100,6 +105,18 @@ export interface AiraStartOptions {
 	/** Cancellation for the foreground phase; ignored once backgrounded. */
 	signal?: AbortSignal;
 	purpose?: AiraProcessPurpose;
+	/** Allocate a local terminal-backed session for host/UI input. */
+	interactive?: boolean;
+}
+
+/**
+ * Local-only input bridge for interactive processes.
+ *
+ * The prompt is a bounded, non-secret label. The returned value is written
+ * directly to the PTY and is never part of an Aira tool result or snapshot.
+ */
+export interface AiraInteractiveInputBridge {
+	requestSecret(prompt: string, signal: AbortSignal): Promise<string | undefined>;
 }
 
 /** Full managed-process record (process manager's source of truth). */
@@ -129,6 +146,18 @@ export interface AiraProcessRecord {
 	reused?: boolean;
 	/** When the record escalated from foreground to background (auto mode). */
 	backgroundedAt?: number;
+	/** True when the process is attached to a local interactive terminal bridge. */
+	interactive?: boolean;
+	/** Non-secret local authentication lifecycle fact. */
+	interactiveAuth?: AiraInteractiveAuthStatus;
+	/** Internal: a secret was submitted to the PTY; OS authentication is not yet confirmed. */
+	interactiveAuthAttempted?: boolean;
+	/** True while the local bridge is collecting input. */
+	interactiveInputPending?: boolean;
+	/** Bounded non-secret prompt label, when input is required. */
+	interactivePrompt?: string;
+	/** Internal cancellation for a pending local input request. */
+	interactiveInputAbort?: AbortController;
 	/** Spawn-failure error message. */
 	spawnError?: string;
 	stdout: BoundedOutputBuffer;
@@ -163,6 +192,12 @@ export interface AiraExecutionHandle {
 	get(id: string): AiraProcessRecord | undefined;
 	list(): readonly AiraProcessRecord[];
 	logs(id: string, tailChars?: number): { stdout: BoundedLogTail; stderr: BoundedLogTail } | undefined;
+	/** Write local UI input to an interactive process; input is never model-visible or persisted. */
+	writeInput(id: string, input: string): boolean;
+	/** Attach a local-only secret input bridge; never available to model tools. */
+	attachInteractiveInputBridge?(bridge: AiraInteractiveInputBridge): void;
+	/** Detach the local-only secret input bridge. */
+	detachInteractiveInputBridge?(): void;
 	terminate(id: string, reason?: "user" | "timeout" | "cancelled" | "restart"): Promise<AiraProcessRecord | undefined>;
 	subscribe(listener: (event: AiraExecutionEvent) => void): () => void;
 	dispose(): Promise<void>;

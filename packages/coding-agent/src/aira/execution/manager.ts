@@ -37,6 +37,7 @@ import { type AiraExecutionStatus, type AiraProcessSnapshot, initialAiraExecutio
 import {
 	type AiraExecutionEvent,
 	type AiraExecutionResult,
+	type AiraInteractiveInputBridge,
 	type AiraProcessPurpose,
 	type AiraProcessRecord,
 	type AiraProcessRequest,
@@ -76,6 +77,38 @@ export interface AiraExecutionManagerOptions {
 
 const FORCE_WAIT_MS = 3000;
 
+/** Small POSIX PTY proxy. Python's stdlib provides forkpty without a native dependency. */
+const POSIX_PTY_PROXY = [
+	"import errno, os, pty, select, signal, sys",
+	"pid, master = pty.fork()",
+	"if pid == 0:",
+	"    os.execvpe(sys.argv[1], sys.argv[1:], os.environ)",
+	"while True:",
+	"    try:",
+	"        readable, _, _ = select.select([0, master], [], [])",
+	"    except InterruptedError:",
+	"        continue",
+	"    if 0 in readable:",
+	"        data = os.read(0, 4096)",
+	"        if not data:",
+	"            os.kill(pid, signal.SIGHUP)",
+	"            break",
+	"        os.write(master, data)",
+	"    if master in readable:",
+	"        try:",
+	"            data = os.read(master, 4096)",
+	"        except OSError as error:",
+	"            if error.errno == errno.EIO:",
+	"                break",
+	"            raise",
+	"        if not data:",
+	"            break",
+	"        os.write(1, data)",
+	"os.close(master)",
+	"_, status = os.waitpid(pid, 0)",
+	"os._exit(os.WEXITSTATUS(status) if os.WIFEXITED(status) else 128 + os.WTERMSIG(status))",
+].join("\n");
+
 const PURPOSE_PREFIX: Record<AiraProcessPurpose, string> = {
 	run: "run",
 	test: "test",
@@ -112,6 +145,7 @@ export class AiraExecutionManager {
 	private status: AiraExecutionStatus = initialAiraExecutionStatus();
 	private readonly terminator: ProcessTerminator;
 	private readonly now: () => number;
+	private interactiveInputBridge: AiraInteractiveInputBridge | undefined;
 
 	constructor(state: AiraSessionState, sessionCwd: string, options: AiraExecutionManagerOptions = {}) {
 		this.state = state;
@@ -138,6 +172,12 @@ export class AiraExecutionManager {
 		const now = this.now();
 		if (this.disposed) {
 			return unavailableResult(request, now, "execution runtime is disposed");
+		}
+		if (options.interactive && (this.options.platform ?? process.platform) === "win32") {
+			return unavailableResult(request, now, "interactive terminal unavailable on this host");
+		}
+		if (options.interactive && !this.interactiveInputBridge) {
+			return unavailableResult(request, now, "interactive input unavailable: no local secret-input UI is attached");
 		}
 		const purpose = options.purpose ?? requestPurposeHint(request);
 		if (options.reuse === "reuse" || options.reuse === "restart") {
@@ -167,6 +207,7 @@ export class AiraExecutionManager {
 			request,
 			purpose,
 			options.mode === "auto" ? "foreground" : (options.mode ?? "foreground"),
+			options.interactive === true,
 		);
 		try {
 			this.launch(record);
@@ -197,18 +238,20 @@ export class AiraExecutionManager {
 		if (record.request.command !== undefined) {
 			const shell = this.options.shellConfig?.() ?? getShellConfig();
 			const commandFromStdin = shell.commandTransport === "stdin";
-			const child = (this.options.spawnImpl ?? spawn)(
-				shell.shell,
-				commandFromStdin ? shell.args : [...shell.args, record.request.command],
-				{
-					cwd: record.request.cwd,
-					detached: process.platform !== "win32",
-					env,
-					stdio: [commandFromStdin ? "pipe" : "ignore", "pipe", "pipe"],
-					windowsHide: true,
-				},
-			);
-			if (commandFromStdin) {
+			const executable = record.interactive ? "python3" : shell.shell;
+			const args = record.interactive
+				? ["-c", POSIX_PTY_PROXY, shell.shell, ...shell.args, record.request.command]
+				: commandFromStdin
+					? shell.args
+					: [...shell.args, record.request.command];
+			const child = (this.options.spawnImpl ?? spawn)(executable, args, {
+				cwd: record.request.cwd,
+				detached: process.platform !== "win32",
+				env,
+				stdio: [record.interactive || commandFromStdin ? "pipe" : "ignore", "pipe", "pipe"],
+				windowsHide: true,
+			});
+			if (commandFromStdin && !record.interactive) {
 				child.stdin?.on("error", () => {});
 				child.stdin?.end(record.request.command);
 			}
@@ -216,11 +259,15 @@ export class AiraExecutionManager {
 			return;
 		}
 		if (record.request.exe !== undefined) {
-			const child = (this.options.spawnImpl ?? spawn)(record.request.exe, [...(record.request.args ?? [])], {
+			const executable = record.interactive ? "python3" : record.request.exe;
+			const args = record.interactive
+				? ["-c", POSIX_PTY_PROXY, record.request.exe, ...(record.request.args ?? [])]
+				: [...(record.request.args ?? [])];
+			const child = (this.options.spawnImpl ?? spawn)(executable, args, {
 				cwd: record.request.cwd,
 				detached: process.platform !== "win32",
 				env,
-				stdio: ["ignore", "pipe", "pipe"],
+				stdio: [record.interactive ? "pipe" : "ignore", "pipe", "pipe"],
 				windowsHide: true,
 			});
 			this.attach(record, child);
@@ -249,6 +296,7 @@ export class AiraExecutionManager {
 		let stdoutEnded = false;
 		let stderrEnded = false;
 		let settled = false;
+		let localSecretForRedaction: string | undefined;
 		let postExitTimer: NodeJS.Timeout | undefined;
 		const finalize = (code: number | null) => {
 			if (settled) return;
@@ -260,6 +308,7 @@ export class AiraExecutionManager {
 			if (record.pid !== undefined) {
 				untrackDetachedChildPid(record.pid);
 			}
+			localSecretForRedaction = undefined;
 			this.finalizeExit(record, code);
 		};
 		const armIdleTimer = () => {
@@ -276,11 +325,19 @@ export class AiraExecutionManager {
 			if (exited && !settled) armIdleTimer();
 		};
 		child.stdout?.on("data", (data: Buffer) => {
-			record.stdout.append(decodeSanitized(stdoutDecoder, data));
+			const text = redactInteractiveSecret(decodeSanitized(stdoutDecoder, data), localSecretForRedaction);
+			record.stdout.append(text);
+			this.maybeRequestInteractiveInput(record, text, (secret) => {
+				localSecretForRedaction = secret;
+			});
 			onData();
 		});
 		child.stderr?.on("data", (data: Buffer) => {
-			record.stderr.append(decodeSanitized(stderrDecoder, data));
+			const text = redactInteractiveSecret(decodeSanitized(stderrDecoder, data), localSecretForRedaction);
+			record.stderr.append(text);
+			this.maybeRequestInteractiveInput(record, text, (secret) => {
+				localSecretForRedaction = secret;
+			});
 			onData();
 		});
 		child.stdout?.on("end", () => {
@@ -325,6 +382,19 @@ export class AiraExecutionManager {
 	}
 
 	private finalizeExit(record: AiraProcessRecord, code: number | null): void {
+		// Submitting a secret is not proof that the OS accepted it. Resolve the
+		// authentication fact only after the child has reported its outcome.
+		if (record.interactiveAuth === "requested") {
+			if (record.status === "exited" && record.interactiveAuthAttempted) {
+				record.interactiveAuth = code === 0 ? "succeeded" : "failed";
+			} else if (record.status === "terminated") {
+				record.interactiveAuth = "cancelled";
+			}
+		}
+		record.interactiveInputAbort?.abort();
+		record.interactiveInputAbort = undefined;
+		record.interactiveInputPending = false;
+		record.interactivePrompt = undefined;
 		record.exitPromiseResolve(code);
 		this.publish();
 		this.emit({ type: "process_exited", processId: record.id, record: snapshotOf(record) });
@@ -445,6 +515,29 @@ export class AiraExecutionManager {
 		};
 	}
 
+	/** Write only host/UI input to a local interactive process. */
+	writeInput(id: string, input: string): boolean {
+		const record = this.records.get(id);
+		if (!record?.interactive || record.status !== "running" || !record.child?.stdin?.writable) return false;
+		return record.child.stdin.write(input);
+	}
+
+	/** Attach the local-only secret input bridge used by interactive processes. */
+	attachInteractiveInputBridge(bridge: AiraInteractiveInputBridge): void {
+		this.interactiveInputBridge = bridge;
+	}
+
+	/** Detach the local-only secret input bridge and cancel any pending prompt. */
+	detachInteractiveInputBridge(): void {
+		this.interactiveInputBridge = undefined;
+		for (const record of this.records.values()) {
+			if (record.interactiveInputAbort) {
+				record.interactiveInputAbort.abort();
+				void this.terminate(record.id, "cancelled");
+			}
+		}
+	}
+
 	subscribe(listener: (event: AiraExecutionEvent) => void): () => void {
 		this.listeners.add(listener);
 		return () => this.listeners.delete(listener);
@@ -559,6 +652,7 @@ export class AiraExecutionManager {
 		request: AiraProcessRequest,
 		purpose: AiraProcessPurpose,
 		mode: "foreground" | "background",
+		interactive: boolean,
 	): AiraProcessRecord {
 		this.idCounter += 1;
 		const id = `${PURPOSE_PREFIX[purpose]}-${this.idCounter}`;
@@ -576,6 +670,7 @@ export class AiraExecutionManager {
 			createdAt: now,
 			startedAt: now,
 			status: "running",
+			interactive,
 			stdout: new BoundedOutputBuffer(this.options.maxLogBytesPerStream),
 			stderr: new BoundedOutputBuffer(this.options.maxLogBytesPerStream),
 			exitPromise,
@@ -594,6 +689,7 @@ export class AiraExecutionManager {
 			processId: record.id,
 			stdout: { text: "", truncated: false },
 			stderr: { text: "", truncated: false },
+			interactiveAuth: record.interactiveAuth,
 		};
 	}
 
@@ -613,6 +709,7 @@ export class AiraExecutionManager {
 				processId: record.id,
 				stdout,
 				stderr,
+				interactiveAuth: record.interactiveAuth,
 				reason: record.spawnError,
 			};
 		}
@@ -640,8 +737,73 @@ export class AiraExecutionManager {
 			processId: record.id,
 			stdout,
 			stderr,
+			interactiveAuth: record.interactiveAuth,
 			reason: status === "exited" ? undefined : record.exitReason,
 		};
+	}
+
+	/**
+	 * Detect only a password-like prompt. The raw output remains ordinary
+	 * bounded process output; the local bridge receives a fixed label rather
+	 * than arbitrary command output.
+	 */
+	private maybeRequestInteractiveInput(
+		record: AiraProcessRecord,
+		text: string,
+		onSecret: (secret: string) => void,
+	): void {
+		if (
+			!record.interactive ||
+			record.status !== "running" ||
+			record.interactiveInputPending ||
+			!this.interactiveInputBridge
+		) {
+			return;
+		}
+		if (!interactivePasswordPrompt(text)) {
+			return;
+		}
+
+		const bridge = this.interactiveInputBridge;
+		const controller = new AbortController();
+		record.interactiveInputAbort = controller;
+		record.interactiveInputPending = true;
+		record.interactivePrompt = "sudo password";
+		record.interactiveAuth = "requested";
+		this.publish();
+
+		void bridge
+			.requestSecret("sudo password", controller.signal)
+			.then((secret) => {
+				if (record.interactiveInputAbort !== controller) return;
+				record.interactiveInputAbort = undefined;
+				record.interactiveInputPending = false;
+				record.interactivePrompt = undefined;
+				this.publish();
+				if (secret === undefined) {
+					record.interactiveAuth = "cancelled";
+					this.publish();
+					void this.terminate(record.id, "cancelled");
+					return;
+				}
+				if (record.status === "running" && record.child?.stdin?.writable) {
+					record.interactiveAuthAttempted = true;
+					onSecret(secret);
+					// The secret exists only in this local callback and is written
+					// directly to the PTY. Echoed bytes are redacted before they
+					// enter the bounded output buffers or canonical state.
+					record.child.stdin.write(`${secret}\n`);
+				}
+			})
+			.catch(() => {
+				if (record.interactiveInputAbort !== controller) return;
+				record.interactiveInputAbort = undefined;
+				record.interactiveInputPending = false;
+				record.interactivePrompt = undefined;
+				record.interactiveAuth = "unavailable";
+				this.publish();
+				void this.terminate(record.id, "cancelled");
+			});
 	}
 
 	/** Record a final result into the bounded evidence list + snapshot (bounded). */
@@ -733,6 +895,15 @@ function decodeSanitized(decoder: InstanceType<typeof TextDecoder>, data: Buffer
 	return sanitizeBinaryOutput(stripAnsi(decoder.decode(data, { stream: true }))).replace(/\r/g, "");
 }
 
+function interactivePasswordPrompt(text: string): boolean {
+	const lastLine = text.split("\n").at(-1)?.trim() ?? "";
+	return /(?:password|passphrase)(?:\s+for\s+[^:]{0,120})?\s*:\s*$/i.test(lastLine);
+}
+
+function redactInteractiveSecret(text: string, secret: string | undefined): string {
+	return secret && secret.length > 0 ? text.replaceAll(secret, "[REDACTED]") : text;
+}
+
 function unavailableResult(request: AiraProcessRequest, now: number, reason: string): AiraExecutionResult {
 	return {
 		status: "unavailable",
@@ -752,6 +923,10 @@ function snapshotOf(record: AiraProcessRecord): AiraProcessSnapshot {
 		id: record.id,
 		purpose: record.purpose,
 		mode: record.mode,
+		interactive: record.interactive,
+		interactiveInputPending: record.interactiveInputPending,
+		interactivePrompt: record.interactivePrompt,
+		interactiveAuth: record.interactiveAuth,
 		status: record.status,
 		command: displayCommand(record.request),
 		cwd: record.request.cwd,
