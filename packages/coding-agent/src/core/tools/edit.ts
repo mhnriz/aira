@@ -7,7 +7,6 @@ import { renderDiff } from "../../modes/interactive/components/diff.ts";
 import { keyHint } from "../../modes/interactive/components/keybinding-hints.ts";
 import type { Theme } from "../../modes/interactive/theme/theme.ts";
 import { splitBom } from "../../utils/text.ts";
-import { getExperimentalToolSampling } from "../experimental.ts";
 import type { ExtensionContext, ToolDefinition } from "../extensions/types.ts";
 import { buildCompactRow, type CompactStatus, diffDelta, formatDiffDeltaParts } from "./compact.ts";
 import {
@@ -343,7 +342,7 @@ export function createEditToolDefinition(
 		promptSnippet: editToolSystemPromptContribution.snippet,
 		promptGuidelines: [...editToolSystemPromptContribution.guidelines],
 		parameters: editSchema,
-		constrainedSampling: getExperimentalToolSampling(),
+		constrainedSampling: { type: "json_schema", strict: "prefer" },
 		renderShell: "self",
 		prepareArguments: prepareEditArguments,
 		async execute(_toolCallId, input: EditToolInput, signal?: AbortSignal, _onUpdate?, ctx?: ExtensionContext) {
