@@ -443,4 +443,19 @@ to the explicit `2 running · 0 queued` counts.
      pre-commit gate and the release smoke to run.
   5. `feat(aira): browser header counts` — `2 running · 0 queued` instead of
      the manager's `1 active` summary (applied during dogfood).
+  6. `fix(aira): close live-code idle-eviction boundary race; harden
+     load-flaky tests` — repair round 2 (independent verification: workspace
+     test run exits 1 with no diagnostics). ROOT CAUSE (real bug, outside
+     the inspector but blocking the suite): the Phase 5 live-code provider's
+     idle check could be armed 1ms before a touch, fire at delta=timeout-1,
+     miss eviction, and be re-armed by lagging status events indefinitely —
+     an LSP server that never idle-evicts. The `shuts servers down on idle
+     timeout` test flaked ~10-25% even in isolation. Fixed by arming checks
+     at timeout+2ms (a firing check then always observes delta >= timeout)
+     and evicting only running clients that were actually touched (no
+     stale-timestamp kills of starting servers); the 120ms boundary now
+     evicts deterministically (40x stress green). The two fixed-sleep tests
+     (live-code idle, agent-session-concurrent's streaming guards) now poll
+     for the observed state instead of sleeping; no other product behavior
+     changed.
 - Reference trees untouched; working tree clean at completion.
