@@ -13,7 +13,7 @@
  * it), the structured result contract, and tool discipline notes.
  */
 
-import { airaModeLabel } from "../modes.ts";
+import { airaModeLabel, buildAiraRuntimeModeEnvelope } from "../modes.ts";
 import type { AiraProjectProfile } from "../project/profile.ts";
 import { summarizeAiraProject } from "../project/profile.ts";
 import type { AiraMode } from "../state.ts";
@@ -103,6 +103,7 @@ export function buildAiraChildEnvelope(input: AiraChildEnvelopeInput): AiraChild
 		sections.push(``, `## Relevant files`, ...files.map((file) => `- ${file}`));
 	}
 	sections.push(``, `## Execution mode`, airaModeLabel(input.mode));
+	sections.push(`Control: ${buildAiraRuntimeModeEnvelope(input.mode)}`);
 	if (!input.mutatingAllowed) {
 		sections.push(
 			``,

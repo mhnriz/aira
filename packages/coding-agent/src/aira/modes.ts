@@ -160,3 +160,23 @@ export function airaModeGlyph(mode: AiraMode): string {
 export function isAiraModeReadOnly(mode: AiraMode): boolean {
 	return mode === "plan";
 }
+
+/**
+ * Small host-owned control signal appended to the model system prompt for the
+ * next inference. It is advisory; tool policy remains authoritative.
+ */
+export function buildAiraRuntimeModeEnvelope(mode: AiraMode): string {
+	const posture =
+		mode === "plan"
+			? "read-only; plan and inspect only"
+			: mode === "review"
+				? "review and gather evidence"
+				: "build and verify changes";
+	return `<aira-runtime mode=${airaModeLabel(mode)} posture="${posture}" host-enforcement=authoritative />`;
+}
+
+/** Build the bounded runtime control envelope, including one-shot recovery context when present. */
+export function buildAiraRuntimeControlEnvelope(mode: AiraMode, recoveryHint?: string): string {
+	const modeEnvelope = buildAiraRuntimeModeEnvelope(mode);
+	return recoveryHint ? `${modeEnvelope}\n<aira-task-recovery>${recoveryHint}</aira-task-recovery>` : modeEnvelope;
+}

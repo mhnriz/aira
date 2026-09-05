@@ -97,6 +97,21 @@ describe("Aira PLAN read-only enforcement (host/tool-policy level)", () => {
 		]);
 	});
 
+	it("refreshes the runtime mode envelope when the mode changes", () => {
+		const harness = harnesses[0]!;
+
+		harness.session.setAiraMode("plan");
+		expect(harness.session.systemPrompt).toContain("<aira-runtime mode=PLAN");
+
+		harness.session.setAiraMode("review");
+		expect(harness.session.systemPrompt).toContain("<aira-runtime mode=REVIEW");
+		expect(harness.session.systemPrompt).not.toContain("<aira-runtime mode=PLAN");
+
+		harness.session.setAiraMode("build");
+		expect(harness.session.systemPrompt).toContain("<aira-runtime mode=BUILD");
+		expect(harness.session.systemPrompt).not.toContain("<aira-runtime mode=REVIEW");
+	});
+
 	it("restores the previous tool set when leaving PLAN", () => {
 		const harness = harnesses[0]!;
 		harness.session.setAiraMode("review");
