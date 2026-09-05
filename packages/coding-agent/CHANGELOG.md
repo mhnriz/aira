@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- **Aira**: Deferred context-only extension messages sent during a running turn until its tool results are appended, preserving provider message ordering ([#8537](https://github.com/earendil-works/pi/issues/8537)).
 - **Aira**: Phase 13 runtime reliability hardening. Native tasks now use
   bounded session-scoped persistence with safe resume recovery; child and
   verifier runtimes expose bounded tool-budget telemetry and failure
