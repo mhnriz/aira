@@ -9,25 +9,29 @@
  * the human/model see ONE task universe. No second mutable task owner.
  *
  * Semantics:
- * - transitions are forward-only and validated (types.ts);
+ * - model patches use forward-only transitions and are validated (types.ts);
+ *   the human `/tasks done` action activates a pending task before completing
+ *   it so the command matches its user-facing meaning;
  * - `blocked` is DERIVED from unfinished dependencies and can never be set
  *   directly; a task with an unfinished dependency cannot become
  *   active/completed (truthful rejection);
  * - child-derived rows are immutable through the task surface ("owned by
  *   orchestration; cancel via /agents cancel");
  * - rows are bounded (AIRA_TASK_MAX_ROWS; oldest settled rows evicted);
- * - session-scoped only: no task persistence in Phase 11 (bounded; the
- *   session is the task lifetime).
+ * - session-scoped persistence is bounded and native rows only; child rows
+ *   remain orchestration-owned projections.
  */
 import { randomUUID } from "node:crypto";
 import type { AiraOrchestrationHandle } from "../orchestration/manager.ts";
 import type { AiraSessionState } from "../state.ts";
+import { type AiraTaskPersistence, createAiraTaskPersistence } from "./persistence.ts";
 import {
 	AIRA_TASK_MAX_DEPENDENCIES,
 	AIRA_TASK_MAX_NOTE_CHARS,
 	AIRA_TASK_MAX_ROWS,
 	AIRA_TASK_MAX_TITLE_CHARS,
 	AIRA_TASK_PATCHABLE_STATUSES,
+	AIRA_TASK_RECOVERY_HINT,
 	AIRA_TASK_SNAPSHOT_ROWS,
 	AIRA_TASK_TRANSITIONS,
 	type AiraTask,
@@ -47,6 +51,11 @@ export interface AiraTaskManagerOptions {
 	/** Orchestration handle (Phase 9) — child-run projection source. */
 	orchestration?: AiraOrchestrationHandle;
 	now?: () => number;
+	/** Session identity and lifecycle reason for the default durable store. */
+	sessionId?: string;
+	startReason?: string;
+	persistence?: AiraTaskPersistence;
+	persistenceEnabled?: boolean;
 }
 
 export interface AiraTaskManagerHandle {
@@ -59,10 +68,15 @@ export interface AiraTaskManagerHandle {
 	patch(id: string, patch: AiraTaskPatch): { ok: true; task: AiraTask } | { ok: false; message: string };
 	get(id: string): AiraTask | undefined;
 	list(status?: AiraTask["status"]): AiraTask[];
+	/** Complete a user/model task, activating it first when necessary. */
+	complete(id: string): { ok: true; task: AiraTask } | { ok: false; message: string };
 	/** Remove a non-child task row (child rows are orchestration-owned). */
 	remove(id: string): { ok: true } | { ok: false; message: string };
+	clear(): { ok: true } | { ok: false; message: string };
 	/** Canonical snapshot (token-free). */
 	status(): AiraTasksStatus;
+	/** Consume the one-shot model hint created by interrupted-task recovery. */
+	consumeRecoveryHint?(): string | undefined;
 	subscribe(listener: (status: AiraTasksStatus) => void): () => void;
 	dispose(): void;
 }
@@ -75,10 +89,25 @@ export class AiraTaskManager implements AiraTaskManagerHandle {
 	private snapshot: AiraTasksStatus;
 	private unsubscribeOrchestration: (() => void) | undefined;
 	private disposed = false;
+	private readonly persistence: AiraTaskPersistence | undefined;
+	private recoveryHintPending = false;
 
 	constructor(state: AiraSessionState, options: AiraTaskManagerOptions) {
 		this.state = state;
 		this.options = options;
+		this.persistence =
+			options.persistence ??
+			(options.sessionId
+				? createAiraTaskPersistence(options.sessionId, options.startReason ?? "startup", {
+						enabled: options.persistenceEnabled,
+					})
+				: undefined);
+		const recovered = this.persistence?.recover();
+		for (const task of recovered?.tasks ?? []) {
+			if (!this.tasks.has(task.id)) this.tasks.set(task.id, task);
+		}
+		this.recoveryHintPending = (recovered?.normalizedCount ?? 0) > 0;
+		this.refreshDerivedStates();
 		this.snapshot = this.buildSnapshot();
 	}
 
@@ -126,6 +155,7 @@ export class AiraTaskManager implements AiraTaskManagerHandle {
 		this.tasks.set(task.id, task);
 		this.refreshDerivedStates();
 		this.evictSettled();
+		this.persist();
 		this.publish();
 		return { ok: true, task: this.clone(task) };
 	}
@@ -201,6 +231,7 @@ export class AiraTaskManager implements AiraTaskManagerHandle {
 		}
 
 		this.refreshDerivedStates();
+		this.persist();
 		this.publish();
 		return { ok: true, task: this.clone(task) };
 	}
@@ -218,6 +249,16 @@ export class AiraTaskManager implements AiraTaskManagerHandle {
 			: ordered.filter((task) => task.status === status).map((task) => this.clone(task));
 	}
 
+	complete(id: string): { ok: true; task: AiraTask } | { ok: false; message: string } {
+		const task = this.tasks.get(id);
+		if (!task) return { ok: false, message: `unknown task "${id}"` };
+		if (task.status === "pending") {
+			const activated = this.patch(id, { status: "active" });
+			if (!activated.ok) return activated;
+		}
+		return this.patch(id, { status: "completed" });
+	}
+
 	remove(id: string): { ok: true } | { ok: false; message: string } {
 		const task = this.tasks.get(id);
 		if (!task) {
@@ -228,6 +269,18 @@ export class AiraTaskManager implements AiraTaskManagerHandle {
 		}
 		this.tasks.delete(id);
 		this.refreshDerivedStates();
+		this.persist();
+		this.publish();
+		return { ok: true };
+	}
+
+	clear(): { ok: true } | { ok: false; message: string } {
+		if (this.disposed) return { ok: false, message: "session disposed" };
+		for (const [id, task] of this.tasks) {
+			if (task.source !== "child") this.tasks.delete(id);
+		}
+		this.refreshDerivedStates();
+		this.persist();
 		this.publish();
 		return { ok: true };
 	}
@@ -235,6 +288,14 @@ export class AiraTaskManager implements AiraTaskManagerHandle {
 	status(): AiraTasksStatus {
 		this.publish();
 		return this.snapshot;
+	}
+
+	consumeRecoveryHint(): string | undefined {
+		if (!this.recoveryHintPending) {
+			return undefined;
+		}
+		this.recoveryHintPending = false;
+		return AIRA_TASK_RECOVERY_HINT;
 	}
 
 	subscribe(listener: (status: AiraTasksStatus) => void): () => void {
@@ -246,6 +307,7 @@ export class AiraTaskManager implements AiraTaskManagerHandle {
 		if (this.disposed) {
 			return;
 		}
+		this.persist();
 		this.disposed = true;
 		this.unsubscribeOrchestration?.();
 		this.unsubscribeOrchestration = undefined;
@@ -400,7 +462,12 @@ export class AiraTaskManager implements AiraTaskManagerHandle {
 			childRows: rows.filter((task) => task.source === "child").length,
 			updatedAt: this.now(),
 			summary: taskSummary(total, counts, enabled),
+			...(this.persistence ? { persistence: persistenceSnapshot(this.persistence.health()) } : {}),
 		};
+	}
+
+	private persist(): void {
+		this.persistence?.save([...this.tasks.values()]);
 	}
 
 	private publish(): void {
@@ -492,4 +559,11 @@ export function createAiraTaskManager(state: AiraSessionState, options: AiraTask
 	const manager = new AiraTaskManager(state, options);
 	manager.activate();
 	return manager;
+}
+
+function persistenceSnapshot(record: { status: "ok" | "unavailable" | "failed"; error: string | undefined }): {
+	status: "ok" | "unavailable" | "failed";
+	error?: string;
+} {
+	return { status: record.status, ...(record.error ? { error: record.error } : {}) };
 }

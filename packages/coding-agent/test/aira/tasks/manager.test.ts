@@ -116,14 +116,16 @@ describe("AiraTaskManager (Phase 11)", () => {
 		expect(invalid.ok).toBe(false);
 		if (invalid.ok) return;
 		expect(invalid.message).toContain("cannot move");
+		const completedViaCommand = manager.complete(second.task.id);
+		expect(completedViaCommand.ok).toBe(true);
 
 		// snapshot projection truth
 		const snapshot = manager.status();
-		expect(snapshot.completed).toBe(1);
-		expect(snapshot.pending).toBe(1);
+		expect(snapshot.completed).toBe(2);
+		expect(snapshot.pending).toBe(0);
 		expect(snapshot.total).toBe(2);
 		expect(snapshot.rows.length).toBe(2);
-		expect(state.tasks?.summary).toContain("1/2");
+		expect(state.tasks?.summary).toContain("2/2");
 	});
 
 	it("dependency-blocked tasks are derived and enforced", () => {

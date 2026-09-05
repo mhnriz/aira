@@ -399,10 +399,14 @@ export function buildAiraDoctorReport(state: AiraSessionState | undefined): Aira
 			detail: "no task snapshot (manager wiring)",
 		});
 	} else {
+		const persistence = tasks.persistence;
+		const persistenceLine = persistence
+			? ` · persistence ${persistence.status}${persistence.error ? `: ${persistence.error}` : ""}`
+			: " · persistence unavailable";
 		checks.push({
 			name: "tasks",
 			pass: true,
-			detail: `${tasks.enabled ? "enabled" : "disabled"} · ${tasks.total} task(s) · ${tasks.completed} completed · ${tasks.active} active · ${tasks.blocked} blocked · ${tasks.childRows} orchestration-projected row(s)`,
+			detail: `${tasks.enabled ? "enabled" : "disabled"} · ${tasks.total} task(s) · ${tasks.completed} completed · ${tasks.active} active · ${tasks.blocked} blocked · ${tasks.childRows} orchestration-projected row(s)${persistenceLine}`,
 		});
 	}
 

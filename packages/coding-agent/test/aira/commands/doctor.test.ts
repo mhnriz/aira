@@ -32,7 +32,7 @@ function idleGoalSnapshot(mode: string = "build"): AiraGoalSnapshot {
 		budget: { tokens: undefined, maxDurationMs: undefined },
 		usage: { sources: [] },
 		revision: undefined,
-		tasks: { completed: 0, active: 0 },
+		tasks: { completed: 0, active: 0, total: 0 },
 		verification: {
 			verdict: undefined,
 			stale: false,

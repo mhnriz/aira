@@ -92,6 +92,8 @@ export interface AiraTasksStatus {
 	updatedAt: number;
 	/** One-line summary for restrained surfaces ("3/8 · 1 active"). */
 	summary: string;
+	/** Bounded storage/recovery health; absent for hosts without persistence. */
+	persistence?: { status: "ok" | "unavailable" | "failed"; error?: string };
 }
 
 export const AIRA_TASK_MAX_ROWS = 128;
@@ -99,6 +101,10 @@ export const AIRA_TASK_SNAPSHOT_ROWS = 24;
 export const AIRA_TASK_MAX_TITLE_CHARS = 200;
 export const AIRA_TASK_MAX_NOTE_CHARS = 300;
 export const AIRA_TASK_MAX_DEPENDENCIES = 16;
+
+/** One-shot model hint after interrupted task recovery. */
+export const AIRA_TASK_RECOVERY_HINT =
+	"interrupted native tasks were recovered; consult canonical task state before continuing";
 
 /** Forward-only legal transitions (blocked is derived, never settable). */
 export const AIRA_TASK_TRANSITIONS: Readonly<Record<AiraTaskStatus, readonly AiraTaskStatus[]>> = {

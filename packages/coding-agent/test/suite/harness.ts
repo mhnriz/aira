@@ -19,10 +19,11 @@ import type { AiraBrowserManagerOptions } from "../../src/aira/browser/manager.t
 import type { AiraExecutionManagerOptions } from "../../src/aira/execution/manager.ts";
 import type { AiraGoalManagerOptions } from "../../src/aira/goal/manager.ts";
 import type { AiraOrchestrationManagerOptions } from "../../src/aira/orchestration/manager.ts";
+import type { AiraTaskManagerOptions } from "../../src/aira/tasks/manager.ts";
 import type { AiraVerificationManagerOptions } from "../../src/aira/verification/manager.ts";
 import { AgentSession, type AgentSessionEvent } from "../../src/core/agent-session.ts";
 import { AuthStorage } from "../../src/core/auth-storage.ts";
-import type { ExtensionRunner } from "../../src/core/extensions/index.ts";
+import type { ExtensionRunner, SessionStartEvent } from "../../src/core/extensions/index.ts";
 import { convertToLlm } from "../../src/core/messages.ts";
 import { SessionManager } from "../../src/core/session-manager.ts";
 import type { Settings } from "../../src/core/settings-manager.ts";
@@ -74,6 +75,8 @@ export interface HarnessOptions {
 	allowedToolNames?: string[];
 	excludedToolNames?: string[];
 	resourceLoader?: ResourceLoader;
+	sessionManager?: SessionManager;
+	sessionStartEvent?: SessionStartEvent;
 	extensionFactories?: Array<InlineExtension | CreateTestExtensionsResultInput>;
 	withConfiguredAuth?: boolean;
 	modelsJson?: Record<string, unknown>;
@@ -104,6 +107,8 @@ export interface HarnessOptions {
 		| "abortRun"
 		| "agentEvents"
 	>;
+	/** Task-runtime options (tests inject persistence and recovery seams). */
+	airaTaskOptions?: Omit<AiraTaskManagerOptions, "settings" | "orchestration">;
 }
 
 export interface Harness {
@@ -141,7 +146,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 	const withConfiguredAuth = options.withConfiguredAuth ?? true;
 	const extensionRunnerRef: { current?: ExtensionRunner } = {};
 
-	const sessionManager = SessionManager.inMemory();
+	const sessionManager = options.sessionManager ?? SessionManager.inMemory();
 	// Core session-behavior tests exercise the agent loop, not the Phase 11
 	// permission seam (it has its own dedicated tests under test/aira/permissions).
 	// Default the gate off so fixture tools (echo/dummy/wait) run; pass
@@ -235,6 +240,8 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 		airaVerificationOptions: options.airaVerificationOptions,
 		airaOrchestrationOptions: options.airaOrchestrationOptions,
 		airaGoalOptions: options.airaGoalOptions,
+		sessionStartEvent: options.sessionStartEvent,
+		airaTaskOptions: options.airaTaskOptions,
 	});
 
 	const events: AgentSessionEvent[] = [];
