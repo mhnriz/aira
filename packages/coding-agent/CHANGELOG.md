@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- Fixed Windows process-tree termination spawning `taskkill` through PATH, which could crash when the child process emitted an unhandled spawn error.
+
 ### Added
 - Added RPC `clear_queue` to retrieve and remove queued steering and follow-up messages ([#8432](https://github.com/earendil-works/pi/issues/8432)).
 - **Aira**: Deferred context-only extension messages sent during a running turn until its tool results are appended, preserving provider message ordering ([#8537](https://github.com/earendil-works/pi/issues/8537)).

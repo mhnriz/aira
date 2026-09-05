@@ -24,6 +24,7 @@
  * codes).
  */
 import { spawn } from "node:child_process";
+import { join } from "node:path";
 
 /** Injectable kill effects so platform behavior is unit-testable. */
 export interface KillEffects {
@@ -43,7 +44,12 @@ export function defaultKillEffects(): KillEffects {
 		kill: (pid, signal) => process.kill(pid, signal),
 		taskkill: (args) => {
 			try {
-				spawn("taskkill", args, { stdio: "ignore", detached: true, windowsHide: true });
+				const child = spawn(join(process.env.SystemRoot ?? "C:\\Windows", "System32", "taskkill.exe"), args, {
+					stdio: "ignore",
+					detached: true,
+					windowsHide: true,
+				});
+				child.once("error", () => {});
 			} catch {
 				// Best-effort: nothing further; the manager falls back to directKill.
 			}

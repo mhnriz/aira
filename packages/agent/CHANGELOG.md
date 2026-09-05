@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- Fixed Windows process-tree termination spawning `taskkill` through PATH, which could crash when the child process emitted an unhandled spawn error.
+
 ## [0.84.3] - 2026-08-24
 
 ### Fixed
