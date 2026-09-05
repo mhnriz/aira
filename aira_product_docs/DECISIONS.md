@@ -1004,3 +1004,118 @@ background (true black, charcoal, warm-dark, blue-black). Semantic roles keep
 working for third-party themes with their classic fallbacks; only the
 built-in default changed. HTML export keeps explicit page/card/info
 backgrounds because exported HTML has no terminal behind it.
+
+## ADR-039 — Native tasks persist bounded rows; runtime projections do not
+
+**Status:** accepted · Phase 13
+
+The Task Manager is the sole live task authority. It persists only native task
+identity, title, status, dependencies, source, note, and meaningful
+timestamps in a session-scoped Aira cache record with a schema version and
+atomic replacement. Resume reconstructs the graph, maps interrupted active
+work to pending, and recomputes dependency blocking. Child rows, process
+state, rendering rows, and transcripts are excluded.
+
+## ADR-040 — Runtime mode awareness is a small advisory control envelope
+
+**Status:** accepted · Phase 13
+
+The host appends one bounded effective-mode envelope to the next root system
+prompt and includes the same mode semantics in fresh child envelopes. It is
+not visible in the composer and cannot weaken the authoritative PLAN tool
+policy. Mode-aware text is measured by the context-cost audit.
+
+## ADR-041 — Capability incompatibility is rejected before child model spend
+
+**Status:** accepted · Phase 13
+
+Child specifications may declare a small explicit capability requirement
+(`process`, `mutation`, or `browser`). The orchestration manager checks the
+requested role and effective mode before creating a child provider runtime.
+The check never broadens a role; incompatible work fails truthfully before a
+provider call.
+
+## ADR-042 — Runtime budgets are role-aware and observable
+
+**Status:** accepted · Phase 13
+
+Child roles and the independent verifier use bounded, role-calibrated tool
+round limits. Usage and limits are published as compact telemetry alongside
+the existing bounded lifecycle snapshots. Exhaustion remains a truthful
+failure category; there is no unbounded extension or weighted quota system.
+
+## ADR-043 — Interactive process input is a local-only execution seam
+
+**Status:** accepted · Phase 13
+
+Interactive processes extend the existing Execution Manager rather than
+creating a second runtime. POSIX terminal allocation and host/UI input are
+separate from model-visible tools and canonical state. Input is never logged,
+persisted, emitted as an event, or sent through semantic `ask_user`. When a
+host cannot supply the local bridge, the manager returns unavailable rather
+than hanging.
+
+## ADR-044 — Ambient context must declare measured cost
+
+**Status:** accepted · Phase 13
+
+Host enforcement and UI projection cost zero model tokens. Runtime facts the
+model genuinely needs use the smallest bounded stable envelope; inactive
+subsystem context is conditional, and unchanged context should use existing
+caching. Every future ambient feature must provide exact character counts and
+a local/provider token estimate where available. Observability data is not
+automatically model context.
+
+## ADR-045 — Goal workspace ownership is host-tracked and destructive repair is protected
+
+**Status:** accepted · Phase 13
+
+**Context.** A dirty worktree can contain user or another session's changes
+that predate a Goal. Treating every current dirty path as Goal output allowed a
+repair loop to restore unrelated files merely to make verification pass.
+
+**Decision.** At Goal start, the host captures a bounded baseline from the
+canonical repository change seam. Only successful direct `edit`/`write` tool
+events in that Goal scope are candidates for Goal ownership. A path already in
+the baseline, a path changed outside that execution path, or a path whose
+post-edit fingerprint drifts is protected. The verifier receives bounded
+baseline, Goal-owned, protected, and unowned counts and evaluates an active
+Goal against its owned delta. The host refuses destructive restore,
+checkout/reset, or tracked-file removal when any target is protected,
+ambiguous, outside the workspace, or ownership evidence is unavailable.
+
+**Consequences.** Baseline dirtiness alone cannot fail a read-only Goal and is
+never repairable. Shared edits preserve the user's pre-Goal content at
+minimum. Repair remains available for a clean-workspace Goal-owned path, but
+the guard is authoritative at `beforeToolCall`; prompt text cannot grant
+ownership. Ownership state is bounded, in-memory, and token-free apart from
+the verifier's measured ownership summary.
+
+## ADR-046 — Goal completion observes the all-settled task edge and forwards the stored objective
+
+**Status:** accepted · Phase 13
+
+**Context.** A Goal can outlive the root turn that dispatched it. With
+`agents_delegate(await=false)` the root `agent_end` boundary fires while the
+native child is still running; a completion boundary evaluated only at
+`agent_end` either ends the Goal on builder-side evidence without an
+independent verifier run or runs the verifier without the stored objective.
+
+**Decision.** The Goal completion boundary is reachable from two edges: the
+root `agent_end` event and the canonical task graph reaching an all-settled
+state (total > 0, completed === total, and no pending, active, or blocked
+work). Both edges invoke the same bounded boundary. A bounded completion key
+makes repeated task snapshots and a root/child race run verification once.
+The boundary passes the current Goal objective to the independent verifier,
+and the verifier gives that boundary objective precedence over its
+explicit-request fallback, so child-backed Goals are verified against the
+user's actual explicit criteria.
+
+**Consequences.** A background child settling after the root turn ends can no
+longer complete a Goal without independent verification, and no user wake-up
+is required. Filesystem-only objectives no longer gain unrelated
+browser/runtime requirements. Known low-severity follow-up: the verifier's
+diagnostic presentation can still show placeholder objective wording and
+browser-evidence commentary when browser evidence is not applicable; this is
+presentation wording only and is tracked as backlog item B-011, not a
+lifecycle change.

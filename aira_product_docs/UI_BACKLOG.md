@@ -457,7 +457,7 @@ Native child-Agent observability from the root conversation:
 Carried forward (explicitly deferred in v1): steering into children,
 transcript search/filtering, persisted transcript snapshots.
 
-### Backlog — record-only follow-up (NOT implemented this phase)
+### Delivered in Phase 13
 
 **Model runtime mode awareness:** in BUILD/PLAN/REVIEW mode the host
 enforcement knows the mode, but the model does not always know its effective
@@ -465,7 +465,39 @@ mode — in PLAN this causes wasted attempts to call mutation tools, perform
 writes, and sometimes delegate implement/write work to a child. Inject the
 smallest invisible backend-side effective-mode/control hint so the model
 knows BUILD/PLAN/REVIEW without exposing it in the visible composer or adding
-unnecessary context. A later context-cost audit should measure ambient token
-overhead from: mode awareness, project context, Goal, browser, verification,
-tasks, orchestration, and other injected runtime context — the Agent
-Inspector itself is zero-token.
+unnecessary context. Phase 13 now supplies a compact backend control envelope
+and measures its exact character/local-token cost; host enforcement remains
+authoritative and the Agent Inspector remains zero-token.
+
+## B-010 — Runtime reliability surfaces (Phase 13) — DONE
+
+**Status:** implemented in Phase 13
+
+Phase 13 extends existing native surfaces without another visual overhaul:
+
+- Task Manager persistence survives resume using bounded native rows only;
+  child projections and runtime state are excluded.
+- Child and verifier budgets expose used/limit telemetry and truthful failure
+  categories, while explicit role/capability incompatibilities fail before
+  provider spend.
+- The Workbench has cached, read-only Checkpoints (up to five commits plus a
+  dirty-tree hint) and a responsive wide-terminal sidebar width.
+- Workbench, Agent Browser, Agent Inspector, checkpoint rendering, and status
+  projections remain zero-token.
+
+Deferred: interactive checkpoint rollback, child steering, transcript
+persistence, and arbitrary panes. Secure authentication uses the dedicated
+local-only Gate 6 input path; broader interactive workflows remain deferred.
+
+## B-011 — Verifier diagnostic wording cleanup (Phase 13 follow-up)
+
+**Status:** backlog (low severity · Phase 13 follow-up debt)
+
+**Problem:** the independent verifier's diagnostic presentation can still show
+stale/default wording — "Objective text is a placeholder ('explicit …')" and
+browser-evidence commentary — even when browser evidence is correctly not
+applicable. Verdicts, evidence logic, and the completion-boundary lifecycle
+are correct; this is presentation wording only.
+
+**Scope guard:** explicitly NOT part of the Phase 13 completion-boundary
+lifecycle. That lifecycle is closed; this debt must not reopen or redesign it.

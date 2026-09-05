@@ -3,6 +3,17 @@
 ## [Unreleased]
 
 ### Added
+- **Aira**: Phase 13 runtime reliability hardening. Native tasks now use
+  bounded session-scoped persistence with safe resume recovery; child and
+  verifier runtimes expose bounded tool-budget telemetry and failure
+  categories; runtime mode awareness is supplied through a compact backend
+  envelope; explicit child capability mismatches fail before provider spend;
+  and the Workbench adds cached read-only Git checkpoints with responsive
+  wide-terminal sizing. A host-only interactive execution input seam is
+  available on POSIX hosts with truthful unavailable behavior where no local
+  bridge exists. Context-cost measurement records exact characters and local
+  token estimates; UI projection remains zero-token.
+
 - **Aira**: Native Agent Inspector (Phase 12.2). A bare Left Arrow on an empty
   composer (cursor at start, root conversation selected, ≥1 child) opens the
   Agent Browser: running → waiting → queued → recently settled children with
@@ -114,6 +125,11 @@
 - **Aira**: Versioning policy — Aira's own product version (`AIRA_VERSION`, currently 0.1.4) tracks updates; the Pi base version stays internal for syncing Aira's backend with upstream Pi bug/security fixes. The interactive startup update notice checks Aira's GitHub releases against `AIRA_VERSION` instead of the upstream pi.dev marker, so it no longer reports unrelated upstream Pi versions (e.g. "new version 0.84.4 is available" when the installed Aira build is already current). The notice links to the Aira release page and drops the stale "Run `aira update`" npm instruction.
 
 ### Fixed
+
+- Fixed Aira interactive authentication reporting so submitting a local secret
+  is not treated as successful OS authentication; success and failure are
+  recorded only after the child exits, with non-zero authentication outcomes
+  surfaced as `failed` and secrets remaining local to the PTY boundary.
 
 - Fixed a fresh-context timeout race in both the Phase 8 verifier and the Phase 9 child runner: `raceWithTimeout` never observed the timeout promise's rejection, so a hanging provider response never settled the run (the manager kept waiting instead of reporting `timed out` after the configured bound). The race now settles on the first of result/error/abort/timeout.
 

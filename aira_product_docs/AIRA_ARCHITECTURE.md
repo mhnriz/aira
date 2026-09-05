@@ -719,3 +719,38 @@ Agent / Goal / Orchestration
 - **Token discipline**: all policy evaluation is host-side; snapshots
   (`state.permissions`, `state.interaction`, `state.tasks`) are bounded,
   token-free, UI-ready with subscribe seams (UI_BACKLOG B-006).
+
+## 1.12. Runtime Reliability and Context Cost (Phase 13)
+
+Phase 13 hardens the existing native owners without adding a parallel
+runtime. The Task Manager remains the live task authority and persists only
+bounded native task rows in an Aira-owned, session-scoped file. Recovery is
+limited to resume semantics; active rows return to pending and derived
+dependency blocking is recomputed. Orchestration child projections are never
+serialized as tasks.
+
+The orchestration manager remains the owner of child lifecycle records and
+bounded event buffers. Child and verifier snapshots expose bounded tool
+usage/limit telemetry, activity, and categorized failures. Explicit child
+capability requirements are checked before provider invocation, and PLAN
+continues to reject mutation or process work absolutely at the host boundary.
+
+The effective BUILD/PLAN/REVIEW mode is supplied through a small backend
+control envelope on the next inference and in fresh child envelopes. This is
+advisory model awareness; policy enforcement remains host-owned.
+
+The Execution Manager now has a host-only interactive input seam backed by a
+POSIX PTY proxy and a dedicated masked TUI secret-input component. Input is
+write-only process I/O: it is not an event, log, canonical-state secret,
+persistence field, or model tool argument. Echoed bytes are redacted before
+they enter bounded output. Hosts without an interactive bridge return an
+unavailable result instead of waiting indefinitely. Secure authentication is
+not routed through `ask_user`.
+
+The Workbench remains a zero-token projection. Its cached read-only Git
+checkpoint panel uses at most five short commits and a dirty-tree indicator;
+Git inspection is coalesced with the existing working-set refresh. Responsive
+sidebar sizing expands only on wide terminals and preserves the existing
+medium/narrow collapse rules. `context-cost.ts` measures exact injected text
+length and a conservative local token estimate so each future ambient context
+feature can declare its cost.

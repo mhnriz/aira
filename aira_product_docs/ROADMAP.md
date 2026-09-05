@@ -486,28 +486,36 @@ engineering interface. Subsystems own state; the UI only projects it.
   browser/verification/goal/agents/permission/Q&A/performance/headless)
   pass; tests + repo checks green.
 
-## Phase 13 — Policy, Hooks, and Trust
+## Phase 13 — Runtime Reliability, Awareness, and Efficiency
 
 ### Goal
 
-Harden autonomy for daily use.
+Make the accepted Aira runtime reliable, resumable, observable, and
+efficient for daily engineering use without adding a second state authority.
 
 ### Work
 
-- allow/ask/deny policy;
-- workspace boundaries;
-- trusted-project mechanism;
-- project-local settings restrictions;
-- Aira hook contract;
-- exact-hash hook trust;
-- explicit high-autonomy mode;
-- security tests.
+- harden bounded child observability and budget telemetry;
+- persist and recover native tasks with truthful interrupted-work semantics;
+- add compact backend runtime-mode awareness and role/capability preflight;
+- calibrate child and verifier budgets without unbounded extension;
+- extend the existing execution manager with a local-only interactive input
+  seam and truthful headless fallback;
+- size the Engineering Context responsively and surface read-only Git
+  checkpoints;
+- measure context cost feature-by-feature and preserve zero-token UI paths.
 
 ### Exit criteria
 
-- a repository cannot self-grant privileges;
-- destructive/out-of-scope actions are gated;
-- changed hooks lose trust automatically.
+- task, child, verifier, execution, and UI state remain bounded and owned by
+  their existing native managers;
+- resume restores native tasks without resurrecting dead work or child rows;
+- BUILD/PLAN/REVIEW awareness is current while PLAN remains host-enforced;
+- impossible child assignments fail before provider spend;
+- budgets and failures are inspectable, interactive input is local-only, and
+  headless execution never hangs waiting for input;
+- Workbench, Agent Inspector, and Git checkpoints remain read-only and
+  zero-token; context costs are measured and documented.
 
 ---
 
