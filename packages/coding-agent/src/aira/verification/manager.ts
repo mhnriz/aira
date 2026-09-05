@@ -17,6 +17,7 @@ import { statSync } from "node:fs";
 import { join } from "node:path";
 import type { AgentEvent } from "@earendil-works/pi-agent-core";
 import type { AiraSessionState } from "../state.ts";
+import type { AiraWorkspaceOwnershipHandle, AiraWorkspaceOwnershipObservation } from "../workspace/ownership.ts";
 import { type AiraChangeFile, decideAutomaticVerification } from "./eligibility.ts";
 import { boundedText, buildVerificationEvidence } from "./evidence.ts";
 import { buildVerifierEnvelope } from "./prompt.ts";
@@ -49,13 +50,15 @@ export interface AiraVerificationManagerOptions {
 	/** Runner seam (unit tests inject canned outcomes). */
 	runner?: (
 		runtime: AiraVerifierRuntime,
-		options: { cwd: string; envelope: string; timeoutMs: number },
+		options: { cwd: string; envelope: string; timeoutMs: number; maxToolRounds: number },
 		signal?: AbortSignal,
 	) => Promise<AiraVerifierOutcome>;
 	/** Verifier model-call timeout. */
 	timeoutMs?: number;
 	/** Max evidence envelope budget class override (tests). */
 	maxChangeSetFiles?: number;
+	/** Host-side Goal baseline/repair ownership guard. */
+	workspaceOwnership?: AiraWorkspaceOwnershipHandle;
 }
 
 /** Result of requesting a verification run. */
@@ -69,7 +72,7 @@ export interface AiraVerifyRequestResult {
 
 export interface AiraVerificationHandle {
 	/** Run independent verification now (explicit path; REVIEW-friendly). */
-	verify(options?: { force?: boolean }): Promise<AiraVerifyRequestResult>;
+	verify(options?: { force?: boolean; objective?: string }): Promise<AiraVerifyRequestResult>;
 	/** Canonical snapshot (refreshes staleness first, bounded). */
 	status(): AiraVerificationStatus;
 	/** Status listener seam (token-free UI projection). */
@@ -107,6 +110,7 @@ export class AiraVerificationManager implements AiraVerificationHandle {
 	};
 	private pendingEditPaths = new Map<string, string>();
 	private lastChangeFiles: AiraChangeFile[] = [];
+	private lastWorkspaceObservation: AiraWorkspaceOwnershipObservation | undefined;
 	private lastObjective = "";
 	private abort: AbortController | undefined;
 	private inFlight = false;
@@ -138,7 +142,7 @@ export class AiraVerificationManager implements AiraVerificationHandle {
 	 * unchanged revision already has a current result (dedupe), or hold while
 	 * another run is in flight.
 	 */
-	async verify(options: { force?: boolean } = {}): Promise<AiraVerifyRequestResult> {
+	async verify(options: { force?: boolean; objective?: string } = {}): Promise<AiraVerifyRequestResult> {
 		if (this.disposed) {
 			return { ok: false, outcome: "refused", reason: "session disposed" };
 		}
@@ -166,7 +170,7 @@ export class AiraVerificationManager implements AiraVerificationHandle {
 				result: this.snapshot.currentResult,
 			};
 		}
-		const objective = this.lastObjective || "(explicit verification request)";
+		const objective = options.objective?.trim() || this.lastObjective || "(explicit verification request)";
 		return this.runVerification(files, revisionId, objective, this.state.mode);
 	}
 
@@ -302,7 +306,13 @@ export class AiraVerificationManager implements AiraVerificationHandle {
 				merged.set(rel, { path: rel, status: "modified", added: 0, deleted: 0 });
 			}
 		}
-		return [...merged.values()];
+		const files = [...merged.values()];
+		const ownership = this.options.workspaceOwnership;
+		if (!ownership) return files;
+		this.lastWorkspaceObservation = await ownership.classify(files);
+		const goalStatus = this.state.goal?.status;
+		const goalActive = goalStatus === "active" || goalStatus === "repairing" || goalStatus === "verifying";
+		return goalActive ? this.lastWorkspaceObservation.owned : files;
 	}
 
 	private async onAgentEnd(messages: unknown[]): Promise<void> {
@@ -353,7 +363,11 @@ export class AiraVerificationManager implements AiraVerificationHandle {
 		}
 
 		const executionDelta = (this.state.execution?.recentResults.length ?? 0) - this.runScope.executionBaseline;
-		const workHappened = this.runScope.edits.size > 0 || executionDelta > 0 || this.runScope.browserWork;
+		const workHappened =
+			this.runScope.edits.size > 0 ||
+			executionDelta > 0 ||
+			this.runScope.browserWork ||
+			(this.lastWorkspaceObservation?.counts.owned ?? 0) > 0;
 		const decision = decideAutomaticVerification(
 			settings.auto,
 			workHappened,
@@ -400,6 +414,7 @@ export class AiraVerificationManager implements AiraVerificationHandle {
 			intelligence: this.state.intelligence,
 			execution: this.state.execution,
 			browser: this.state.browser,
+			workspace: this.lastWorkspaceObservation,
 			contextBudget: this.options.settings().contextBudget,
 		});
 		const envelope = buildVerifierEnvelope(bundle);
@@ -415,11 +430,26 @@ export class AiraVerificationManager implements AiraVerificationHandle {
 				return { ok: false, outcome: "failed", reason: "verifier model unavailable" };
 			}
 			const timeoutMs = this.options.timeoutMs ?? 180_000;
+			const maxToolRounds = 8;
 			this.abort = new AbortController();
 			const signal = this.abort.signal;
 			const outcome = await (this.options.runner
-				? this.options.runner(runtime, { cwd: this.options.cwd, envelope, timeoutMs }, signal)
-				: runAiraVerifier(runtime, { cwd: this.options.cwd, envelope, timeoutMs }, signal));
+				? this.options.runner(runtime, { cwd: this.options.cwd, envelope, timeoutMs, maxToolRounds }, signal)
+				: runAiraVerifier(runtime, { cwd: this.options.cwd, envelope, timeoutMs, maxToolRounds }, signal));
+			if (
+				outcome.toolCallsUsed !== undefined ||
+				outcome.toolBudgetLimit !== undefined ||
+				outcome.toolBudgetExtensions !== undefined
+			) {
+				this.snapshot = {
+					...this.snapshot,
+					toolBudgetUsed: outcome.toolCallsUsed,
+					toolBudgetLimit: outcome.toolBudgetLimit,
+					toolBudgetExtensions: outcome.toolBudgetExtensions,
+					updatedAt: Date.now(),
+				};
+				this.publish();
+			}
 			this.abort = undefined;
 			const completedAt = Date.now();
 			if (!outcome.ok) {

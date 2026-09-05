@@ -10,7 +10,7 @@
  *   influences verdict content; PASS completes, FAIL drives a bounded repair
  *   continuation, INCONCLUSIVE drives bounded evidence acquisition or a
  *   truthful waiting state);
- * - Phase 9 task graph = execution decomposition (the goal only projects it);
+ * - Phase 11 TaskManager = canonical task graph (the goal only projects it);
  * - Phase 6 execution runtime = bounded evidence acquisition (tests);
  * - Phase 7 browser = evidence only (browser.* settings respected; the goal
  *   never forces browser use);
@@ -31,9 +31,12 @@ import { randomUUID } from "node:crypto";
 import type { AgentEvent } from "@earendil-works/pi-agent-core";
 import type { AiraChildTokenUsage } from "../orchestration/types.ts";
 import type { AiraSessionState } from "../state.ts";
+import type { AiraTaskManagerHandle } from "../tasks/manager.ts";
+import type { AiraTasksStatus } from "../tasks/types.ts";
 import type { AiraChangeFile } from "../verification/eligibility.ts";
 import type { AiraVerificationHandle } from "../verification/manager.ts";
 import type { AiraVerificationResult } from "../verification/types.ts";
+import type { AiraWorkspaceOwnershipHandle } from "../workspace/ownership.ts";
 import { decideAiraGoalPromotion } from "./eligibility.ts";
 import { type AiraGoalPersistence, type AiraGoalPersistenceRecord, createAiraGoalPersistence } from "./persistence.ts";
 import { isNoProgress, isRepeatedVerdict } from "./progress.ts";
@@ -48,6 +51,7 @@ import type {
 	AiraGoalUsage,
 	AiraGoalVerificationProjection,
 	AiraGoalWaiting,
+	AiraGoalWorkspaceProjection,
 } from "./types.ts";
 import { AIRA_GOAL_CLEARABLE_STATUSES, AIRA_GOAL_RUNNING_STATUSES, AIRA_GOAL_TERMINAL_STATUSES } from "./types.ts";
 import {
@@ -76,6 +80,8 @@ export interface AiraGoalManagerOptions {
 	settings: () => AiraGoalSettings;
 	/** Canonical verification handle (Phase 8) — the completion authority. */
 	verification: AiraVerificationHandle | undefined;
+	/** Canonical TaskManager (Phase 11) — the goal only projects its snapshot. */
+	tasks?: AiraTaskManagerHandle;
 	/** Execution handle (Phase 6) — bounded evidence acquisition. */
 	execution: AiraExecutionHandleLike | undefined;
 	/** Host session usage seam (session stats; undefined = usage unknown). */
@@ -98,6 +104,8 @@ export interface AiraGoalManagerOptions {
 	agentEvents: (listener: (event: AgentEvent) => void | Promise<void>) => () => void;
 	/** Repository change seam (revision fingerprinting; undefined when unavailable). */
 	changeSeam?: () => Promise<AiraChangeFile[] | undefined>;
+	/** Host-side Goal baseline and destructive-repair ownership guard. */
+	workspaceOwnership?: AiraWorkspaceOwnershipHandle;
 	/** Persistence seam (tests inject temp dirs / disabled storage). */
 	persistence?: AiraGoalPersistence;
 	/** Elapsed-time source (tests inject a clock). */
@@ -201,6 +209,9 @@ export class AiraGoalManager implements AiraGoalHandle {
 	private snapshot: AiraGoalSnapshot;
 	private disposed = false;
 	private unsubscribeAgent: (() => void) | undefined;
+	private unsubscribeTasks: (() => void) | undefined;
+	/** Completion key already submitted to the Goal boundary. */
+	private taskCompletionKey: string | undefined;
 	private previousFailObservation:
 		| { revisionId: string | undefined; blockingFinding: string | undefined; verdict: "fail" }
 		| undefined = undefined;
@@ -254,6 +265,12 @@ export class AiraGoalManager implements AiraGoalHandle {
 		if (this.disposed) {
 			return;
 		}
+		this.unsubscribeTasks = this.options.tasks?.subscribe((status) => {
+			if (!this.disposed) {
+				this.publish();
+				this.observeTaskCompletion(status);
+			}
+		});
 		this.unsubscribeAgent = this.options.agentEvents((event) => this.applyAgentEvent(event));
 		this.publish();
 	}
@@ -278,6 +295,7 @@ export class AiraGoalManager implements AiraGoalHandle {
 		if (current.status === "paused" || current.status === "waiting") {
 			// A real user message resumes a stopped/waiting goal (steering,
 			// constraint, or the input the goal was waiting for).
+			this.options.workspaceOwnership?.beginGoal();
 			this.transition(current, "active", "user message");
 			current.stopReason = undefined;
 			current.waiting = undefined;
@@ -440,11 +458,17 @@ export class AiraGoalManager implements AiraGoalHandle {
 			};
 		}
 		this.transition(current, "active", "user resume");
+		this.options.workspaceOwnership?.beginGoal();
+		this.taskCompletionKey = undefined;
 		current.stopReason = undefined;
 		current.waiting = undefined;
 		this.setEvent(current, "resumed by user");
 		this.persistGoal(current);
 		this.publish();
+		const tasks = this.options.tasks?.status();
+		if (tasks) {
+			this.observeTaskCompletion(tasks);
+		}
 		// After a FAIL-driven stop, resume continues the repair loop within
 		// the same hard bounds (a fresh repair round, still counted).
 		if (current.lastVerdict === "fail" && !current.continuationPending) {
@@ -520,10 +544,11 @@ export class AiraGoalManager implements AiraGoalHandle {
 		if (this.disposed) {
 			return;
 		}
+		this.options.workspaceOwnership?.applyAgentEvent(event);
 		if (event.type === "message_start" && event.message.role === "user") {
 			const text = messageText(event.message.content);
 			this.considerUserObjective(text);
-			return;
+			return this.options.workspaceOwnership?.ready?.();
 		}
 		if (event.type === "agent_end") {
 			return this.onAgentEnd(event);
@@ -537,6 +562,8 @@ export class AiraGoalManager implements AiraGoalHandle {
 		this.disposed = true;
 		this.unsubscribeAgent?.();
 		this.unsubscribeAgent = undefined;
+		this.unsubscribeTasks?.();
+		this.unsubscribeTasks = undefined;
 		const current = this.goal;
 		if (current && AIRA_GOAL_RUNNING_STATUSES.includes(current.status)) {
 			this.transition(current, "paused", "session disposed");
@@ -681,7 +708,7 @@ export class AiraGoalManager implements AiraGoalHandle {
 		this.setEvent(current, "independent verification at completion boundary");
 		this.publish();
 		try {
-			await verification.verify();
+			await verification.verify({ objective: current.objective });
 		} finally {
 			this.commitChildUsage(current);
 		}
@@ -734,7 +761,7 @@ export class AiraGoalManager implements AiraGoalHandle {
 			this.publish();
 			const ran = await this.acquireTestEvidence(acquisition.command);
 			if (ran) {
-				const recheck = await this.options.verification?.verify({ force: true });
+				const recheck = await this.options.verification?.verify({ force: true, objective: current.objective });
 				if (recheck?.ok) {
 					const fresh = this.freshVerificationResult(current);
 					if (fresh && fresh.id !== result.id) {
@@ -889,6 +916,35 @@ export class AiraGoalManager implements AiraGoalHandle {
 		this.publish();
 	}
 
+	/**
+	 * Background children can settle after the root agent_end boundary. When
+	 * the canonical task graph reaches an all-settled completion edge, feed the
+	 * same Goal boundary used by direct parent implementation. The bounded key
+	 * makes repeated projections and a root/child race idempotent.
+	 */
+	private observeTaskCompletion(tasks: AiraTasksStatus): void {
+		const allSettled =
+			tasks.total > 0 &&
+			tasks.completed === tasks.total &&
+			tasks.active === 0 &&
+			tasks.pending === 0 &&
+			tasks.blocked === 0;
+		if (!allSettled) {
+			this.taskCompletionKey = undefined;
+			return;
+		}
+		const key = `${tasks.completed}/${tasks.total}`;
+		if (key === this.taskCompletionKey) {
+			return;
+		}
+		this.taskCompletionKey = key;
+		const current = this.goal;
+		if (!current || !AIRA_GOAL_RUNNING_STATUSES.includes(current.status)) {
+			return;
+		}
+		void this.handleBoundary(current);
+	}
+
 	private budgetLimit(
 		current: AiraGoalState,
 		bound: {
@@ -970,6 +1026,8 @@ export class AiraGoalManager implements AiraGoalHandle {
 			lastEvent: `goal started (${reason}) — round 1`,
 			waitingInteraction: undefined,
 		};
+		this.options.workspaceOwnership?.beginGoal();
+		this.taskCompletionKey = undefined;
 		this.previousFailObservation = undefined;
 		this.persistGoal(this.goal);
 		this.publish();
@@ -1062,6 +1120,7 @@ export class AiraGoalManager implements AiraGoalHandle {
 			revision: undefined,
 			tasks: this.taskProjection(),
 			verification: this.verificationProjection(),
+			workspace: this.workspaceProjection(),
 			staleCompletion: false,
 			needsUserInput: false,
 			mode: this.state.mode,
@@ -1127,6 +1186,7 @@ export class AiraGoalManager implements AiraGoalHandle {
 					: undefined,
 			tasks,
 			verification,
+			workspace: this.workspaceProjection(),
 			staleCompletion,
 			needsUserInput: current.status === "waiting",
 			mode: this.state.mode,
@@ -1142,13 +1202,20 @@ export class AiraGoalManager implements AiraGoalHandle {
 	}
 
 	private taskProjection(): AiraGoalTaskProjection {
+		const tasks = this.state.tasks;
+		if (tasks) {
+			return { completed: tasks.completed, active: tasks.active, total: tasks.total };
+		}
 		const orchestration = this.state.orchestration;
 		if (!orchestration) {
-			return { completed: 0, active: 0 };
+			return { completed: 0, active: 0, total: 0 };
 		}
+		const completed = (orchestration.children ?? []).filter((child) => child.phase === "settled").length;
+		const active = (orchestration.runningCount ?? 0) + (orchestration.queuedCount ?? 0);
 		return {
-			completed: (orchestration.children ?? []).filter((child) => child.phase === "settled").length,
-			active: (orchestration.runningCount ?? 0) + (orchestration.queuedCount ?? 0),
+			completed,
+			active,
+			total: completed + active,
 		};
 	}
 
@@ -1164,6 +1231,13 @@ export class AiraGoalManager implements AiraGoalHandle {
 				.map((item) => boundedText(item, MAX_MISSING_EVIDENCE_CHARS)),
 			lastError: verification?.lastError,
 		};
+	}
+
+	private workspaceProjection(): AiraGoalWorkspaceProjection {
+		const ownership = this.options.workspaceOwnership?.observation();
+		return ownership
+			? { available: ownership.available, ...ownership.counts }
+			: { available: false, baseline: 0, owned: 0, protected: 0, unowned: 0 };
 	}
 
 	private persistGoal(current: AiraGoalState): void {
@@ -1221,7 +1295,7 @@ function summarizeGoal(
 ): string {
 	switch (current.status) {
 		case "active":
-			return `active · round ${current.round}${tasks.active > 0 ? ` · ${tasks.completed}/${tasks.completed + tasks.active} tasks` : ""}`;
+			return `active · round ${current.round}${tasks.active > 0 ? ` · ${tasks.completed}/${tasks.total} tasks` : ""}`;
 		case "repairing":
 			return `repairing · round ${current.round}`;
 		case "verifying":

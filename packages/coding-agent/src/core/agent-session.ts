@@ -71,7 +71,7 @@ import {
 } from "../aira/interaction/manager.ts";
 import { createAiraInteractionToolDefinitions } from "../aira/interaction/model-tool.ts";
 import { onAiraSessionCreated, onAiraSessionDisposed } from "../aira/lifecycle.ts";
-import { AIRA_READ_ONLY_TOOLS, isAiraMutatingTool } from "../aira/modes.ts";
+import { AIRA_READ_ONLY_TOOLS, buildAiraRuntimeControlEnvelope, isAiraMutatingTool } from "../aira/modes.ts";
 import type { AiraOrchestrationHandle, AiraOrchestrationManagerOptions } from "../aira/orchestration/manager.ts";
 import { createAiraOrchestrationManager } from "../aira/orchestration/manager.ts";
 import { createAiraOrchestrationToolDefinitions } from "../aira/orchestration/model-tools.ts";
@@ -94,6 +94,7 @@ import { createAiraTaskToolDefinitions } from "../aira/tasks/model-tool.ts";
 import type { AiraVerificationHandle } from "../aira/verification/manager.ts";
 import { type AiraVerificationManagerOptions, createAiraVerificationManager } from "../aira/verification/manager.ts";
 import type { AiraVerifierRuntime } from "../aira/verification/verifier.ts";
+import { type AiraWorkspaceOwnershipHandle, createAiraWorkspaceOwnershipManager } from "../aira/workspace/ownership.ts";
 import { getThemeByName, theme } from "../modes/interactive/theme/theme.ts";
 import { stripFrontmatter } from "../utils/frontmatter.ts";
 import { sleep } from "../utils/sleep.ts";
@@ -448,6 +449,7 @@ export class AgentSession {
 	private _airaInteraction: AiraInteractionHandle | undefined;
 	private _airaPermissions: AiraPermissionControllerHandle | undefined;
 	private _airaTasks: AiraTaskManagerHandle | undefined;
+	private _airaWorkspaceOwnership: AiraWorkspaceOwnershipHandle | undefined;
 	private _extensionUIContext?: ExtensionUIContext;
 	private _extensionMode: ExtensionMode = "print";
 	private _extensionCommandContextActions?: ExtensionCommandContextActions;
@@ -469,6 +471,7 @@ export class AgentSession {
 	private _baseSystemPrompt = "";
 	private _baseSystemPromptOptions!: BuildSystemPromptOptions;
 	private _systemPromptOverride?: string;
+	private _activeRecoveryHint: string | undefined;
 
 	constructor(config: AgentSessionConfig) {
 		this.agent = config.agent;
@@ -501,6 +504,10 @@ export class AgentSession {
 			cacheDir: join(getAiraCacheDir(), "intelligence"),
 		});
 		void this._airaIntelligence.activate();
+		this._airaWorkspaceOwnership = createAiraWorkspaceOwnershipManager({
+			cwd: this._cwd,
+			snapshot: () => this._airaIntelligence?.verificationChanges() ?? Promise.resolve(undefined),
+		});
 
 		// Aira execution seam (Phase 6): the session owns its process runtime.
 		// This manager is created BEFORE the tool registry is built so the
@@ -533,6 +540,7 @@ export class AgentSession {
 				cwd: this._cwd,
 				settings: () => this.settingsManager.getVerificationSettings(),
 				changeSeam: () => this._airaIntelligence?.verificationChanges() ?? Promise.resolve(undefined),
+				workspaceOwnership: this._airaWorkspaceOwnership,
 				runtime: () => this.resolveAiraVerifierRuntime(),
 			},
 		);
@@ -551,6 +559,21 @@ export class AgentSession {
 			// deterministic (ask→deny) — children never prompt, so nested
 			// interactive storms are impossible.
 			permissionGate: (toolName, args) => this._airaPermissions?.gateForChild(toolName, args),
+			workspaceMutation: (path) => this._airaWorkspaceOwnership?.recordToolMutation(path),
+		});
+
+		// Aira task seam (Phase 11): the canonical session task graph. The
+		// orchestration manager remains the owner of child RUN records; child
+		// runs project into the task graph as read-only rows via subscribe.
+		// Create this before GoalManager so goal snapshots can project the
+		// restored native graph immediately during session startup/resume.
+		this._airaTasks = createAiraTaskManager(this._airaSessionState, {
+			...config.airaTaskOptions,
+			settings: () => this.settingsManager.getTasksSettings(),
+			orchestration: this._airaOrchestration,
+			sessionId: this.sessionId,
+			startReason: this._sessionStartEvent.reason,
+			persistenceEnabled: this.sessionManager.isPersisted(),
 		});
 
 		// Aira goal seam (Phase 10): the session owns the native Goal Runtime.
@@ -566,6 +589,7 @@ export class AgentSession {
 			startReason: this._sessionStartEvent.reason,
 			settings: () => this.settingsManager.getGoalSettings(),
 			verification: this._airaVerification,
+			tasks: this._airaTasks,
 			execution: this._airaExecution,
 			// Subscribed AFTER the verification manager so completion-boundary
 			// listeners run in verification-first order; agent_end carries the
@@ -596,6 +620,7 @@ export class AgentSession {
 					// best effort — the goal must never break the host
 				}
 			},
+			workspaceOwnership: this._airaWorkspaceOwnership,
 		});
 
 		// Aira interaction seam (Phase 11): the native structured-Q&A manager.
@@ -623,15 +648,6 @@ export class AgentSession {
 			settings: () => this.settingsManager.getPermissionsSettings(),
 			interaction: this._airaInteraction,
 			projectRoot: () => this._airaSessionState.project?.root ?? this._cwd,
-		});
-
-		// Aira task seam (Phase 11): the canonical session task graph. The
-		// orchestration manager remains the owner of child RUN records; child
-		// runs project into the task graph as read-only rows via subscribe.
-		this._airaTasks = createAiraTaskManager(this._airaSessionState, {
-			...config.airaTaskOptions,
-			settings: () => this.settingsManager.getTasksSettings(),
-			orchestration: this._airaOrchestration,
 		});
 
 		// Always subscribe to agent events for internal handling
@@ -730,6 +746,39 @@ export class AgentSession {
 					block: true,
 					reason: `PLAN mode is read-only: ${toolCall.name} is blocked. Switch to BUILD (Shift+Tab) to modify the workspace.`,
 				};
+			}
+			if (toolCall.name === "bash" || toolCall.name === "powershell") {
+				const command =
+					typeof (args as Record<string, unknown> | undefined)?.command === "string"
+						? ((args as Record<string, unknown>).command as string)
+						: undefined;
+				if (command) {
+					const ownership = await this._airaWorkspaceOwnership?.authorizeDestructiveCommand(command);
+					if (ownership && !ownership.allowed) {
+						return {
+							block: true,
+							reason: `Destructive workspace repair refused: ${ownership.reason}${ownership.path ? ` (${ownership.path})` : ""}.`,
+						};
+					}
+				}
+			}
+			if (
+				(toolCall.name === "edit" || toolCall.name === "write") &&
+				this._airaSessionState.goal?.status === "repairing"
+			) {
+				const path =
+					typeof (args as Record<string, unknown> | undefined)?.path === "string"
+						? ((args as Record<string, unknown>).path as string)
+						: undefined;
+				if (path) {
+					const ownership = await this._airaWorkspaceOwnership?.authorizeDestructivePath(path);
+					if (ownership && !ownership.allowed) {
+						return {
+							block: true,
+							reason: `Destructive workspace repair refused: ${ownership.reason}${ownership.path ? ` (${ownership.path})` : ""}.`,
+						};
+					}
+				}
 			}
 			// Aira permission seam (Phase 11): deterministic authorization after
 			// the PLAN boundary. ASK runs through the native interaction manager
@@ -1161,6 +1210,7 @@ export class AgentSession {
 		this._airaTasks?.dispose();
 		// Aira intelligence seam: shut down providers (language servers, timers).
 		void this._airaIntelligence?.dispose();
+		this._airaWorkspaceOwnership?.dispose();
 		// Aira lifecycle seam: release canonical state, ownership-checked so a
 		// stale owner (replaced by a newer session over the same file) is a no-op.
 		onAiraSessionDisposed(this.sessionId, this._airaSessionState);
@@ -1254,6 +1304,11 @@ export class AgentSession {
 	/** Aira task manager for this session (Phase 11; tests and host). */
 	get airaTasks(): AiraTaskManagerHandle | undefined {
 		return this._airaTasks;
+	}
+
+	/** Host-side Goal workspace ownership and repair guard. */
+	get airaWorkspaceOwnership(): AiraWorkspaceOwnershipHandle | undefined {
+		return this._airaWorkspaceOwnership;
 	}
 	/** Resolve the fresh-context verifier runtime (current model + auth). */
 	private async resolveAiraVerifierRuntime(): Promise<AiraVerifierRuntime | undefined> {
@@ -1366,6 +1421,11 @@ export class AgentSession {
 			this._airaModeToolBackup = undefined;
 			this.setActiveToolsByName(restore);
 		}
+		// A mode command can arrive while the agent is still running. Refresh the
+		// host-owned envelope immediately so a continuation turn cannot reuse the
+		// previous mode. The current provider request cannot be rewritten in place,
+		// but prepareNextTurnWithContext observes this updated prompt.
+		this._refreshRuntimeModePrompt();
 	}
 
 	/** Current retry attempt (0 if not retrying) */
@@ -1535,6 +1595,23 @@ export class AgentSession {
 		return buildSystemPrompt(this._baseSystemPromptOptions);
 	}
 
+	private _refreshRuntimeModePrompt(): void {
+		const currentPrompt = this._systemPromptOverride ?? this._baseSystemPrompt;
+		const promptWithoutRecoveryHint = currentPrompt.replace(
+			/\n<aira-task-recovery>[^<]{0,240}<\/aira-task-recovery>$/,
+			"",
+		);
+		const promptWithoutRuntimeMode = promptWithoutRecoveryHint.replace(
+			/\n\n<aira-runtime mode=(?:BUILD|PLAN|REVIEW) posture="[^"]+" host-enforcement=authoritative \/>$/,
+			"",
+		);
+		this._systemPromptOverride = `${promptWithoutRuntimeMode}\n\n${buildAiraRuntimeControlEnvelope(
+			this._airaSessionState.mode,
+			this._activeRecoveryHint,
+		)}`;
+		this.agent.state.systemPrompt = this._systemPromptOverride;
+	}
+
 	// =========================================================================
 	// Prompting
 	// =========================================================================
@@ -1548,6 +1625,7 @@ export class AgentSession {
 			}
 		} finally {
 			this._systemPromptOverride = undefined;
+			this._activeRecoveryHint = undefined;
 			this._flushPendingBashMessages();
 			await this._emitAgentSettled();
 		}
@@ -1757,14 +1835,16 @@ export class AgentSession {
 				});
 			}
 			// Apply extension-modified system prompt, or reset to base
-			if (result?.systemPrompt !== undefined) {
-				this._systemPromptOverride = result.systemPrompt;
-				this.agent.state.systemPrompt = result.systemPrompt;
-			} else {
-				// Ensure we're using the base prompt (in case previous turn had modifications)
-				this._systemPromptOverride = undefined;
-				this.agent.state.systemPrompt = this._baseSystemPrompt;
-			}
+			const promptBase = result?.systemPrompt ?? this._baseSystemPrompt;
+			// Runtime mode is host-owned control metadata. It is appended after
+			// extension prompt customization so every inference sees the current
+			// mode without changing the user's composer message.
+			this._activeRecoveryHint = this._airaTasks?.consumeRecoveryHint?.();
+			this._systemPromptOverride = `${promptBase}\n\n${buildAiraRuntimeControlEnvelope(
+				this._airaSessionState.mode,
+				this._activeRecoveryHint,
+			)}`;
+			this.agent.state.systemPrompt = this._systemPromptOverride;
 		} catch (error) {
 			preflightResult?.(false);
 			throw error;

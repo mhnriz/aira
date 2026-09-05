@@ -31,8 +31,8 @@ export function formatAiraGoalReport(goal: AiraGoalSnapshot | undefined): string
 	if (goal.startedAt) {
 		lines.push(`elapsed: ${formatElapsed(goal.startedAt, goal.completedAt ?? Date.now())}`);
 	}
-	if (goal.tasks.active > 0 || goal.tasks.completed > 0) {
-		lines.push(`tasks: ${goal.tasks.completed} done · ${goal.tasks.active} active`);
+	if (goal.tasks.total > 0) {
+		lines.push(`tasks: ${goal.tasks.completed}/${goal.tasks.total} done · ${goal.tasks.active} active`);
 	}
 	if (goal.verification.verdict) {
 		lines.push(

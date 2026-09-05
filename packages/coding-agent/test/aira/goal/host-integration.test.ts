@@ -15,14 +15,15 @@
  * - passive ownership: a new session (fork) never inherits the goal.
  */
 import { execFileSync } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai/compat";
+import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/compat";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildAiraDoctorReport } from "../../../src/aira/commands/doctor.ts";
 import { buildAiraStatusReport, formatAiraStatusReport } from "../../../src/aira/commands/status.ts";
 import { formatAiraGoalReport } from "../../../src/aira/goal/status.ts";
+import type { AiraChildOutcome } from "../../../src/aira/orchestration/runner.ts";
 import type { AiraVerifierOutcome } from "../../../src/aira/verification/verifier.ts";
 import type { AgentSessionEvent } from "../../../src/core/agent-session.ts";
 import { createHarness, type Harness } from "../../suite/harness.ts";
@@ -61,6 +62,57 @@ const FAIL_OUTCOME: AiraVerifierOutcome = {
 		confidence: "high",
 	},
 };
+
+const FILE_GOAL_OBJECTIVE = `Using a child agent, create phase13-final.txt containing exactly phase13-final.
+
+Explicit acceptance criteria:
+- phase13-final.txt exists in the current working directory.
+- Its contents are exactly phase13-final with no trailing newline.
+- Verify the result byte-for-byte.
+- No other files may be created or modified.`;
+
+const FILE_GOAL_PASS_VERDICT = JSON.stringify({
+	verdict: "pass",
+	summary: "The child-created file matches every explicit filesystem acceptance criterion byte-for-byte.",
+	requirements: [
+		{
+			id: "R1",
+			text: "phase13-final.txt exists in the current working directory",
+			kind: "explicit",
+			status: "verified",
+		},
+		{
+			id: "R2",
+			text: "phase13-final.txt contains exactly phase13-final with no trailing newline",
+			kind: "explicit",
+			status: "verified",
+		},
+		{
+			id: "R3",
+			text: "the result is verified byte-for-byte",
+			kind: "explicit",
+			status: "verified",
+		},
+		{
+			id: "R4",
+			text: "no other files are created or modified",
+			kind: "explicit",
+			status: "verified",
+		},
+	],
+	findings: [],
+	evidence: [
+		{
+			category: "repository",
+			label: "read",
+			summary: "phase13-final.txt was read and matched the exact bytes phase13-final.",
+		},
+		{ category: "git", label: "status", summary: "only phase13-final.txt appears as a new workspace path." },
+	],
+	missingEvidence: [],
+	scope: { verdict: "in-scope", notes: [] },
+	confidence: "high",
+});
 
 function makeProjectDir(): string {
 	const root = join(tmpdir(), `aira-suite-goal-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -117,6 +169,14 @@ async function settle(): Promise<void> {
 	await new Promise((resolve) => setTimeout(resolve, 0));
 	await new Promise((resolve) => setTimeout(resolve, 0));
 	await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+async function waitForCondition(predicate: () => boolean, timeoutMs = 10_000): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	while (!predicate()) {
+		if (Date.now() > deadline) throw new Error("condition did not settle before the timeout");
+		await new Promise((resolve) => setTimeout(resolve, 25));
+	}
 }
 
 /** Poll until the canonical goal snapshot satisfies the predicate. */
@@ -201,6 +261,167 @@ describe("Aira goal runtime through the host (Phase 10)", () => {
 		expect(continuationEvents).toHaveLength(0);
 	});
 
+	it("settled child after an idle root turn triggers independent Goal verification", async () => {
+		let releaseChild!: () => void;
+		const childReleased = new Promise<void>((resolve) => {
+			releaseChild = resolve;
+		});
+		let verificationRuns = 0;
+		const root = makeProjectDir();
+		const childHarness = await createHarness({
+			cwd: root,
+			settings: {
+				goals: { enabled: true, auto: "always" },
+				orchestration: { enabled: true },
+			} as never,
+			airaVerificationOptions: {
+				runner: async () => {
+					verificationRuns += 1;
+					return PASS_OUTCOME;
+				},
+			},
+			airaOrchestrationOptions: {
+				runner: async (_runtime, options): Promise<AiraChildOutcome> => {
+					await childReleased;
+					const path = join(options.cwd, "phase13-final.txt");
+					writeFileSync(path, "child completed\n");
+					options.workspaceMutation?.(path);
+					return {
+						ok: true,
+						model: "faux/faux",
+						result: {
+							status: "completed",
+							summary: "created phase13-final.txt",
+							findings: [],
+							evidence: ["phase13-final.txt"],
+							relevantFiles: ["phase13-final.txt"],
+							changedFiles: ["phase13-final.txt"],
+							tests: [],
+							errors: [],
+						},
+					};
+				},
+			},
+		});
+		harnesses.push({ harness: childHarness, root });
+		childHarness.setResponses([
+			fauxAssistantMessage([
+				{
+					type: "toolCall",
+					id: "delegate-phase13",
+					name: "agents_delegate",
+					arguments: {
+						tasks: [{ id: "R1", role: "implement", task: "create phase13-final.txt" }],
+						await: false,
+					},
+				},
+			]),
+			fauxAssistantMessage(fauxText("delegated")),
+		]);
+		await childHarness.session.prompt("implement the Phase 13 acceptance criteria");
+		expect(childHarness.session.airaSessionState.goal?.status).toBe("active");
+		expect(childHarness.session.airaSessionState.verification?.currentResult).toBeUndefined();
+		expect(verificationRuns).toBe(0);
+
+		await waitForCondition(() => childHarness.session.airaSessionState.tasks?.active === 1);
+		releaseChild();
+		await waitForGoal(childHarness, (goal) => goal.status === "completed");
+		expect(verificationRuns).toBe(1);
+		expect(childHarness.session.airaSessionState.tasks?.completed).toBe(1);
+		expect(childHarness.session.airaSessionState.goal?.verification.verdict).toBe("pass");
+	});
+
+	it("preserves exact filesystem criteria for autonomous child verification", async () => {
+		let releaseChild!: () => void;
+		const childReleased = new Promise<void>((resolve) => {
+			releaseChild = resolve;
+		});
+		const root = makeProjectDir();
+		const harness = await createHarness({
+			cwd: root,
+			settings: {
+				goals: { enabled: true, auto: "always" },
+				orchestration: { enabled: true },
+				verification: { auto: "always" },
+			} as never,
+			airaOrchestrationOptions: {
+				runner: async (_runtime, options): Promise<AiraChildOutcome> => {
+					await childReleased;
+					const path = join(options.cwd, "phase13-final.txt");
+					writeFileSync(path, "phase13-final");
+					options.workspaceMutation?.(path);
+					return {
+						ok: true,
+						model: "faux/faux",
+						result: {
+							status: "completed",
+							summary: "created phase13-final.txt",
+							findings: [],
+							evidence: ["phase13-final.txt"],
+							relevantFiles: ["phase13-final.txt"],
+							changedFiles: ["phase13-final.txt"],
+							tests: [],
+							errors: [],
+						},
+					};
+				},
+			},
+		});
+		harnesses.push({ harness, root });
+		harness.setResponses([
+			fauxAssistantMessage([
+				fauxToolCall("agents_delegate", {
+					tasks: [{ id: "R1", role: "implement", task: "create phase13-final.txt" }],
+					await: false,
+				}),
+			]),
+			fauxAssistantMessage(fauxText("delegated")),
+			// The independent verifier reads the file in its fresh context before
+			// returning its structured, explicit-criteria verdict.
+			fauxAssistantMessage([fauxToolCall("read", { path: "phase13-final.txt" })]),
+			fauxAssistantMessage(fauxText(FILE_GOAL_PASS_VERDICT)),
+		]);
+
+		await harness.session.prompt(FILE_GOAL_OBJECTIVE);
+		expect(harness.session.airaSessionState.goal?.status).toBe("active");
+		expect(harness.getPendingResponseCount()).toBe(2);
+		await waitForCondition(() => harness.session.airaSessionState.tasks?.active === 1);
+
+		// The root turn has ended, but the deferred child is still canonical
+		// active work. Releasing it is the only event that should start the
+		// independent verifier.
+		releaseChild();
+		await waitForGoal(harness, (goal) => goal.status === "completed");
+
+		const verification = harness.session.airaSessionState.verification!;
+		const result = verification.currentResult!;
+		expect(result.verdict).toBe("pass");
+		expect(result.stale).toBe(false);
+		expect(result.objective).toBe(FILE_GOAL_OBJECTIVE);
+		expect(result.requirements).toHaveLength(4);
+		expect(result.requirements.every((requirement) => requirement.kind === "explicit")).toBe(true);
+		expect(result.requirements.map((requirement) => requirement.text)).toEqual([
+			"phase13-final.txt exists in the current working directory",
+			"phase13-final.txt contains exactly phase13-final with no trailing newline",
+			"the result is verified byte-for-byte",
+			"no other files are created or modified",
+		]);
+		expect(result.requirements.some((requirement) => /browser|runtime/i.test(requirement.text))).toBe(false);
+		expect(result.evidence.some((item) => item.label === "read")).toBe(true);
+		expect(readFileSync(join(root, "phase13-final.txt"), "utf8")).toBe("phase13-final");
+		expect(execFileSync("git", ["status", "--short"], { cwd: root, encoding: "utf8" }).trim()).toBe(
+			"?? phase13-final.txt",
+		);
+
+		const resultId = result.id;
+		harness.session.airaTasks?.status();
+		harness.session.airaTasks?.status();
+		await settle();
+		expect(harness.session.airaSessionState.verification?.currentResult?.id).toBe(resultId);
+		expect(harness.getPendingResponseCount()).toBe(0);
+		expect(harness.session.airaSessionState.goal?.status).toBe("completed");
+	});
+
 	it("FAIL drives a goal-owned continuation turn (display:false custom message) that ends the loop when bounded", async () => {
 		const harness = await makeGoalHarness({ verdicts: [FAIL_OUTCOME, PASS_OUTCOME] });
 		harness.setResponses([
@@ -277,6 +498,8 @@ describe("Aira goal runtime through the host (Phase 10)", () => {
 
 	it("/status, /doctor, and /goal report the canonical goal snapshot token-free", async () => {
 		const harness = await makeGoalHarness();
+		const pendingTask = harness.session.airaTasks!.create("pending verification task");
+		expect(pendingTask.ok).toBe(true);
 		harness.setResponses([fauxAssistantMessage([INITIAL_EDIT]), fauxAssistantMessage(fauxText("final"))]);
 		await harness.session.prompt("implement authentication middleware for the API");
 		await waitForGoal(harness, (goal) => goal.status === "completed");
@@ -294,5 +517,6 @@ describe("Aira goal runtime through the host (Phase 10)", () => {
 		expect(report).toContain("goal:");
 		expect(report).toContain("authentication middleware");
 		expect(report).toContain("completed");
+		expect(report).toContain("tasks: 0/1 done · 0 active");
 	});
 });

@@ -4,7 +4,7 @@
  * Phase 10: the native durable Goal Runtime. One canonical goal per live
  * session (ADR-024 ownership pattern, mirroring execution/browser/
  * verification/orchestration). The goal owns the OBJECTIVE and LIFECYCLE;
- * the Phase 9 task graph owns execution decomposition; the Phase 8 verifier
+ * the Phase 11 TaskManager owns the canonical task graph; the Phase 8 verifier
  * remains the independent completion authority. The Goal Runtime is a
  * COORDINATOR — it never re-implements implementation mechanics, execution,
  * browser, delegation, or verification.
@@ -124,12 +124,14 @@ export interface AiraGoalRevision {
 	blockingSignature: string | undefined;
 }
 
-/** Bounded task-graph projection (Phase 9 orchestration is the owner). */
+/** Bounded task-graph projection (TaskManager is the canonical owner). */
 export interface AiraGoalTaskProjection {
-	/** Children settled in the current orchestration epoch. */
+	/** Tasks completed in the canonical TaskManager graph. */
 	completed: number;
-	/** Children active/queued right now. */
+	/** Tasks active right now in the canonical TaskManager graph. */
 	active: number;
+	/** Uncancelled, non-failed tasks in the canonical graph. */
+	total: number;
 }
 
 /** Bounded projection of the current independent verification result. */
@@ -142,6 +144,15 @@ export interface AiraGoalVerificationProjection {
 	missingEvidence: readonly string[];
 	/** Verifier driver error when the last run failed (INCONCLUSIVE driver). */
 	lastError: string | undefined;
+}
+
+/** Bounded host-side workspace ownership counters for the current Goal. */
+export interface AiraGoalWorkspaceProjection {
+	available: boolean;
+	baseline: number;
+	owned: number;
+	protected: number;
+	unowned: number;
 }
 
 /** Persistence health (bounded machine-readable goal state on disk). */
@@ -185,6 +196,8 @@ export interface AiraGoalSnapshot {
 	tasks: AiraGoalTaskProjection;
 	/** Verification projection (Phase 8 owner). */
 	verification: AiraGoalVerificationProjection;
+	/** Workspace ownership is a safety projection, never file contents. */
+	workspace?: AiraGoalWorkspaceProjection;
 	/** True when a completed goal's verified revision is no longer fresh. */
 	staleCompletion: boolean;
 	/** True when progress genuinely needs the user (waiting seam). */

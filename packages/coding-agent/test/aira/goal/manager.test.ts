@@ -10,7 +10,7 @@
  * real runtime), a fake execution handle records evidence acquisition, and
  * a temp-dir persistence store records recovery semantics.
  */
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentEvent } from "@earendil-works/pi-agent-core";
@@ -19,6 +19,8 @@ import { type AiraGoalHandle, createAiraGoalManager } from "../../../src/aira/go
 import { createAiraGoalPersistence } from "../../../src/aira/goal/persistence.ts";
 import type { AiraGoalSettings } from "../../../src/aira/goal/settings.ts";
 import { type AiraSessionState, acquireAiraSessionState } from "../../../src/aira/state.ts";
+import { createAiraTaskManager } from "../../../src/aira/tasks/manager.ts";
+import { createAiraTaskPersistence } from "../../../src/aira/tasks/persistence.ts";
 import type { AiraVerificationHandle } from "../../../src/aira/verification/manager.ts";
 import type { AiraVerificationResult, AiraVerificationStatus } from "../../../src/aira/verification/types.ts";
 
@@ -185,11 +187,13 @@ interface RigOptions {
 	projectTestCommands?: string[];
 	now?: () => number;
 	persistDir?: string;
+	taskPersistDir?: string;
 }
 
 interface Rig {
 	manager: AiraGoalHandle;
 	state: AiraSessionState;
+	tasks: ReturnType<typeof createAiraTaskManager>;
 	verification: FakeVerification;
 	settings: AiraGoalSettings;
 	emit: (event: AgentEvent) => void;
@@ -219,7 +223,18 @@ function makeRig(options: RigOptions = {}): Rig {
 		testCommands: options.projectTestCommands ?? [],
 		checkCommands: [],
 	} as never;
+	const baseDir = options.persistDir ?? join(root, "persist");
 	const verification = new FakeVerification(state, options.outcomes ?? []);
+	const tasks = createAiraTaskManager(state, {
+		settings: () => ({ enabled: true }),
+		...(options.taskPersistDir
+			? {
+					persistence: createAiraTaskPersistence(state.sessionId, options.startReason ?? "startup", {
+						baseDir: options.taskPersistDir,
+					}),
+				}
+			: {}),
+	});
 	const usage: UsageSnapshot = options.usageBaseline ?? {
 		tokens: { input: 1_000, output: 500, cacheRead: 0, cacheWrite: 0, total: 1_500 },
 		cost: 0.01,
@@ -228,7 +243,6 @@ function makeRig(options: RigOptions = {}): Rig {
 	const aborts = { count: 0 };
 	const executionStarts: Array<{ command: string }> = [];
 	let listener: ((event: AgentEvent) => void | Promise<void>) | undefined;
-	const baseDir = options.persistDir ?? join(root, "persist");
 	const persistence = createAiraGoalPersistence(state.sessionId, options.startReason ?? "startup", { baseDir });
 	const manager = createAiraGoalManager(state, {
 		cwd: root,
@@ -236,6 +250,7 @@ function makeRig(options: RigOptions = {}): Rig {
 		startReason: options.startReason ?? "startup",
 		settings: () => settings,
 		verification,
+		tasks,
 		execution: {
 			start: async (request) => {
 				executionStarts.push({ command: request.command ?? "" });
@@ -266,6 +281,7 @@ function makeRig(options: RigOptions = {}): Rig {
 	return {
 		manager,
 		state,
+		tasks,
 		verification,
 		settings,
 		emit: (event) => void listener?.(event),
@@ -280,6 +296,7 @@ function makeRig(options: RigOptions = {}): Rig {
 		usage,
 		cleanup: () => {
 			void manager.dispose();
+			tasks.dispose();
 			rmSync(root, { recursive: true, force: true });
 		},
 	};
@@ -1030,25 +1047,74 @@ describe("Aira goal manager (Phase 10) — budgets, usage, freshness", () => {
 		}
 	});
 
-	it("task-graph projection comes from the canonical orchestration snapshot (no second owner)", async () => {
+	it("task-graph projection follows the canonical TaskManager and refreshes on task changes", () => {
 		const rig = makeRig();
 		try {
-			rig.state.orchestration = {
-				runningCount: 1,
-				queuedCount: 1,
-				children: [
-					{ id: "c1", phase: "running" },
-					{ id: "c2", phase: "waiting-capacity" },
-					{ id: "c3", phase: "settled" },
-				],
-			} as never;
+			const first = rig.tasks.create("first task");
+			const second = rig.tasks.create("second task");
+			const third = rig.tasks.create("third task");
+			expect(first.ok && second.ok && third.ok).toBe(true);
+			if (!first.ok || !second.ok || !third.ok) return;
+			expect(rig.manager.status().tasks).toEqual({ completed: 0, active: 0, total: 3 });
+			rig.tasks.patch(first.task.id, { status: "active" });
+			rig.tasks.complete(first.task.id);
+			rig.tasks.patch(second.task.id, { status: "active" });
 			rig.emit(userMessageStart("implement authentication middleware"));
 			const status = rig.manager.status();
-			expect(status.tasks.active).toBe(2);
+			expect(status.tasks.active).toBe(1);
 			expect(status.tasks.completed).toBe(1);
 			expect(status.summary).toContain("1/3 tasks");
+			rig.tasks.complete(second.task.id);
+			expect(rig.state.goal?.tasks).toEqual({ completed: 2, active: 0, total: 3 });
 		} finally {
 			rig.cleanup();
+		}
+	});
+
+	it("goal and native task projections agree after a persisted session resume", async () => {
+		const persistenceRoot = mkdtempSync(join(tmpdir(), "aira-goal-task-resume-"));
+		const sessionId = "goal-task-resume";
+		const first = makeRig({
+			sessionId,
+			startReason: "startup",
+			persistDir: join(persistenceRoot, "goals"),
+			taskPersistDir: join(persistenceRoot, "tasks"),
+		});
+		let completedId: string | undefined;
+		try {
+			const completed = first.tasks.create("completed native task");
+			const interrupted = first.tasks.create("interrupted native task");
+			if (!completed.ok || !interrupted.ok) throw new Error("fixture setup failed");
+			completedId = completed.task.id;
+			first.tasks.patch(completed.task.id, { status: "active" });
+			first.tasks.complete(completed.task.id);
+			first.tasks.patch(interrupted.task.id, { status: "active" });
+			first.emit(userMessageStart("implement authentication middleware"));
+			await first.manager.dispose();
+			first.tasks.dispose();
+		} finally {
+			first.cleanup();
+		}
+
+		const resumed = makeRig({
+			sessionId,
+			startReason: "resume",
+			persistDir: join(persistenceRoot, "goals"),
+			taskPersistDir: join(persistenceRoot, "tasks"),
+		});
+		try {
+			const tasks = resumed.tasks.status();
+			const goal = resumed.manager.status();
+			expect(resumed.tasks.get(completedId!)?.status).toBe("completed");
+			expect(tasks.total).toBe(2);
+			expect(tasks.completed).toBe(1);
+			expect(tasks.active).toBe(0);
+			expect(goal.status).toBe("paused");
+			expect(goal.stopReason).toBe("interrupted");
+			expect(goal.tasks).toEqual({ completed: tasks.completed, active: tasks.active, total: tasks.total });
+		} finally {
+			resumed.cleanup();
+			rmSync(persistenceRoot, { recursive: true, force: true });
 		}
 	});
 
