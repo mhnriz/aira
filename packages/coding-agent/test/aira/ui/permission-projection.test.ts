@@ -73,6 +73,7 @@ function footerText(state: AiraSessionState, width = 160): string[] {
 		state,
 		workingSet: [],
 		symbols: [],
+		checkpoints: [],
 		width,
 		settings: { enabled: true, showOnStartup: true, density: "comfortable", width: 42 },
 		explicitVisible: undefined,

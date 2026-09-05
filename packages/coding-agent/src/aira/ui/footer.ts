@@ -275,7 +275,7 @@ function goalSegment(state: AiraSessionState | undefined): WorkbenchFooterSegmen
 		return { id: "goal", text: "GOAL ✓", role: "green", dropRank: DROP.goal, compact: "GOAL ✓" };
 	}
 	const done = goal.tasks.completed;
-	const total = goal.tasks.completed + goal.tasks.active;
+	const total = goal.tasks.total;
 	const tasksText = total > 0 ? ` ${done}/${total}` : "";
 	const roundText = goal.round > 0 ? ` R${goal.round}` : "";
 	const role: WorkbenchRole =

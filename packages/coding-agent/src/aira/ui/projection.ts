@@ -38,6 +38,7 @@ export function projectWorkbench(input: WorkbenchProjectionInput): WorkbenchProj
 		state,
 		workingSet: input.workingSet,
 		symbols: input.symbols,
+		checkpoints: input.checkpoints,
 		finding,
 		inspectedRunId: input.inspectedRunId,
 	});

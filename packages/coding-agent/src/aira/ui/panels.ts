@@ -8,6 +8,7 @@
 
 import type { AiraSessionState } from "../state.ts";
 import type {
+	WorkbenchCheckpoint,
 	WorkbenchFileRow,
 	WorkbenchFinding,
 	WorkbenchPanel,
@@ -22,6 +23,7 @@ export const WORKBENCH_TASK_ROWS = 6;
 export const WORKBENCH_WORKING_SET_ROWS = 4;
 export const WORKBENCH_SYMBOL_ROWS = 4;
 export const WORKBENCH_CHANGESET_ROWS = 2;
+export const WORKBENCH_CHECKPOINT_ROWS = 5;
 
 function elapsed(ms: number | undefined): string | undefined {
 	if (ms === undefined) return undefined;
@@ -189,7 +191,7 @@ export function goalPanel(state: AiraSessionState): WorkbenchPanel | undefined {
 	if (goal.objective) {
 		rows.push({ label: "Objective", value: goal.objective, role: "text" });
 	}
-	const tasksTotal = goal.tasks.completed + goal.tasks.active;
+	const tasksTotal = goal.tasks.total;
 	if (tasksTotal > 0 || goal.round > 0) {
 		rows.push({
 			label: "Tasks",
@@ -532,6 +534,22 @@ export function changesetPanel(files: readonly WorkbenchFileRow[]): WorkbenchPan
 	};
 }
 
+export function checkpointsPanel(checkpoints: readonly WorkbenchCheckpoint[]): WorkbenchPanel | undefined {
+	if (checkpoints.length === 0) return undefined;
+	const dirty = checkpoints.some((checkpoint) => checkpoint.dirty);
+	return {
+		id: "checkpoints",
+		title: "Checkpoints",
+		priority: 3,
+		rows: checkpoints.slice(0, WORKBENCH_CHECKPOINT_ROWS).map((checkpoint) => ({
+			key: checkpoint.hash,
+			value: `${checkpoint.head ? "HEAD " : "     "}${checkpoint.hash} ${checkpoint.subject}`,
+			role: checkpoint.head ? "copper" : "muted",
+		})),
+		hint: dirty ? "working tree dirty" : "recent commits",
+	};
+}
+
 export function intelligencePanel(state: AiraSessionState): WorkbenchPanel | undefined {
 	const intelligence = state.intelligence;
 	if (!intelligence) return undefined;
@@ -644,6 +662,7 @@ const PANEL_ORDER: readonly string[] = [
 	"working-set",
 	"symbols",
 	"changeset",
+	"checkpoints",
 	"intelligence",
 	"control",
 ];
@@ -653,6 +672,7 @@ export function buildPanels(input: {
 	state: AiraSessionState;
 	workingSet: readonly WorkbenchFileRow[];
 	symbols: readonly WorkbenchSymbolRow[];
+	checkpoints: readonly WorkbenchCheckpoint[];
 	finding: WorkbenchFinding | undefined;
 	/** Run id whose transcript the inspector is viewing (UI selection state). */
 	inspectedRunId?: string;
@@ -669,6 +689,7 @@ export function buildPanels(input: {
 		workingSetPanel(input.workingSet),
 		symbolsPanel(input.symbols),
 		changesetPanel(input.workingSet),
+		checkpointsPanel(input.checkpoints),
 		intelligencePanel(input.state),
 		controlPanel(input.state),
 	];

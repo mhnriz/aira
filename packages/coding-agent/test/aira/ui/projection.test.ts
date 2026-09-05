@@ -11,6 +11,7 @@ import type { WorkbenchProjectionInput } from "../../../src/aira/ui/types.ts";
 import {
 	isWorkbenchNarrow,
 	resolveWorkbenchVisibility,
+	responsiveWorkbenchWidth,
 	workbenchLayoutFor,
 	workbenchSafeMinimum,
 } from "../../../src/aira/ui/visibility.ts";
@@ -30,6 +31,7 @@ function defaultInput(state: AiraSessionState, width = 160): WorkbenchProjection
 		state,
 		workingSet: [],
 		symbols: [],
+		checkpoints: [],
 		width,
 		settings: { enabled: true, showOnStartup: true, density: "comfortable", width: 42 },
 		explicitVisible: undefined,
@@ -58,7 +60,7 @@ function goalFixture(): AiraGoalSnapshot {
 		budget: { tokens: 100_000, maxDurationMs: undefined },
 		usage: { consumedTokens: 41_000, remainingTokens: 59_000, sources: ["session"] },
 		revision: undefined,
-		tasks: { completed: 4, active: 3 },
+		tasks: { completed: 4, active: 3, total: 7 },
 		verification: {
 			verdict: "fail",
 			stale: false,
@@ -164,6 +166,13 @@ describe("Workbench visibility policy", () => {
 				explicitVisible: undefined,
 			}),
 		).toBe(true);
+	});
+
+	it("expands the sidebar on wide terminals while preserving the configured minimum", () => {
+		expect(responsiveWorkbenchWidth(120, 42)).toBe(42);
+		expect(responsiveWorkbenchWidth(160, 42)).toBe(43);
+		expect(responsiveWorkbenchWidth(220, 42)).toBe(60);
+		expect(responsiveWorkbenchWidth(220, 60)).toBe(60);
 	});
 
 	it("respects workbench.enabled=false as a hard off", () => {
@@ -498,6 +507,21 @@ describe("Workbench panel projection", () => {
 		expect(agents?.rows[0]).toMatchObject({ value: "● explore", trailing: "18s" });
 		expect(agents?.rows[1]).toMatchObject({ value: "○ review", trailing: "queued" });
 		expect(projection.footer.find((segment) => segment.id === "agents")?.text).toBe("AGENTS 1+1");
+		disposeFixture(state);
+	});
+
+	it("projects bounded read-only Git checkpoints separately from the changeset", () => {
+		const state = sessionFixture();
+		const projection = projectWorkbench({
+			...defaultInput(state),
+			checkpoints: [
+				{ hash: "abc1234", subject: "stabilize runtime", head: true, dirty: true },
+				{ hash: "def5678", subject: "add workbench", head: false, dirty: true },
+			],
+		});
+		const panel = projection.panels.find((candidate) => candidate.id === "checkpoints");
+		expect(panel).toMatchObject({ title: "Checkpoints", priority: 3, hint: "working tree dirty" });
+		expect(panel?.rows[0]).toMatchObject({ value: "HEAD abc1234 stabilize runtime", role: "copper" });
 		disposeFixture(state);
 	});
 

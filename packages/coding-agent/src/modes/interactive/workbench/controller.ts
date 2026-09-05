@@ -25,11 +25,17 @@ import {
 import type { AiraIntelligenceHandle } from "../../../aira/intelligence/coordinator.ts";
 import type { AiraSessionState } from "../../../aira/state.ts";
 import { getAiraSessionState } from "../../../aira/state.ts";
+import { loadWorkbenchCheckpoints } from "../../../aira/ui/checkpoints.ts";
 import { projectWorkbench } from "../../../aira/ui/projection.ts";
-import type { WorkbenchFileRow, WorkbenchProjection, WorkbenchSymbolRow } from "../../../aira/ui/types.ts";
-import { workbenchSafeMinimum } from "../../../aira/ui/visibility.ts";
+import type {
+	WorkbenchCheckpoint,
+	WorkbenchFileRow,
+	WorkbenchProjection,
+	WorkbenchSymbolRow,
+} from "../../../aira/ui/types.ts";
+import { responsiveWorkbenchWidth, workbenchSafeMinimum } from "../../../aira/ui/visibility.ts";
 import type { AgentSession } from "../../../core/agent-session.ts";
-import { MIN_WORKBENCH_MAIN_WIDTH, MIN_WORKBENCH_WIDTH } from "../../../core/settings-manager.ts";
+import { MAX_WORKBENCH_WIDTH, MIN_WORKBENCH_MAIN_WIDTH, MIN_WORKBENCH_WIDTH } from "../../../core/settings-manager.ts";
 import { formatCwdForFooter } from "../components/footer.ts";
 import { theme as workbenchTheme } from "../theme/theme.ts";
 import { AiraTuiMainScreen } from "./tui-rail.ts";
@@ -84,6 +90,7 @@ export class WorkbenchController {
 	// Cached seam inputs (refreshed coalesced, never per render).
 	private workingSet: WorkbenchFileRow[] = [];
 	private symbols: WorkbenchSymbolRow[] = [];
+	private checkpoints: WorkbenchCheckpoint[] = [];
 	private gitRefreshTimer: ReturnType<typeof setTimeout> | undefined;
 	private gitRefreshVersion = 0;
 	private lastChangeCount: number | undefined;
@@ -207,7 +214,8 @@ export class WorkbenchController {
 	/** Effective sidebar width for a terminal width (0 = hidden). */
 	sidebarWidthFor(width: number): number {
 		if (!this.visibleAt(width)) return 0;
-		return Math.max(0, Math.min(this.sidebarWidth, Math.max(0, width - MIN_WORKBENCH_MAIN_WIDTH)));
+		const responsiveWidth = responsiveWorkbenchWidth(width, this.sidebarWidth);
+		return Math.max(0, Math.min(responsiveWidth, Math.max(0, width - MIN_WORKBENCH_MAIN_WIDTH)));
 	}
 
 	private railHeight(): number {
@@ -240,6 +248,7 @@ export class WorkbenchController {
 			state,
 			workingSet: this.workingSet,
 			symbols: this.symbols,
+			checkpoints: this.checkpoints,
 			width: this.tui?.terminal.columns ?? 0,
 			settings: {
 				enabled: this.workbenchEnabled,
@@ -291,7 +300,13 @@ export class WorkbenchController {
 	/** Wrap the main layout root with the sidebar split (fullscreen only). */
 	wrapLayout(mainRoot: Component): Component {
 		if (this.tui?.mode !== "fullscreen") return mainRoot;
-		const width = this.sidebarWidth;
+		const width = Math.max(
+			MIN_WORKBENCH_WIDTH,
+			Math.min(
+				MAX_WORKBENCH_WIDTH,
+				responsiveWorkbenchWidth(this.tui?.terminal.columns ?? this.sidebarWidth, this.sidebarWidth),
+			),
+		);
 		// The pane title strip stays fixed; only the panels scroll.
 		const sidebarColumn = new VStack([
 			{ component: this.titleComponent, basis: "auto", grow: 0, shrink: 0, minSize: 1 },
@@ -400,10 +415,10 @@ export class WorkbenchController {
 		const version = ++this.gitRefreshVersion;
 		try {
 			const intelligence = this.intelligence();
-			if (!intelligence) return;
-			const [stats, symbolRows] = await Promise.all([
-				intelligence.workingSet().catch(() => undefined),
-				Promise.resolve(intelligence.relevantSymbols(12)),
+			const [stats, symbolRows, checkpoints] = await Promise.all([
+				intelligence?.workingSet().catch(() => undefined),
+				Promise.resolve(intelligence?.relevantSymbols(12) ?? []),
+				loadWorkbenchCheckpoints(this.session.sessionManager.getCwd()),
 			]);
 			if (this.disposed || version !== this.gitRefreshVersion) return;
 			this.workingSet = (stats ?? []).map((file) => ({
@@ -413,6 +428,7 @@ export class WorkbenchController {
 				deleted: file.deleted,
 			}));
 			this.symbols = symbolRows.map((row) => ({ ...row }));
+			this.checkpoints = checkpoints;
 			this.reconcile();
 		} catch {
 			// Best effort: the Workbench must never break the session.

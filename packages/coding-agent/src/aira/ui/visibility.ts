@@ -29,6 +29,14 @@ export function workbenchSafeMinimum(sidebarWidth: number): number {
 	return MIN_WORKBENCH_MAIN_WIDTH + Math.min(MAX_WORKBENCH_WIDTH, Math.max(MIN_WORKBENCH_WIDTH, sidebarWidth));
 }
 
+/** Resolve a responsive sidebar width without changing the stored preference. */
+export function responsiveWorkbenchWidth(width: number, configuredWidth: number): number {
+	const configured = Math.min(MAX_WORKBENCH_WIDTH, Math.max(MIN_WORKBENCH_WIDTH, configuredWidth));
+	if (width < 140) return configured;
+	const widePreference = Math.floor(width * (width >= 180 ? 0.3 : 0.27));
+	return Math.min(MAX_WORKBENCH_WIDTH, Math.max(configured, widePreference));
+}
+
 /** Derive the layout class from terminal width (wide / medium / narrow). */
 export function workbenchLayoutFor(width: number): WorkbenchLayout {
 	if (width >= WORKBENCH_MEDIUM_LIMIT) return "wide";

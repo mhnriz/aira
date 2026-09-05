@@ -83,6 +83,7 @@ export type WorkbenchPanelId =
 	| "working-set"
 	| "symbols"
 	| "changeset"
+	| "checkpoints"
 	| "intelligence"
 	| "control";
 
@@ -166,6 +167,14 @@ export interface WorkbenchSymbolRow {
 	line: number;
 }
 
+/** One recent local Git checkpoint, read-only and bounded for the Workbench. */
+export interface WorkbenchCheckpoint {
+	hash: string;
+	subject: string;
+	head: boolean;
+	dirty: boolean;
+}
+
 /** Full Workbench projection — everything the renderer needs to draw. */
 export interface WorkbenchProjection {
 	/** Derived layout class for the current terminal width. */
@@ -190,6 +199,8 @@ export interface WorkbenchProjectionInput {
 	workingSet: readonly WorkbenchFileRow[];
 	/** Relevant symbols from the repository index (cached, token-free). */
 	symbols: readonly WorkbenchSymbolRow[];
+	/** Recent local Git checkpoints (cached, read-only, token-free). */
+	checkpoints: readonly WorkbenchCheckpoint[];
 	/** Current terminal width in columns. */
 	width: number;
 	/** Workbench settings (canonical settings owner). */
