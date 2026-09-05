@@ -26,7 +26,7 @@
  * snapshot, run records, and event buffers.
  */
 import { type Component, type Container, ScrollView, Text, type TUI } from "@earendil-works/pi-tui";
-import type { AiraChildRun } from "../../../aira/orchestration/types.ts";
+import type { AiraChildRun, AiraOrchestrationStatus } from "../../../aira/orchestration/types.ts";
 import type { AgentSession } from "../../../core/agent-session.ts";
 import type { AiraConversationTitleComponent } from "../components/aira-shell.ts";
 import { keyText } from "../components/keybinding-hints.ts";
@@ -70,6 +70,12 @@ export class AgentInspectorController {
 	private view: AgentInspectorView = "closed";
 	private transcript: AgentTranscriptComponent | undefined;
 	private childScrollView: ScrollView | undefined;
+	/**
+	 * Last canonical snapshot delivered by the manager subscription. Cached so
+	 * browser refreshes never call orch.status() (which publishes — calling it
+	 * from inside the subscription callback would recurse unboundedly).
+	 */
+	private snapshot: AiraOrchestrationStatus | undefined;
 	private unsubscribe: Array<() => void> = [];
 	private ticker: NodeJS.Timeout | undefined;
 
@@ -77,7 +83,7 @@ export class AgentInspectorController {
 		this.options = options;
 		this.browser = new AgentBrowserComponent({
 			getRuns: () => this.runs(),
-			getSummary: () => this.orch()?.status().summary,
+			getSummary: () => this.snapshot?.summary,
 			onSelect: (runId) => this.openChild(runId),
 			onCancel: () => this.close(),
 		});
@@ -231,9 +237,12 @@ export class AgentInspectorController {
 			return;
 		}
 		// Snapshot subscription: structural changes (dispatch/settle/eviction)
-		// refresh the browser list and the transcript header.
+		// refresh the browser list and the transcript header. Seeded once via
+		// status() so the first paint has counts without a subscribe round-trip.
+		this.snapshot = orch.status();
 		this.unsubscribe.push(
-			orch.subscribe(() => {
+			orch.subscribe((status) => {
+				this.snapshot = status;
 				this.onOrchestrationChanged();
 			}),
 		);
