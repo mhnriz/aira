@@ -1,5 +1,6 @@
 import { uuidv7 } from "@earendil-works/pi-ai";
 import type { AgentMessage } from "../../types.ts";
+import { MutationLine } from "./mutation-line.ts";
 import type {
 	BranchBounds,
 	Entry,
@@ -101,6 +102,7 @@ export function assertJsonSerializable(value: unknown): void {
 
 export class Session<TMetadata extends SessionMetadata = SessionMetadata> implements SessionTree {
 	private readonly storage: SessionStorage<TMetadata>;
+	private readonly mutationLine = new MutationLine();
 	readonly idGenerator: IdGenerator;
 
 	constructor(storage: SessionStorage<TMetadata>, options: { idGenerator?: IdGenerator } = {}) {
@@ -148,7 +150,7 @@ export class Session<TMetadata extends SessionMetadata = SessionMetadata> implem
 	}
 
 	async setName(name: string | undefined): Promise<void> {
-		await this.storage.setName(name);
+		await this.mutate(() => this.storage.setName(name));
 	}
 
 	async getLabel(targetId: string): Promise<string | undefined> {
@@ -156,7 +158,7 @@ export class Session<TMetadata extends SessionMetadata = SessionMetadata> implem
 	}
 
 	async setLabel(targetId: string, label: string | undefined): Promise<void> {
-		await this.storage.setLabel(targetId, label);
+		await this.mutate(() => this.storage.setLabel(targetId, label));
 	}
 
 	async findEntries(query?: EntryQuery): Promise<Entry[]> {
@@ -188,11 +190,11 @@ export class Session<TMetadata extends SessionMetadata = SessionMetadata> implem
 	}
 
 	async createLane(lane: string, at: string | null): Promise<void> {
-		await this.storage.createLane(lane, at);
+		await this.mutate(() => this.storage.createLane(lane, at));
 	}
 
 	async moveLane(lane: string, to: string | null): Promise<void> {
-		await this.storage.moveLane(lane, to);
+		await this.mutate(() => this.storage.moveLane(lane, to));
 	}
 
 	async appendEntry<TEntry extends Entry>(entry: ProvisionedEntry<TEntry>, lane: string): Promise<TEntry> {
@@ -285,15 +287,19 @@ export class Session<TMetadata extends SessionMetadata = SessionMetadata> implem
 
 	private async commitEntry<TEntry extends Entry>(entry: ProvisionedEntry<TEntry>, lane: string): Promise<TEntry> {
 		assertJsonSerializable(entry);
-		return this.storage.appendEntry(entry, lane);
+		return this.mutate(() => this.storage.appendEntry(entry, lane));
 	}
 
 	private async commitRecord<TNewRecord extends NewRecord>(
 		record: TNewRecord,
 	): Promise<TNewRecord & Pick<RecordBase, "seq" | "timestamp">> {
 		assertJsonSerializable(record);
-		return this.storage.appendRecord<LaneRecord>(record) as unknown as Promise<
+		return this.mutate(() => this.storage.appendRecord<LaneRecord>(record)) as unknown as Promise<
 			TNewRecord & Pick<RecordBase, "seq" | "timestamp">
 		>;
+	}
+
+	private mutate<T>(operation: () => T | Promise<T>): Promise<T> {
+		return this.mutationLine.run(() => operation());
 	}
 }

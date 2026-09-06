@@ -86,6 +86,36 @@ from the preparation baseline and should be refreshed before implementation.
 - Reject nested mutations and external effects inside mutation callbacks.
 - Add storage-failure and concurrent-write tests.
 
+#### Stage 1 disposition — implemented
+
+- `423e20c` — **IMPLEMENTED**. Mario Zechner, `feat(agent): separate
+  sessions, branches, and lanes`. Aira adopted only the reusable serialized
+  mutation-line invariant; the upstream Session/Branch/AgentLane split remains
+  deferred to Stage 2.
+- `b37834b` — **DESIGN_ONLY**. Mario Zechner, `feat(agent): add durable retry
+  and deferred polling`. Its captured-effect and settlement constraints were
+  reviewed as follow-up invariants; the deferred runtime is not implemented.
+- `eb1185d` — **DESIGN_ONLY**. Mario Zechner, `feat(agent): add durable tool
+  execution`. Its intent/effect/outcome separation and prohibition on tool,
+  hook, timer, and event effects inside durable callbacks informed the Stage 1
+  mutation scope; durable tool execution remains deferred.
+- Local implementation commit: this Stage 1 commit.
+- Adopted invariant: Session-owned durable writes are serialized in submission
+  order; ordinary reads remain outside the line; failed mutations do not poison
+  later mutations; nested mutation and external-effect attempts are rejected by
+  the mutation scope; backend transactions remain responsible for atomic
+  publication and rollback.
+- Tests: MutationLine focused coverage includes serialization, nested mutation,
+  failed commit visibility, recovery, committed-read visibility, external
+  effects, concurrent stress, and sealing. Agent session/storage conformance,
+  JSONL, Memory, SQLite, recovery, and coding-agent lifecycle tests remain
+  green.
+- Dogfood: required post-implementation smoke coverage is recorded in the
+  Stage 1 execution report; no intentional UX change is expected.
+- Remaining follow-up: Stage 2 owns Session/Branch/AgentLane separation,
+  atomic lane acquisition, and removal of implicit-main APIs. No Stage 2 work
+  is included here.
+
 ### Stage 2 — Session and Branch separation
 
 - Define explicit global `Session` and path-only `Branch` interfaces.
