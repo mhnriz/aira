@@ -2386,3 +2386,89 @@ All other commits in `ee398cb^..da840b6` were inspected by their complete file d
 deferred/no-op where documented above: primarily missing Chord/session architecture, broad TUI
 redesigns, package/release migrations, catalog snapshots, merge commits, and security-sensitive
 allowlist changes. No upstream release commit was copied and nothing was pushed.
+
+## Stage 9 final deferred-work reconciliation
+
+Stage 9 refreshed the current HEAD rather than treating earlier preparation
+assumptions as authoritative. Aira still has no `packages/chord/` package,
+experimental mini/client-service tree, lane-replica implementation, Radius
+relay, or Chord Delta owner. Its current package graph is the explicit local
+graph of `agent`, `ai`, `client`, `coding-agent`, `protocol`, `server`,
+`session-backends`, `telemetry`, and `tui`. Package exports and dependency
+edges are already narrow enough for the shipped local CLI/server boundary;
+there is no measured startup or bundle regression that justifies copying Pi's
+entry-graph checker or source-alias topology. The only Radius reference in the
+current bundle script is an existing AI authentication module, not the deferred
+experimental transport.
+
+No Stage 9 implementation commit was justified. Stages 1–8 already absorbed
+the local mutation, ownership, durability, fork, lifecycle, provider, and TUI
+invariants. The following is the authoritative final disposition for every
+remaining deferred/reference entry in this ledger. Historical entries and
+their authors, subjects, upstream intent, and inspection evidence remain
+unchanged above; this index adds the final classification without rewriting
+that chronology.
+
+### Stage 9 at-a-glance inventory
+
+| Final disposition | Upstream entries | Reason |
+|---|---|---|
+| `ALREADY_SATISFIED` | `423e20c`, `8fa7eeb`, `b37834b`, `eb1185d`, `8935654`, `d09576d`, `c5a35ea`, `bea67d9`, `c2d3dc5`, `2d41163`, `7968053`, `ab9e6f8`, `92d8e2d`, `f2a6227`, `62835ea`, `1d9787c`, `457ae8c`, `9841914`, `605a1b0`, `b8b873b`, `3fc3ef5` | Aira-native Stage 1–8 implementations, equivalent existing behavior, or intentionally absent upstream behavior already cover the useful local requirement. |
+| `ALREADY_SATISFIED` | `d24c99f`, `56c6fb3`, `afda4d6`, `6492144`, `a63fb12`, `3205678`, `5009d06`, `96317e5`, `23842b1`, `ebc3744`, `256f630`, `69afa10`, `1e4fbe3`, `e583b29`, `e266507`, `f41f804`, `55adba4`, `64eeb82`, `6aedd10`, `0dbf2b7`, `007c0be`, `47236c8`, `082f757`, `2631b25`, `1a773c8`, `2b768ba`, `57e53b0`, `c6b0067`, `6f35de5`, `1d6dbf9`, `fbc87d2` | Existing direct copies or compatible adaptations are recorded in the applied proof index; no duplicate implementation is needed. |
+| `SUPERSEDED_BY_AIRA` | `9b23c65`, `3a68f01`, `c60dd63`, `0f0ca0f`, `3625e5b`, `8b69107`, `f8da63b`, `f2eae92`, `1081eb2`, `4e356c0`, `4b7a0a7`, `1df998a`, `8b5899d`, `0fdec07`, `4e69b0c` | The important local invariant is already owned by Aira's MutationLine, Session/Branch/AgentLane, durable operation, fork, provider, or lifecycle implementation; importing the upstream runtime shape would duplicate or conflict with it. |
+| `DESIGN_ONLY` | `5507d76`, `5976a2f`, `eb3e9fe`, `2d675d0`, `35fb116`, `0095bce`, `fbb31a7`, `d14d6b2`, `bf15712`, `f059220`, `e44d75c`, `1382777`, `17de82d`, `22940a6`, `265a333`, `6f11c31`, `e7b47bd`, `d981de1`, `da840b6`, `35c4935`, `5cf1b95` | Package/import, renderer/theme, output, catalog, release, Radius, and documentation changes have no compatible low-risk local owner or measured current need. Retain their constraints as future design input. |
+| `MOVE_TO_LATER_PHASE` | `353c990`, `e055b9f`, `97f7472`, `e44ecea`, `7522307`, `6f0ea81`, `a17ead3`, `6441fa6`, `8288bc3`, `4bd9438`, `ecd3164`, `b6c8797`, `1d0d110`, `f55da4a`, `fcbb0b3`, `d4ce5d5`, `28b49a6`, `34dc9d0`, `4151e57`, `6ec57e6`, `e6dc574`, `1bf0de2`, `b1e9b9e`, `024439d`, `45d0174`, `0252dff`, `429f4e7`, `5245aba`, `d3697e6`, `984846b`, `65f77ec`, `8e374e4`, `f7079d5`, `9af45be`, `8a738e2`, `b99964b`, `3de0030`, `f98c285`, `ef11444`, `2865393`, `c025524`, `ba74f03`, `ae2cc51`, `86bac52`, `1a7bc80`, `6c3fafb`, `fa503683`, `7cf456a`, `c4b0e35`, `6f6fa20`, `fbf2db6`, `6ee906d`, `ee398cb`, `e26afb6` | Chord, Delta, replicated state, remote/multi-process presentation, facet distribution, SQLite ownership, and experimental transport require a coordinated future architecture and real consumers. No placeholder classes, exports, or protocol changes were added. |
+| `REJECTED` | `2c273c1` | Security-sensitive CI contributor authorization was not in scope or authorized; no local edit remains. |
+| `ALREADY_SATISFIED` | `435b0c6`, `bf60867`, `487af8e`, `c30cda1`, `a84a161`, `7123410`, `8c08d06`, `9f74575` | Merge commits have no independent patch; their constituent work was audited separately. |
+
+The abbreviated entries correspond to the full SHA and exact subject already
+recorded in the chronological sections above. Repeated entries are retained
+where they occur in separate historical families; their final classification
+is unchanged. The earlier “defer” wording is historical audit language; this
+section is the final disposition authority.
+
+### Family decisions
+
+- **Tool renderer/theme split (`eb3e9fe`): `DESIGN_ONLY`.** Aira already
+  separates execution from the Workbench's compact tool rows, permission
+  cards, Inspector rows, extension fallback, and running/completed/failed
+  state. The remaining upstream split is a broad dependency and theme
+  validator migration with no measured Aira startup benefit. `aira-zhr` and
+  built-in/custom theme behavior remain unchanged.
+- **Package/import graph (`5507d76`, `6f6fa20`, `6ee906d`, `6f11c31`,
+  `e7b47bd`, `1382777`): `DESIGN_ONLY` or `MOVE_TO_LATER_PHASE` as indexed.**
+  Current package exports and bundle entry points were inspected; no Chord
+  source alias or broad barrel edge creates a proven regression. Reconsider
+  only with a measured consumer/startup budget and installed-package smoke
+  test, not by copying Pi's package topology.
+- **Chord/service families:** `MOVE_TO_LATER_PHASE`. Stages 1–6 already
+  provide local serialized mutation, ownership, generation fencing, durable
+  operations, and recovery. A Chord runtime would add a second authority
+  model without a current Aira consumer. Reconsider when Aira has an explicit
+  plugin/service-host or multi-process requirement.
+- **Delta/replicated state:** `MOVE_TO_LATER_PHASE`. Aira remains host-owned
+  and local for its supported presentation paths. No snapshot-plus-delta
+  consumer, path codec, or rebasing boundary exists. Reconsider with a real
+  remote presentation or mobile handoff product requirement.
+- **Remote/multi-process/Radius/presentation:** `MOVE_TO_LATER_PHASE`.
+  Existing local client/server transport remains intact; the deferred worker,
+  session-router, facet, and Radius chains are not present as a compatible
+  architecture. Reconsider as one transport and presentation project with
+  snapshot/watch, reconnect, stale-generation, and exit-during-reconnect
+  tests.
+- **Provider/model/package leftovers:** `ALREADY_SATISFIED` where Stage 7 or
+  existing generated metadata proves the behavior; otherwise `DESIGN_ONLY`
+  for catalog snapshots and `MOVE_TO_LATER_PHASE` for GPT-6 support. No
+  generated catalog churn was introduced.
+
+### Stage 9 validation and boundary
+
+No source, package manifest, lockfile, generated catalog, verifier, Workbench,
+Chord, Delta, remote, or Phase 15 file was changed by Stage 9. The final work
+is this ledger reconciliation only. Existing Stage 1–8 focused tests, full
+`npm run check`, full build, and full `./test.sh` results remain the evidence
+for the unchanged implementation; `git diff --check` is required before the
+documentation commit. Built Aira UX remains unchanged: Workbench, Agent
+Inspector, tools, permissions, themes, `/new`, `/resume`, and fullscreen
+scroll/search/jump behavior retain their Stage 8 behavior. Phase 15 was not
+started, the verifier was not redesigned, and nothing was pushed.
