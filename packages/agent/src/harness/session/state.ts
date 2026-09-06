@@ -1,3 +1,4 @@
+import { classifyForkState } from "./fork-policy.ts";
 import {
 	type BranchBounds,
 	type Entry,
@@ -54,7 +55,7 @@ export class SessionState {
 	private readonly entriesById = new Map<string, Entry>();
 	private readonly records: LaneRecord[] = [];
 	private readonly openOperationsByLane = new Map<string, Map<string, OperationStartedRecord>>();
-	private readonly lanes = new Map<string, string | null>([["main", null]]);
+	private readonly lanes: Map<string, string | null>;
 	private readonly log: LogItem[] = [];
 	private readonly stats: SessionStats = {
 		messageCount: 0,
@@ -65,6 +66,10 @@ export class SessionState {
 	};
 	private name: string | undefined;
 	private readonly labels = new Map<string, string>();
+
+	constructor(initialLanes: readonly string[] = ["main"]) {
+		this.lanes = new Map(initialLanes.map((lane) => [lane, null]));
+	}
 
 	get nextSequence(): number {
 		return this.sequence + 1;
@@ -258,35 +263,50 @@ export class SessionState {
 	}
 
 	createForkMutations(options: ForkOptions): SessionMutation[] {
+		if (
+			options.scope !== "tree" &&
+			(options.scope !== "branch" || typeof options.branch !== "string" || options.branch.length === 0)
+		) {
+			throw new SessionError("invalid_fork_target", "Fork requires an explicit non-empty source branch");
+		}
 		let copiedEntries: Entry[];
 		let forkLanes: LanePointer[];
 		if (options.scope === "tree") {
 			copiedEntries = this.findEntries({ order: "oldestFirst" });
 			forkLanes = this.getLanes();
 		} else {
-			const selectedEntryId = options.entryId ?? this.requireLane("main");
+			const sourceTip = this.requireLane(options.branch);
+			const selectedEntryId = options.entryId ?? sourceTip;
 			let targetId: string | null = null;
 			if (selectedEntryId !== null) {
 				const entry = this.getEntry(selectedEntryId);
 				if (!entry || entry.type !== "message") {
 					throw new SessionError("invalid_fork_target", `Fork target is not a message entry: ${selectedEntryId}`);
 				}
+				if (!this.isOnBranch(sourceTip, selectedEntryId)) {
+					throw new SessionError(
+						"invalid_fork_target",
+						`Fork target is not on branch ${JSON.stringify(options.branch)}: ${selectedEntryId}`,
+					);
+				}
 				const position = options.position ?? (options.entryId === undefined ? "at" : "before");
 				targetId = position === "at" ? entry.id : entry.parentId;
 			}
 			copiedEntries = targetId === null ? [] : this.findEntriesOnBranch({ start: targetId, order: "oldestFirst" });
-			forkLanes = [{ lane: "main", leafId: targetId }];
+			forkLanes = [{ lane: options.branch, leafId: targetId }];
 		}
 
 		const mutations: SessionMutation[] = [];
 		let sequence = 1;
 		for (const sourceEntry of copiedEntries) {
+			if (classifyForkState("entry") !== "copy") continue;
 			mutations.push({ kind: "entry", entry: { ...structuredClone(sourceEntry), seq: sequence++ } });
 		}
 		for (const pointer of forkLanes) {
+			if (classifyForkState("lane") !== "reconstruct") continue;
 			mutations.push({ kind: "lane", seq: sequence++, lane: pointer.lane, leafId: pointer.leafId });
 		}
-		if (this.name !== undefined) {
+		if (this.name !== undefined && classifyForkState("fact") === "copy") {
 			mutations.push({ kind: "fact", seq: sequence++, fact: "name", name: this.name });
 		}
 		for (const entry of copiedEntries) {
@@ -296,6 +316,12 @@ export class SessionState {
 			}
 		}
 		return mutations;
+	}
+
+	private isOnBranch(tipId: string | null, entryId: string): boolean {
+		if (tipId === null) return false;
+		for (const entry of this.walkToRoot(tipId)) if (entry.id === entryId) return true;
+		return false;
 	}
 
 	private *walkToRoot(

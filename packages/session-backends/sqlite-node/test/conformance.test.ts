@@ -33,7 +33,7 @@ const conformance = createSessionBackendConformance(async () => {
 		open: (metadata) => sqliteRepository.open(requireSqliteMetadata(metadata)),
 		list: () => sqliteRepository.list(),
 		delete: (metadata) => sqliteRepository.delete(requireSqliteMetadata(metadata)),
-		fork: (source, options = {}) => sqliteRepository.fork(requireSqliteMetadata(source), { ...options, cwd: root }),
+		fork: (source, options) => sqliteRepository.fork(requireSqliteMetadata(source), { ...options, cwd: root }),
 	};
 	return {
 		repository,

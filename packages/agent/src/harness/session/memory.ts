@@ -24,14 +24,15 @@ import {
 
 export class InMemorySessionStorage implements SessionStorage {
 	private readonly metadata: SessionMetadata;
-	private readonly state = new SessionState();
+	private readonly state: SessionState;
 
-	constructor(metadata: SessionMetadata) {
+	constructor(metadata: SessionMetadata, initialLanes: readonly string[] = ["main"]) {
 		this.metadata = structuredClone(metadata);
+		this.state = new SessionState(initialLanes);
 	}
 
 	fork(metadata: SessionMetadata, options: ForkOptions & SessionCreateOptions): InMemorySessionStorage {
-		const storage = new InMemorySessionStorage(metadata);
+		const storage = new InMemorySessionStorage(metadata, []);
 		for (const mutation of this.state.createForkMutations(options)) storage.state.applyMutation(mutation);
 		return storage;
 	}
@@ -172,7 +173,7 @@ export class InMemorySessionRepo implements SessionRepo {
 		this.sessions.delete(metadata.id);
 	}
 
-	async fork(source: SessionMetadata, options: ForkOptions & SessionCreateOptions = {}): Promise<Session> {
+	async fork(source: SessionMetadata, options: ForkOptions & SessionCreateOptions): Promise<Session> {
 		const sourceStorage = this.requireStorage(source.id);
 		const id = options.id ?? uuidv7();
 		if (this.sessions.has(id)) throw new SessionError("already_exists", `Session already exists: ${id}`);

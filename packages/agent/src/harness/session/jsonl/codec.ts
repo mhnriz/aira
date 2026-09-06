@@ -89,6 +89,13 @@ function decodeHeader(line: string): JsonlV4Header {
 		throw new JsonlDecodeError("schema", "has invalid metadata");
 	}
 	const metadata = metadataValue as JsonlV4Header["metadata"];
+	const initialLanes = value.initialLanes;
+	if (
+		initialLanes !== undefined &&
+		(!Array.isArray(initialLanes) || initialLanes.some((lane) => typeof lane !== "string"))
+	) {
+		throw new JsonlDecodeError("schema", "has invalid initialLanes");
+	}
 	return {
 		kind: "header",
 		version: 4,
@@ -98,6 +105,7 @@ function decodeHeader(line: string): JsonlV4Header {
 		parentSessionId,
 		legacyParentSessionPath,
 		metadata,
+		initialLanes: initialLanes as string[] | undefined,
 	};
 }
 

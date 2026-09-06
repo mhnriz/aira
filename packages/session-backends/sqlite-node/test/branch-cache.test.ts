@@ -163,6 +163,8 @@ describe("SQLite branch cache", () => {
 			repo.fork(await source.getMetadata(), {
 				cwd: root,
 				id: "fork",
+				scope: "branch",
+				branch: "main",
 				entryId: childId,
 				position: "at",
 			}),

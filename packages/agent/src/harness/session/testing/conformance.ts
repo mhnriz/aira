@@ -659,7 +659,7 @@ export function createSessionBackendConformance(
 				{ kind: "fact", seq: 2, fact: "name", name: undefined },
 			]);
 
-			const fork = await repository.fork(metadata, { id: "fork" });
+			const fork = await repository.fork(metadata, { id: "fork", scope: "branch", branch: "main" });
 			strictEqual(await fork.getName(), undefined);
 		}),
 
@@ -898,7 +898,7 @@ export function createSessionBackendConformance(
 				const shared = await source.appendMessage(createAssistantMessage("shared"));
 				await source.createLane("thread", shared);
 				const threadChild = await source.view("thread").appendMessage(createUserMessage("thread"));
-				const mainChild = await source.appendMessage(createUserMessage("main"));
+				await source.appendMessage(createUserMessage("main"));
 				await source.setName("Source");
 				await source.setLabel(shared, "copied");
 				await source.setLabel(threadChild, "excluded");
@@ -920,16 +920,17 @@ export function createSessionBackendConformance(
 
 				const fork = await repository.fork(await source.getMetadata(), {
 					scope: "branch",
-					entryId: mainChild,
+					branch: "thread",
+					entryId: threadChild,
 					position: "at",
 					id: "branch-fork",
 				});
 
-				deepStrictEqual(await entryIds(fork.findEntries({ order: "oldestFirst" })), [root, shared, mainChild]);
-				deepStrictEqual(await fork.getLanes(), [{ lane: "main", leafId: mainChild }]);
+				deepStrictEqual(await entryIds(fork.findEntries({ order: "oldestFirst" })), [root, shared, threadChild]);
+				deepStrictEqual(await fork.getLanes(), [{ lane: "thread", leafId: threadChild }]);
 				strictEqual(await fork.getName(), "Source");
 				strictEqual(await fork.getLabel(shared), "copied");
-				strictEqual(await fork.getLabel(threadChild), undefined);
+				strictEqual(await fork.getLabel(threadChild), "excluded");
 				deepStrictEqual(await fork.findRecords(), []);
 				deepStrictEqual(await fork.getStats(), {
 					messageCount: 3,
@@ -938,12 +939,39 @@ export function createSessionBackendConformance(
 					totalTokens: 0,
 					costTotal: 0,
 				});
-				await fork.appendMessage(createUserMessage("after fork"));
+				await fork.view("thread").appendMessage(createUserMessage("after fork"));
 				strictEqual((await fork.getStats()).messageCount, 4);
 				const metadata = await fork.getMetadata();
 				deepStrictEqual(
 					{ id: metadata.id, parentSessionId: metadata.parentSessionId },
 					{ id: "branch-fork", parentSessionId: "source" },
+				);
+			},
+		),
+
+		createCase(
+			factory,
+			"repository and forks",
+			"rejects a fork entry outside the selected branch",
+			async (repository) => {
+				const source = await repository.create({ id: "source" });
+				const root = await source.appendMessage(createUserMessage("root"));
+				await source.createLane("thread", root);
+				const mainChild = await source.appendMessage(createUserMessage("main"));
+				await source.view("thread").appendMessage(createUserMessage("thread"));
+				await rejectsWithCode(
+					repository.fork(await source.getMetadata(), {
+						id: "invalid-fork",
+						scope: "branch",
+						branch: "thread",
+						entryId: mainChild,
+					}),
+					"invalid_fork_target",
+				);
+				const listed = await repository.list();
+				strictEqual(
+					listed.some((metadata) => metadata.id === "invalid-fork"),
+					false,
 				);
 			},
 		),
@@ -981,12 +1009,19 @@ export function createSessionBackendConformance(
 				const source = await repository.create({ id: "source" });
 				const root = await source.appendMessage(createUserMessage("root"));
 				const tail = await source.appendMessage(createUserMessage("tail"));
-				const fork = await repository.fork(await source.getMetadata(), { entryId: tail, id: "fork" });
+				const fork = await repository.fork(await source.getMetadata(), {
+					scope: "branch",
+					branch: "main",
+					entryId: tail,
+					id: "fork",
+				});
 
 				deepStrictEqual(await entryIds(fork.findEntries({ order: "oldestFirst" })), [root]);
 				strictEqual(await fork.getLeafId(), root);
 				strictEqual(await source.getLeafId(), tail);
 				const beforeDefaultTarget = await repository.fork(await source.getMetadata(), {
+					scope: "branch",
+					branch: "main",
 					position: "before",
 					id: "before-default-target",
 				});
@@ -994,13 +1029,15 @@ export function createSessionBackendConformance(
 				strictEqual(await beforeDefaultTarget.getLeafId(), root);
 
 				const atDefaultTarget = await repository.fork(await source.getMetadata(), {
+					scope: "branch",
+					branch: "main",
 					position: "at",
 					id: "at-default-target",
 				});
 				deepStrictEqual(await entryIds(atDefaultTarget.findEntries({ order: "oldestFirst" })), [root, tail]);
 				strictEqual(await atDefaultTarget.getLeafId(), tail);
 				await rejectsWithCode(
-					repository.fork(await source.getMetadata(), { entryId: "missing" }),
+					repository.fork(await source.getMetadata(), { scope: "branch", branch: "main", entryId: "missing" }),
 					"invalid_fork_target",
 				);
 			},
@@ -1010,7 +1047,10 @@ export function createSessionBackendConformance(
 			const source = await repository.create({ id: "source-with-custom-leaf" });
 			await source.appendCustomEntry("not-a-message");
 
-			await rejectsWithCode(repository.fork(await source.getMetadata(), { id: "fork" }), "invalid_fork_target");
+			await rejectsWithCode(
+				repository.fork(await source.getMetadata(), { scope: "branch", branch: "main", id: "fork" }),
+				"invalid_fork_target",
+			);
 		}),
 	];
 }

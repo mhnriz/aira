@@ -106,11 +106,13 @@ describe("SQLite session repository", () => {
 		expect((await repo.list({ cwd: root })).map((listed) => listed.metadata)).toEqual([{ profile: "reviewer" }]);
 		const reopened = await repo.open(sourceMetadata);
 		expect((await reopened.getMetadata()).metadata).toEqual({ profile: "reviewer" });
-		const fork = await repo.fork(sourceMetadata, { cwd: root, id: "session-2" });
+		const fork = await repo.fork(sourceMetadata, { cwd: root, id: "session-2", scope: "branch", branch: "main" });
 		expect((await fork.getMetadata()).metadata).toEqual({ profile: "reviewer" });
 		const overridden = await repo.fork(sourceMetadata, {
 			cwd: root,
 			id: "session-3",
+			scope: "branch",
+			branch: "main",
 			metadata: { profile: "writer" },
 		});
 		expect((await overridden.getMetadata()).metadata).toEqual({ profile: "writer" });
@@ -139,7 +141,9 @@ END;
 			await db.close();
 		}
 
-		await expect(repo.fork(await source.getMetadata(), { cwd: root, id: "fork" })).rejects.toMatchObject({
+		await expect(
+			repo.fork(await source.getMetadata(), { cwd: root, id: "fork", scope: "branch", branch: "main" }),
+		).rejects.toMatchObject({
 			code: "storage",
 		});
 		const inspection = await sqlite.open(databasePath);

@@ -48,12 +48,13 @@ async function publishFileAtomically(
 export class JsonlSessionStorage implements SessionStorage<JsonlSessionMetadata> {
 	private readonly fs: JsonlSessionRepoFileSystem;
 	private readonly metadata: JsonlSessionMetadata;
-	private readonly state = new SessionState();
+	private readonly state: SessionState;
 	private tail: Promise<void> = Promise.resolve();
 
-	constructor(fs: JsonlSessionRepoFileSystem, metadata: JsonlSessionMetadata) {
+	constructor(fs: JsonlSessionRepoFileSystem, metadata: JsonlSessionMetadata, initialLanes?: readonly string[]) {
 		this.fs = fs;
 		this.metadata = structuredClone(metadata);
+		this.state = new SessionState(initialLanes);
 	}
 
 	static async create(
@@ -63,7 +64,7 @@ export class JsonlSessionStorage implements SessionStorage<JsonlSessionMetadata>
 	): Promise<JsonlSessionStorage> {
 		fileResult(await fs.writeFile(path, encodeHeader(header)), `Failed to initialize session ${path}`);
 		const fileInfo = fileResult(await fs.fileInfo(path), `Failed to read session metadata ${path}`);
-		return new JsonlSessionStorage(fs, metadataFromHeader(header, path, fileInfo.mtimeMs));
+		return new JsonlSessionStorage(fs, metadataFromHeader(header, path, fileInfo.mtimeMs), header.initialLanes);
 	}
 
 	static async load(fs: JsonlSessionRepoFileSystem, path: string): Promise<JsonlSessionStorage> {
@@ -76,7 +77,11 @@ export class JsonlSessionStorage implements SessionStorage<JsonlSessionMetadata>
 		const headerResult = parseHeader(physicalLines[0]);
 		if (!headerResult.ok) throw invalidFile(path, 1, headerResult.error);
 		const fileInfo = fileResult(await fs.fileInfo(path), `Failed to read session metadata ${path}`);
-		const storage = new JsonlSessionStorage(fs, metadataFromHeader(headerResult.value, path, fileInfo.mtimeMs));
+		const storage = new JsonlSessionStorage(
+			fs,
+			metadataFromHeader(headerResult.value, path, fileInfo.mtimeMs),
+			headerResult.value.initialLanes,
+		);
 		for (let index = 1; index < physicalLines.length; index++) {
 			const line = physicalLines[index]!;
 			const mutationResult = parseMutation(line);
@@ -117,6 +122,10 @@ export class JsonlSessionStorage implements SessionStorage<JsonlSessionMetadata>
 			}
 		});
 		return JsonlSessionStorage.load(this.fs, path);
+	}
+
+	validateFork(options: ForkOptions): void {
+		this.state.createForkMutations(options);
 	}
 
 	async drain(): Promise<void> {

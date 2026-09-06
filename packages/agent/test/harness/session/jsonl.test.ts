@@ -196,7 +196,7 @@ describe("JSONL v4 persistence", () => {
 			const run = (kind: "create" | "fork") =>
 				kind === "create"
 					? repository.create({ id: "same", cwd })
-					: repository.fork(sourceMetadata, { id: "same", cwd });
+					: repository.fork(sourceMetadata, { id: "same", scope: "branch", branch: "main", cwd });
 
 			const results = await Promise.allSettled([run(firstKind), run(secondKind)]);
 			const successes = results.flatMap((result) => (result.status === "fulfilled" ? [result.value] : []));
@@ -221,7 +221,7 @@ describe("JSONL v4 persistence", () => {
 		const run = () =>
 			kind === "create"
 				? repository.create({ id: "retry", cwd })
-				: repository.fork(sourceMetadata, { id: "retry", cwd });
+				: repository.fork(sourceMetadata, { id: "retry", scope: "branch", branch: "main", cwd });
 
 		if (kind === "create") {
 			vi.spyOn(env, "writeFile").mockResolvedValueOnce({
@@ -328,7 +328,12 @@ describe("JSONL v4 persistence", () => {
 		const source = await repository.create({ id: "source", cwd: root });
 		await source.appendMessage({ role: "user", content: [{ type: "text", text: "one" }], timestamp: 1 });
 		await source.appendMessage({ role: "user", content: [{ type: "text", text: "two" }], timestamp: 2 });
-		const fork = await repository.fork(await source.getMetadata(), { id: "fork", cwd: root });
+		const fork = await repository.fork(await source.getMetadata(), {
+			id: "fork",
+			scope: "branch",
+			branch: "main",
+			cwd: root,
+		});
 		const metadata = await fork.getMetadata();
 
 		const reopenedRepository = createRepository(root);
@@ -395,7 +400,9 @@ describe("JSONL v4 persistence", () => {
 				error: new FileError("unknown", "injected staging failure"),
 			});
 
-		await expect(repository.fork(sourceMetadata, { id: "fork", cwd: root })).rejects.toMatchObject({
+		await expect(
+			repository.fork(sourceMetadata, { id: "fork", scope: "branch", branch: "main", cwd: root }),
+		).rejects.toMatchObject({
 			code: "storage",
 		});
 
@@ -415,7 +422,9 @@ describe("JSONL v4 persistence", () => {
 			error: new FileError("unknown", "injected rename failure"),
 		});
 
-		await expect(repository.fork(sourceMetadata, { id: "fork", cwd: root })).rejects.toMatchObject({
+		await expect(
+			repository.fork(sourceMetadata, { id: "fork", scope: "branch", branch: "main", cwd: root }),
+		).rejects.toMatchObject({
 			code: "storage",
 		});
 

@@ -220,6 +220,51 @@ from the preparation baseline and should be refreshed before implementation.
   verifier redesign, fork changes, TUI/catalog/Chord/Delta work, packaging,
   and broad drive integration remain deferred. No push was performed.
 
+#### Stage 5 disposition — implemented
+
+- `f8da63be590e14080dc06eed8c8986bc2eec8310` — **ADAPTED**. David
+  Brailovsky, `feat(agent): require explicit named branches for session forks`.
+  Aira now requires `{ scope: "branch", branch }`, preserves that lane name
+  in the destination, and keeps tree forks explicit with `{ scope: "tree" }`.
+- `f2eae920c61f0434b37b331cc597a4faa0f90830` — **ADAPTED**. David
+  Brailovsky, `fix(agent): validate fork entries against named branch ancestry`.
+  Aira walks the selected lane ancestry and rejects off-branch, unknown,
+  non-message, stale, and invalid before-root targets before publication.
+- `1081eb2126748588c6579df7117be42f40a9892e` — **ADAPTED**. David
+  Brailovsky, `fix(agent): require configured lanes for branch forks`.
+  Aira's Stage 2 storage model has no separate persisted lane-configuration
+  namespace; the durable lane row is the configuration/ownership boundary, so
+  no second configuration model or runtime object is copied.
+- `4e356c0ade5a788098c892bb8e35080bc439e97f` — **ADAPTED**. David
+  Brailovsky, `feat(agent): centralize scalar fork namespace policy`.
+  Aira has no scalar namespace store; its closed equivalent classifies entries
+  as copied, lanes as reconstructed, facts as copied, and all generation/tool
+  records as excluded. Stage 3/4 execution state is never fork-copied.
+- Related evidence inspected: `f98c2850f5024409d95c9078b8b6417110b353cc`,
+  `ef11444b6e0c4345ff1d7de055500d6928f65e118`,
+  `5cf1b95c870c75ba912e9c136126af217edde811`,
+  `4b7a0a7dbafe6c4fcbc704183c772a4ca4b7c863`, and
+  `1df998a96ce918cd836a294336bad23981e13c84`. These informed bounded
+  validation and ownership decisions; no streaming subsystem, worker redesign,
+  or SQLite lease change was copied.
+- Memory, JSONL, and SQLite share the named-branch contract. JSONL validates
+  before destination directory creation and atomically publishes a fixed
+  snapshot; Memory publishes after validation; SQLite validates before its
+  transactional destination insert and rolls back copy failures. Existing
+  reservations and collision guards remain active. Legacy JSONL headers still
+  reopen with implicit `main`; no migration is required.
+- Conformance covers named non-main forks, sibling ancestry rejection,
+  destination non-publication, tree forks, before-root/at-tip placement,
+  source preservation, collision safety, and reopen behavior. Stage 3
+  generation and Stage 4 tool tests were rerun; their durable records remain
+  excluded from fork projections. No UX, Stage 6, or Phase 15 redesign was
+  included.
+- Validation: focused fork/backend and Stage 3/4 suites passed; `npm run check`
+  passed. The full build passed; the full test sweep reached all packages, with
+  only the known sandbox socket/loopback integration failures; built-CLI help
+  and version startup passed; and `git diff --check` passed. No push was
+  performed.
+
 ### Stage 2 — Session and Branch separation
 
 - Define explicit global `Session` and path-only `Branch` interfaces.

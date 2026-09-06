@@ -148,9 +148,10 @@ export class JsonlSessionRepo
 			...options,
 			parentSessionId: options.parentSessionId ?? source.id,
 		};
+		sourceStorage.validateFork(options);
 		const destination = await this.resolveCreateDestination(createOptions);
 		return this.claimCreateDestination(destination, async () => {
-			const { header, path } = await this.prepareCreate(destination, createOptions);
+			const { header, path } = await this.prepareCreate(destination, createOptions, []);
 			return new Session(await sourceStorage.fork(path, header, options));
 		});
 	}
@@ -190,6 +191,7 @@ export class JsonlSessionRepo
 	private async prepareCreate(
 		destination: { id: string; cwd: string },
 		options: JsonlSessionCreateOptions,
+		initialLanes: string[] = ["main"],
 	): Promise<{
 		header: JsonlV4Header;
 		path: string;
@@ -214,6 +216,7 @@ export class JsonlSessionRepo
 			cwd,
 			parentSessionId: options.parentSessionId,
 			metadata: options.metadata,
+			initialLanes,
 		};
 		fileResult(await this.fs.createDir(sessionDirectory, { recursive: true }), `Failed to create sessions directory`);
 		return { header, path };

@@ -799,6 +799,12 @@ export class SqliteSessionRepository
 		options: ForkOptions & SqliteSessionCreateOptions,
 	): Promise<Session<SqliteSessionMetadata>> {
 		return this.operations.enqueue(async () => {
+			if (
+				options.scope !== "tree" &&
+				(options.scope !== "branch" || typeof options.branch !== "string" || options.branch.length === 0)
+			) {
+				throw new SessionError("invalid_fork_target", "Fork requires an explicit non-empty source branch");
+			}
 			const db = await this.getDatabase();
 			const path = await this.getDatabasePath();
 			const sourceMetadata = decodeSessionMetadata(requireSessionRow(db, source.id), path);
@@ -815,9 +821,9 @@ export class SqliteSessionRepository
 				lanes.push(...readLanes(db, source.id).map((row) => ({ lane: row.lane, leafId: row.leaf_id })));
 				branchTips.push(...readBranchTipIds(db, source.id));
 			} else {
-				const main = readLane(db, source.id, "main");
-				if (!main) throw new SessionError("invalid_lane", "Lane not found: main");
-				const selectedEntryId = options.entryId ?? main.leaf_id;
+				const sourceLane = readLane(db, source.id, options.branch);
+				if (!sourceLane) throw new SessionError("invalid_lane", `Lane not found: ${options.branch}`);
+				const selectedEntryId = options.entryId ?? sourceLane.leaf_id;
 				if (selectedEntryId !== null) {
 					const target = readEntryRow(db, source.id, selectedEntryId);
 					if (!target || target.type !== "message") {
@@ -826,10 +832,24 @@ export class SqliteSessionRepository
 							`Fork target is not a message entry: ${selectedEntryId}`,
 						);
 					}
+					if (sourceLane.leaf_id === null) {
+						throw new SessionError("invalid_fork_target", `Fork target is not on branch ${options.branch}`);
+					}
+					const sourceBranch = readCachedBranch(db, source.id, sourceLane.leaf_id);
+					if (!sourceBranch) {
+						throw new SessionError("invalid_fork_target", `Branch cache missing lane ${options.branch}`);
+					}
+					const sourceBranchRows = queryCachedBranchRows(db, source.id, sourceBranch, { order: "oldestFirst" });
+					if (!sourceBranchRows.some((row) => row.id === selectedEntryId)) {
+						throw new SessionError(
+							"invalid_fork_target",
+							`Fork target is not on branch ${JSON.stringify(options.branch)}: ${selectedEntryId}`,
+						);
+					}
 					const position = options.position ?? (options.entryId === undefined ? "at" : "before");
 					branchForkTargetId = position === "at" ? target.id : target.parent_id;
 				}
-				lanes.push({ lane: "main", leafId: branchForkTargetId });
+				lanes.push({ lane: options.branch, leafId: branchForkTargetId });
 				if (branchForkTargetId !== null) {
 					const cached = readCachedBranch(db, source.id, branchForkTargetId);
 					if (!cached) {
@@ -882,7 +902,7 @@ export class SqliteSessionRepository
 					if (options.scope === "tree") {
 						for (const lane of lanes) insertLane(db, id, allocateSeq(), lane.lane, lane.leafId);
 					} else {
-						createInitialLane(db, id, "main", branchForkTargetId);
+						createInitialLane(db, id, options.branch, branchForkTargetId);
 					}
 
 					if (latestName?.value !== undefined && latestName.value !== null) {

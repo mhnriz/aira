@@ -429,7 +429,9 @@ export interface SessionCreateOptions {
 	parentSessionId?: string;
 }
 
-export type ForkOptions = { scope?: "branch"; entryId?: string; position?: "before" | "at" } | { scope: "tree" };
+export type ForkOptions =
+	| { scope: "branch"; branch: string; entryId?: string; position?: "before" | "at" }
+	| { scope: "tree" };
 
 export interface SessionRepo<
 	TMetadata extends SessionMetadata = SessionMetadata,

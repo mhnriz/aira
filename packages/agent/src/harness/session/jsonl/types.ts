@@ -54,4 +54,6 @@ export interface JsonlV4Header {
 	/** Preserved only when a v3 parent path could not be resolved to a session id. */
 	legacyParentSessionPath?: string;
 	metadata?: Record<string, JsonValue>;
+	/** Initial lane set for fork snapshots; omitted legacy files retain implicit main. */
+	initialLanes?: string[];
 }

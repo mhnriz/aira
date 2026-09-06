@@ -1,5 +1,6 @@
 export * from "./branch.ts";
 export * from "./context.ts";
+export { classifyForkState, type ForkStateDisposition, shouldCopyForkRecord } from "./fork-policy.ts";
 export type {
 	JsonlSessionCreateOptions,
 	JsonlSessionListOptions,
