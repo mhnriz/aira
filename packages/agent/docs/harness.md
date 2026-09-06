@@ -208,7 +208,7 @@ Had the tool declared `replay: "safe"` (a read, a query), the harness would have
 
 - **Exactly-once external effects.** See above. Hooks with their own side effects must be idempotent, keyed by operation id.
 - **Provider stream resumption.** Partial streams are process-local, never persisted. A settled response is persisted *completely* before anything classifies it.
-- **Multiple writers.** One process per session. The serving layer routes accordingly, and the SQLite backend enforces it with a fenced lease (§1.7). Lanes cover the workload that looks like multi-writer.
+- **Multiple writers.** One host-assigned process owns writable authority for a session; normally this is the Session worker. Storage backends do not enforce host ownership, and lanes cover the workload that looks like multi-writer.
 - **Replication.** A session lives in one place.
 - **Durable write history.** Registers hold only current values: an overwritten register is gone, and no API or table exposes write history. Order-of-write assertions in tests use an instrumented storage decorator around `commit()` (Part 9); production auditing belongs to the telemetry layer (§5.8).
 - **Deletion as a runtime feature.** Entries and usage rows are never deleted: compaction changes provider context, not storage, and terminal cleanup deletes only registers. Note that `retainedTail` copies old messages forward into newer compaction entries and summaries derive from old content, so compaction is not erasure either. Compliance-grade "erase this" is the administrative precise rewrite (§2.9), the sole sanctioned exception.
@@ -546,7 +546,7 @@ CREATE UNIQUE INDEX ix_bm_tip ON branch_meta(tip_entry_id);
 -- One row each: the file is the session.
 session(created_at, parent_session_id, storage_version, metadata,
         message_count, usage_payload, next_seq);
-writer_lease(owner_id TEXT, fence INTEGER, expires_at_ms INTEGER);
+-- Writable ownership belongs to the host lifecycle, not a storage lease.
 ```
 
 One `commit()` is one SQL transaction: insert entries, insert ledger rows, upsert or delete registers, maintain the branch index, bump `session_stats`. Never an UPDATE or DELETE on an entry or ledger row; mutability is confined to registers, the branch index (`branch_meta` tips and bases), stats, sequences, the session catalog row, and leases.
@@ -564,16 +564,20 @@ reading the newest compaction before inserting. `BEGIN IMMEDIATE` takes the writ
 lock up front and avoids an unrecoverable stale-snapshot upgrade, so there is no case
 where a deferred `BEGIN` is the right choice here.
 
-**`writer_lease` enforces the single-writer rule.** WAL happily lets two
-processes alternate writes to one file, which is exactly the interleaving the
-design forbids — so per-session files do not remove the need for the lease. Expiring fenced ownership:
-`open()` acquires the claim, storage renews it on appends and while idle, and close
-stops renewal after the queue drains and deletes only its matching `(owner_id,
-fence)` pair — so a stale owner cannot release the replacement that succeeded it.
-This is what makes "one process owns one session" an enforced property rather than
-a convention the serving layer is trusted to uphold. Memory and JSONL have no
-equivalent and rely on process ownership; a JSONL session opened twice is corrupt
-and undetected.
+**Session ownership is host-authoritative.** Exactly one host-assigned process
+owns writable Session authority at a time, normally the Session worker. The
+server closes an old worker before replacement and may temporarily own a newly
+created or forked destination before handing it off. Storage backends do not
+implement writer ownership; directly opening one Session for writes in multiple
+processes is an unsupported host-lifecycle defect. Memory and JSONL follow the
+same rule rather than pretending to provide fencing.
+
+Forking is the supported cross-process overlap: a server may open a live
+worker-owned SQLite source through an independent read-only connection and one
+deferred transaction while the worker continues committing. The fork observes
+one complete committed boundary and never upgrades to a write. A source already
+open in the same repository keeps its queued snapshot path so admitted-commit
+ordering remains deterministic.
 
 Atomicity itself needs no special handling. A multi-write transaction is all-or-none
 by the file format: WAL frames become visible only when the commit record lands, so a
