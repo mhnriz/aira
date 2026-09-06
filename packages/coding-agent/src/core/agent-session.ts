@@ -73,7 +73,12 @@ import {
 } from "../aira/interaction/manager.ts";
 import { createAiraInteractionToolDefinitions } from "../aira/interaction/model-tool.ts";
 import { onAiraSessionCreated, onAiraSessionDisposed } from "../aira/lifecycle.ts";
-import { AIRA_READ_ONLY_TOOLS, buildAiraRuntimeControlEnvelope, isAiraMutatingTool } from "../aira/modes.ts";
+import {
+	AIRA_INTELLIGENCE_TOOLS,
+	AIRA_READ_ONLY_TOOLS,
+	buildAiraRuntimeControlEnvelope,
+	isAiraMutatingTool,
+} from "../aira/modes.ts";
 import type { AiraOrchestrationHandle, AiraOrchestrationManagerOptions } from "../aira/orchestration/manager.ts";
 import { createAiraOrchestrationManager } from "../aira/orchestration/manager.ts";
 import { createAiraOrchestrationToolDefinitions } from "../aira/orchestration/model-tools.ts";
@@ -3426,7 +3431,7 @@ export class AgentSession {
 					...Object.keys(airaIntelligenceTools),
 				]
 			: [
-					...Object.keys(airaIntelligenceTools),
+					...AIRA_INTELLIGENCE_TOOLS,
 					"read",
 					"bash",
 					"edit",
@@ -3436,7 +3441,6 @@ export class AgentSession {
 					...Object.keys(airaOrchestrationTools),
 					...Object.keys(airaInteractionTools),
 					...Object.keys(airaTaskTools),
-					...Object.keys(airaIntelligenceTools),
 				];
 		const baseActiveToolNames = options.activeToolNames ?? defaultActiveToolNames;
 		this._refreshToolRegistry({

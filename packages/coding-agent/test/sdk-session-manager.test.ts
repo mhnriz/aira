@@ -1,10 +1,14 @@
 import { existsSync, mkdirSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { type AssistantMessage, createAssistantMessageEventStream, type Model } from "@earendil-works/pi-ai";
 import { getModel } from "@earendil-works/pi-ai/compat";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { AuthStorage } from "../src/core/auth-storage.ts";
 import { createAgentSession } from "../src/core/sdk.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
+import { SettingsManager } from "../src/core/settings-manager.ts";
+import { createInMemoryModelRegistry, getModelRuntime } from "./model-runtime-test-utils.ts";
 
 describe("createAgentSession session manager defaults", () => {
 	let tempDir: string;
@@ -127,5 +131,103 @@ describe("createAgentSession session manager defaults", () => {
 		]);
 
 		session.dispose();
+	});
+
+	it("passes default Aira intelligence tools to the provider-facing context", async () => {
+		const model: Model<"anthropic-messages"> = {
+			id: "capture-model",
+			name: "Capture Model",
+			api: "anthropic-messages",
+			provider: "capture-provider",
+			baseUrl: "https://capture.invalid",
+			reasoning: false,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 128000,
+			maxTokens: 4096,
+		};
+		const authStorage = AuthStorage.inMemory({ [model.provider]: { type: "api_key", key: "capture-key" } });
+		const modelRegistry = await createInMemoryModelRegistry(authStorage);
+		let capturedTools: string[] = [];
+		modelRegistry.registerProvider(model.provider, {
+			api: model.api,
+			models: [model],
+			streamSimple: (_model, context) => {
+				capturedTools = (context.tools ?? []).map((tool) => tool.name);
+				const stream = createAssistantMessageEventStream();
+				const message: AssistantMessage = {
+					role: "assistant",
+					content: [{ type: "text", text: "ok" }],
+					api: model.api,
+					provider: model.provider,
+					model: model.id,
+					usage: {
+						input: 0,
+						output: 0,
+						cacheRead: 0,
+						cacheWrite: 0,
+						totalTokens: 0,
+						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+					},
+					stopReason: "stop",
+					timestamp: Date.now(),
+				};
+				stream.end(message);
+				return stream;
+			},
+		});
+
+		const { session } = await createAgentSession({
+			cwd,
+			agentDir,
+			model,
+			modelRuntime: getModelRuntime(modelRegistry),
+			settingsManager: SettingsManager.inMemory(),
+			sessionManager: SessionManager.inMemory(cwd),
+		});
+		try {
+			await session.prompt("inspect the project");
+			expect(capturedTools).toEqual(
+				expect.arrayContaining(["aira_symbol_search", "aira_module_report", "aira_semantic_navigation"]),
+			);
+		} finally {
+			session.dispose();
+			modelRegistry.unregisterProvider(model.provider);
+		}
+	});
+
+	it("preserves explicit exclusion of an Aira intelligence tool", async () => {
+		const model: Model<"anthropic-messages"> = {
+			id: "capture-model-excluded",
+			name: "Capture Model",
+			api: "anthropic-messages",
+			provider: "capture-provider-excluded",
+			baseUrl: "https://capture.invalid",
+			reasoning: false,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 128000,
+			maxTokens: 4096,
+		};
+		const authStorage = AuthStorage.inMemory({ [model.provider]: { type: "api_key", key: "capture-key" } });
+		const modelRegistry = await createInMemoryModelRegistry(authStorage);
+		modelRegistry.registerProvider(model.provider, { api: model.api, models: [model] });
+		const { session } = await createAgentSession({
+			cwd,
+			agentDir,
+			model,
+			modelRuntime: getModelRuntime(modelRegistry),
+			settingsManager: SettingsManager.inMemory(),
+			sessionManager: SessionManager.inMemory(cwd),
+			excludeTools: ["aira_semantic_navigation"],
+		});
+		try {
+			const activeNames = session.agent.state.tools.map((tool) => tool.name);
+			expect(activeNames).not.toContain("aira_semantic_navigation");
+			expect(activeNames).toEqual(expect.arrayContaining(["aira_symbol_search", "aira_module_report"]));
+		} finally {
+			session.dispose();
+			modelRegistry.unregisterProvider(model.provider);
+		}
 	});
 });

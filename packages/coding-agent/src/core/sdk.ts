@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { Agent, type AgentMessage, setDefaultStreamFn, type ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { clampThinkingLevel, type Message, type Model, streamSimple } from "@earendil-works/pi-ai/compat";
+import { AIRA_INTELLIGENCE_TOOLS } from "../aira/modes.ts";
 import { getAgentDir } from "../config.ts";
 import { resolvePath } from "../utils/paths.ts";
 import { AgentSession } from "./agent-session.ts";
@@ -258,6 +259,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	// selections still win). ToolName stays the Pi-builtin union — the Aira
 	// tools are resolved by name through the registry.
 	const defaultActiveToolNames: string[] = [
+		...AIRA_INTELLIGENCE_TOOLS,
 		"read",
 		"bash",
 		"edit",
