@@ -139,6 +139,56 @@ from the preparation baseline and should be refreshed before implementation.
   redesign remain deferred. Verifier, browser, Workbench, task, Goal, and
   orchestration behavior were not redesigned.
 
+#### Stage 3 disposition — implemented
+
+- `b37834b695a386869fac3681557a255950c947b3` — **IMPLEMENTED**. Mario
+  Zechner, authored and committed 2026-08-25 18:35:45 +0200, exact subject
+  `feat(agent): add durable retry and deferred polling`. The upstream change
+  introduced captured generation configuration, durable retry/deferred phases,
+  provider effects outside durable commits, response/usage settlement, and
+  recovery tests. Aira adapted those invariants to the existing operation and
+  record log instead of importing Pi's runtime-drive tree.
+- Related commits inspected: `eb1185d93eec09ceb9369373ac02d31e9ca41785`
+  (durable tools), `9b23c65834e0345ff1d7de055500d6928f65e118` (structural
+  drive), `3a68f018c045ccb8308dc13ac953ec836bcc8994` (lane inbox/result
+  redesign), and `c60dd63fdff6a26331c993422de99732cd109b07` (operation graph
+  simplification). They were design/correction evidence only; no later commit
+  materially contributed code to Stage 3.
+- Aira implementation: `generation_state` records persist intent,
+  effect-pending, retry-wait, deferred, cancelled, and settled state. Run
+  operation intent captures model/provider identity, thinking level, safe
+  request options, and retry policy; credentials and callbacks are excluded.
+  `DurableGeneration` is owned by the explicit AgentLane handle and uses
+  Session's MutationLine for compare-and-set transitions and settlement.
+- Provider effects, retry waits, and deferred polling are outside MutationLine.
+  There is no hidden polling loop or durable retry manager. Runtime callers
+  wake and resume from persisted state; repeated or concurrent resumes lose
+  the durable transition and do not start a second provider effect.
+- Response, usage, generation state, and terminal operation settlement are
+  committed through the existing Session mutation boundary. A crash after an
+  external provider completion but before settlement retains an effect-pending
+  state; Aira does not claim exactly-once provider execution and requires
+  explicit recovery/resume for that at-least-once ambiguity.
+- Compatibility: existing records and sessions remain readable; the new
+  record is extensible JSONL/SQLite payload data and requires no migration.
+  Existing coding-agent UX, compaction, verifier, task, goal, orchestration,
+  browser, Workbench, and tool execution behavior were not redesigned.
+- Tests: Memory, JSONL, and SQLite cover captured-model stability, retry
+  persistence/reopen, terminal settlement, cancellation, deferred state,
+  mutation/effect ordering, and concurrent resume deduplication. Existing
+  harness/session suites remain green. Stage 4 durable tools and Stage 5 fork
+  redesign remain deferred.
+- Validation: `npm run check` passed; focused generation, harness/session,
+  SQLite, and coding-agent regression suites passed. `npm run build` passed
+  after the sandbox-only models.dev DNS failure was retried with network
+  access. `./test.sh` completed with exit 1 only on environment-sensitive
+  loopback/Unix-socket `EPERM`, network timeout, and real-Chrome fixture tests;
+  Aira, SQLite, evals, protocol, telemetry, and TUI suites passed. Built CLI
+  `--help`, `--version`, offline startup, `/new`, `/resume`, and clean `/quit`
+  smoke checks passed. No process-kill crash test was added; reopen/resume and
+  concurrent-resume crash-boundary behavior is covered by unit tests.
+- Local implementation commit: this Stage 3 commit. No push was performed.
+
 ### Stage 2 — Session and Branch separation
 
 - Define explicit global `Session` and path-only `Branch` interfaces.

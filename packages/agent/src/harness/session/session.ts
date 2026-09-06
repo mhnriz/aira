@@ -6,12 +6,15 @@ import type {
 	BranchBounds,
 	Entry,
 	EntryQuery,
+	GenerationConfiguration,
+	GenerationStateRecord,
 	IdGenerator,
 	LanePointer,
 	LaneRecord,
 	LogItem,
 	LogOptions,
 	NewRecord,
+	OperationFinishedRecord,
 	OperationStartedRecord,
 	ProvisionedEntry,
 	RecordBase,
@@ -232,6 +235,84 @@ export class Session<TMetadata extends SessionMetadata = SessionMetadata> implem
 	): Promise<TNewRecord & Pick<RecordBase, "seq" | "timestamp">>;
 	async appendRecord(record: NewRecord): Promise<LaneRecord> {
 		return this.commitRecord(record);
+	}
+
+	async transitionGeneration(
+		lane: string,
+		expected: Pick<GenerationStateRecord, "id" | "status">,
+		next: NewRecord<GenerationStateRecord>,
+	): Promise<GenerationStateRecord | undefined> {
+		return this.mutate(async () => {
+			const current = (
+				await this.storage.findRecords({ lane, type: "generation_state", order: "newestFirst", limit: 1 })
+			)[0] as GenerationStateRecord | undefined;
+			if (current?.id !== expected.id || current.status !== expected.status) return undefined;
+			return this.storage.appendRecord<GenerationStateRecord>(next);
+		});
+	}
+
+	async startGeneration(options: {
+		lane: string;
+		operationId: string;
+		stepId: string;
+		originalPrompt: AgentMessage[];
+		initialMessages?: ProvisionedEntry[];
+		configuration: GenerationConfiguration;
+		responseEntryId: string;
+		usageId: string;
+	}): Promise<GenerationStateRecord> {
+		return this.mutate(async () => {
+			await this.storage.appendRecord({
+				type: "operation_started",
+				id: options.operationId,
+				lane: options.lane,
+				sourceLeafId: await this.getLeafIdForLane(options.lane),
+				intent: {
+					kind: "run",
+					originalPrompt: structuredClone(options.originalPrompt),
+					initialMessages: structuredClone(options.initialMessages ?? []),
+					generation: structuredClone(options.configuration),
+				},
+			});
+			return this.storage.appendRecord<GenerationStateRecord>({
+				type: "generation_state",
+				id: this.idGenerator.next(),
+				lane: options.lane,
+				runId: options.operationId,
+				stepId: options.stepId,
+				status: "intent",
+				attempt: 1,
+				responseEntryId: options.responseEntryId,
+				usageId: options.usageId,
+				configuration: structuredClone(options.configuration),
+			});
+		});
+	}
+
+	async commitGenerationOutcome(options: {
+		lane: string;
+		expected: Pick<GenerationStateRecord, "id" | "status">;
+		response: ProvisionedEntry<Extract<Entry, { type: "message" }>>;
+		usage: NewRecord<Extract<LaneRecord, { type: "usage" }>>;
+		nextState: NewRecord<GenerationStateRecord>;
+		finish?: NewRecord<OperationFinishedRecord>;
+	}): Promise<boolean> {
+		return this.mutate(async () => {
+			const current = (
+				await this.storage.findRecords({
+					lane: options.lane,
+					type: "generation_state",
+					order: "newestFirst",
+					limit: 1,
+				})
+			)[0] as GenerationStateRecord | undefined;
+			if (current?.id !== options.expected.id || current.status !== options.expected.status) return false;
+			await this.storage.appendEntry(options.response, options.lane);
+			await this.storage.appendRecord(options.usage);
+			await this.storage.appendRecord(options.nextState);
+			if (options.finish !== undefined) await this.storage.appendRecord(options.finish);
+			return true;
+		});
 	}
 
 	async findRecords<K extends LaneRecord["type"]>(

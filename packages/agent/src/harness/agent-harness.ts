@@ -12,6 +12,7 @@ import type {
 } from "@earendil-works/pi-ai";
 import type { AgentMessage, AgentTool, QueueMode, ThinkingLevel } from "../types.ts";
 import type { CompactionSettings } from "./compaction/compaction.ts";
+import { DurableGeneration } from "./generation.ts";
 import { type Result as ResultValue, TaggedError } from "./result.ts";
 import type {
 	Branch,
@@ -273,6 +274,7 @@ export interface WatchHandle<TSnapshot> {
 export interface AgentLane {
 	readonly name: string;
 	readonly branch: Branch;
+	readonly generation: DurableGeneration;
 	getLeafId(): Promise<string | null>;
 	prompt(text: string, images?: ImageContent[]): Promise<RunResult>;
 	prompt(message: AgentMessage | AgentMessage[]): Promise<RunResult>;
@@ -309,6 +311,7 @@ export class AgentHarness {
 	readonly name = "main";
 	readonly session: SessionTree;
 	readonly branch: Branch;
+	readonly generation: DurableGeneration;
 	readonly hooks: Hooks;
 	readonly events: Events;
 	private readonly durableSession: Session;
@@ -330,6 +333,7 @@ export class AgentHarness {
 		this.durableSession = options.session;
 		this.session = options.session;
 		this.branch = new SessionBranch(options.session, "main");
+		this.generation = new DurableGeneration(options.session, "main");
 		this.hooks = new UnavailableRegistry("hooks.on", () => this.closed);
 		this.events = new UnavailableRegistry("events.on", () => this.closed);
 		this.model = options.model;
@@ -349,7 +353,7 @@ export class AgentHarness {
 		};
 		this.steeringMode = options.steeringMode ?? "one-at-a-time";
 		this.followUpMode = options.followUpMode ?? "one-at-a-time";
-		this.laneHandles.set("main", new AgentLaneHandle(this, this.branch, this.session));
+		this.laneHandles.set("main", new AgentLaneHandle(this, this.branch, this.session, this.generation));
 	}
 
 	static async create(
@@ -454,7 +458,12 @@ export class AgentHarness {
 		if (existing !== undefined) return existing;
 		const branch = await this.durableSession.branch(name);
 		if (branch === undefined) return undefined;
-		const handle = new AgentLaneHandle(this, branch, this.durableSession.view(name));
+		const handle = new AgentLaneHandle(
+			this,
+			branch,
+			this.durableSession.view(name),
+			new DurableGeneration(this.durableSession, name),
+		);
 		this.laneHandles.set(name, handle);
 		return handle;
 	}
@@ -488,7 +497,14 @@ export class AgentHarness {
 
 	private async acquireLane(name: string, at: string | null): Promise<AgentLane> {
 		const branch = await this.durableSession.acquireBranch(name, at);
-		const handle = this.laneHandles.get(name) ?? new AgentLaneHandle(this, branch, this.durableSession.view(name));
+		const handle =
+			this.laneHandles.get(name) ??
+			new AgentLaneHandle(
+				this,
+				branch,
+				this.durableSession.view(name),
+				new DurableGeneration(this.durableSession, name),
+			);
 		this.laneHandles.set(name, handle);
 		return handle;
 	}
@@ -553,13 +569,15 @@ export class AgentHarness {
 class AgentLaneHandle implements AgentLane {
 	readonly name: string;
 	readonly branch: Branch;
+	readonly generation: DurableGeneration;
 	readonly session: SessionTree;
 	private readonly harness: AgentHarness;
 
-	constructor(harness: AgentHarness, branch: Branch, session: SessionTree) {
+	constructor(harness: AgentHarness, branch: Branch, session: SessionTree, generation: DurableGeneration) {
 		this.harness = harness;
 		this.name = branch.name;
 		this.branch = branch;
+		this.generation = generation;
 		this.session = session;
 	}
 

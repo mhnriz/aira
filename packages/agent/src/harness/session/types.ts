@@ -1,4 +1,4 @@
-import type { StopReason, Usage } from "@earendil-works/pi-ai";
+import type { RetryPolicy, StopReason, Usage } from "@earendil-works/pi-ai";
 import "../messages.ts";
 import type { AgentMessage } from "../../types.ts";
 import type { Session } from "./session.ts";
@@ -96,6 +96,7 @@ export interface OperationStartedRecord extends RecordBase {
 				initialMessages: ProvisionedEntry[];
 				systemPromptOverride?: string;
 				resumeData?: { [extensionId: string]: JsonValue };
+				generation?: GenerationConfiguration;
 		  }
 		| {
 				kind: "compaction";
@@ -110,6 +111,35 @@ export interface OperationStartedRecord extends RecordBase {
 				label?: string;
 				summaryEntryId?: string;
 		  };
+}
+
+/** Semantic provider configuration captured for one generation operation. */
+export interface GenerationConfiguration {
+	model: { provider: string; modelId: string };
+	thinkingLevel: string;
+	streamOptions: {
+		transport?: string;
+		timeoutMs?: number;
+		maxRetries?: number;
+		maxRetryDelayMs?: number;
+		metadata?: JsonValue;
+	};
+	retryPolicy: RetryPolicy;
+}
+
+/** Durable generation lifecycle state. Credentials and callbacks are never persisted. */
+export interface GenerationStateRecord extends RecordBase {
+	type: "generation_state";
+	runId: string;
+	stepId: string;
+	status: "intent" | "effect_pending" | "retry_wait" | "deferred" | "cancelled" | "settled";
+	attempt: number;
+	responseEntryId: string;
+	usageId: string;
+	configuration: GenerationConfiguration;
+	notBefore?: number;
+	errorMessage?: string;
+	deferred?: JsonValue;
 }
 
 export interface AbortRequestedRecord extends RecordBase {
@@ -202,6 +232,7 @@ export type UsageRecord = RecordBase & { type: "usage"; usage: Usage } & (
 
 export type LaneRecord =
 	| OperationStartedRecord
+	| GenerationStateRecord
 	| AbortRequestedRecord
 	| OperationFinishedRecord
 	| StepAttemptRecord
