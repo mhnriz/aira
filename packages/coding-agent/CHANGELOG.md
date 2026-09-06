@@ -8,6 +8,7 @@
 - Fixed resumed sessions corrupting the next appended entry when their JSONL file lacks a trailing newline.
 
 ### Added
+- Added `ui_prompt_start` and `ui_prompt_end` extension events around blocking extension UI prompts.
 - Added RPC `clear_queue` to retrieve and remove queued steering and follow-up messages ([#8432](https://github.com/earendil-works/pi/issues/8432)).
 - **Aira**: Deferred context-only extension messages sent during a running turn until its tool results are appended, preserving provider message ordering ([#8537](https://github.com/earendil-works/pi/issues/8537)).
 - **Aira**: Phase 13 runtime reliability hardening. Native tasks now use
