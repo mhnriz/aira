@@ -4,7 +4,10 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { decideIntelligenceActivation } from "../../../src/aira/intelligence/activation.ts";
-import { buildIntelligenceContext } from "../../../src/aira/intelligence/context.ts";
+import {
+	AIRA_CODE_INTELLIGENCE_DISCOVERY_GUIDANCE,
+	buildIntelligenceContext,
+} from "../../../src/aira/intelligence/context.ts";
 import { type AiraIntelligenceHandle, createAiraIntelligence } from "../../../src/aira/intelligence/coordinator.ts";
 import { AiraFindingsStore } from "../../../src/aira/intelligence/findings.ts";
 import { RepositoryProvider } from "../../../src/aira/intelligence/providers/repository/index.ts";
@@ -108,6 +111,7 @@ describe("ambient context selection", () => {
 		expect(result.content).toContain("Likely files");
 		expect(result.content).toContain("src/tray.ts");
 		expect(result.content).toContain("detectionState");
+		expect(result.content).toContain(AIRA_CODE_INTELLIGENCE_DISCOVERY_GUIDANCE);
 		expect(result.content).not.toContain("src/other.ts");
 	});
 
@@ -198,6 +202,23 @@ describe("ambient context selection", () => {
 			oriented: true,
 		});
 		expect(result.content).toBeUndefined();
+	});
+
+	it("does not advertise semantic navigation without a live-code candidate", async () => {
+		const { state, repository } = setup();
+		await repository.activate();
+		await repository.settled();
+		const activation = { ...decideIntelligenceActivation(state.project), liveCodeCandidates: [] };
+		const result = buildIntelligenceContext({
+			prompt: "find the tray state",
+			mode: "build",
+			activation,
+			projectRootName: "ctx",
+			repository,
+			findings: new AiraFindingsStore(),
+			oriented: false,
+		});
+		expect(result.content).not.toContain(AIRA_CODE_INTELLIGENCE_DISCOVERY_GUIDANCE);
 	});
 });
 
@@ -303,6 +324,7 @@ describe("intelligence coordinator", () => {
 		await handle.waitUntilSettled();
 		const first = handle.providePromptContext("where is entry implemented?");
 		expect(first).toBeDefined();
+		expect(first).toContain(AIRA_CODE_INTELLIGENCE_DISCOVERY_GUIDANCE);
 		// Rerun after the first injection: orientation delivered, no new signal.
 		state.intelligence!.findings = { total: 0, errors: 0, warnings: 0, stale: 0, top: [] };
 		const second = handle.providePromptContext("continue");

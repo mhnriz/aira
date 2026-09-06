@@ -51,6 +51,9 @@ const DEFAULT_LIMITS: Required<AiraIntelligenceContextLimits> = {
 	maxImpactPerFile: 3,
 };
 
+export const AIRA_CODE_INTELLIGENCE_DISCOVERY_GUIDANCE =
+	"For code navigation, Aira provides a bounded discovery funnel: `aira_symbol_search` finds likely code, `aira_module_report` summarizes module structure, and `aira_semantic_navigation` provides definitions, references, and document symbols. Use ordinary search/read for broad or literal searches and as fallback.";
+
 export interface AiraIntelligenceContextInput {
 	prompt: string;
 	mode: AiraMode;
@@ -70,9 +73,24 @@ export interface AiraIntelligenceContextResult {
 	hasSignal: boolean;
 }
 
-const SECTION_BUILD = ["diagnostics", "likelyFiles", "changedFiles", "impact", "orientation", "availability"] as const;
-const SECTION_PLAN = ["likelyFiles", "orientation", "availability", "diagnostics"] as const;
-const SECTION_REVIEW = ["diagnostics", "changedFiles", "impact", "orientation", "availability"] as const;
+const SECTION_BUILD = [
+	"discoveryGuidance",
+	"diagnostics",
+	"likelyFiles",
+	"changedFiles",
+	"impact",
+	"orientation",
+	"availability",
+] as const;
+const SECTION_PLAN = ["discoveryGuidance", "likelyFiles", "orientation", "availability", "diagnostics"] as const;
+const SECTION_REVIEW = [
+	"discoveryGuidance",
+	"diagnostics",
+	"changedFiles",
+	"impact",
+	"orientation",
+	"availability",
+] as const;
 
 function sectionOrderForMode(mode: AiraMode): readonly string[] {
 	if (mode === "plan") {
@@ -91,6 +109,15 @@ export function buildIntelligenceContext(input: AiraIntelligenceContextInput): A
 
 	const sections = new Map<string, string>();
 	let hasSignal = false;
+
+	if (
+		input.activation.active &&
+		!input.oriented &&
+		input.activation.liveCodeCandidates.length > 0 &&
+		input.repository
+	) {
+		sections.set("discoveryGuidance", AIRA_CODE_INTELLIGENCE_DISCOVERY_GUIDANCE);
+	}
 
 	const orientation = buildOrientationSection(input.activation, input.projectRootName);
 	if (orientation && !input.oriented) {

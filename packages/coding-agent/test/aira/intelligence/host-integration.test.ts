@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/compat";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { AIRA_CODE_INTELLIGENCE_DISCOVERY_GUIDANCE } from "../../../src/aira/intelligence/context.ts";
 import { createHarness, getUserTexts, type Harness } from "../../suite/harness.ts";
 
 /**
@@ -112,8 +113,24 @@ describe("Aira ambient intelligence through the host (Phase 5)", () => {
 		expect(content).toContain("Likely files");
 		expect(content).toContain("src/tray.ts");
 		expect(content).toContain("detectionState");
+		expect(content).toContain(AIRA_CODE_INTELLIGENCE_DISCOVERY_GUIDANCE);
 		// The injection is silent: it must not appear as a user message.
 		expect(getUserTexts(harness).every((t) => !t.includes("Aira intelligence"))).toBe(true);
+	});
+
+	it("shows discovery guidance once per session and again for a new session", async () => {
+		const harness = harnesses[0]!;
+		harness.setResponses([fauxAssistantMessage(fauxText("second"))]);
+		await harness.session.prompt("continue the investigation");
+		const allContext = customContext(harness).join("\n");
+		expect(allContext.split(AIRA_CODE_INTELLIGENCE_DISCOVERY_GUIDANCE)).toHaveLength(2);
+
+		const replacement = await createHarness({ cwd: makeProjectDir() });
+		harnesses.push(replacement);
+		replacement.setResponses([fauxAssistantMessage(fauxText("new session"))]);
+		await replacement.session.prompt("start a new investigation");
+		const replacementContext = customContext(replacement).join("\n");
+		expect(replacementContext).toContain(AIRA_CODE_INTELLIGENCE_DISCOVERY_GUIDANCE);
 	});
 
 	it("runs the automatic post-edit pipeline after a real edit tool execution", async () => {

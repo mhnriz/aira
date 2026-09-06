@@ -444,6 +444,7 @@ export class AgentSession {
 	private _sessionStartEvent: SessionStartEvent;
 	private _airaSessionState: AiraSessionState;
 	private _airaIntelligence: AiraIntelligenceHandle | undefined;
+	private _airaIntelligenceActivation: Promise<void> | undefined;
 	private _airaExecution: AiraExecutionHandle | undefined;
 	private _airaBrowser: AiraBrowserHandle | undefined;
 	private _airaVerification: AiraVerificationHandle | undefined;
@@ -506,7 +507,7 @@ export class AgentSession {
 		this._airaIntelligence = createAiraIntelligence(this._airaSessionState, this.agent, {
 			cacheDir: join(getAiraCacheDir(), "intelligence"),
 		});
-		void this._airaIntelligence.activate();
+		this._airaIntelligenceActivation = this._airaIntelligence.activate();
 		this._airaWorkspaceOwnership = createAiraWorkspaceOwnershipManager({
 			cwd: this._cwd,
 			snapshot: () => this._airaIntelligence?.verificationChanges() ?? Promise.resolve(undefined),
@@ -1797,6 +1798,11 @@ export class AgentSession {
 			if (lastAssistant) {
 				await this._checkCompaction(lastAssistant, false);
 			}
+
+			// Ensure the first model request can receive the one-time intelligence
+			// discovery guidance when this project is eligible. Later prompts reuse
+			// the coordinator's existing once-per-session context gate.
+			await this._airaIntelligenceActivation;
 
 			// Build messages array (custom message if any, then user message)
 			messages = [];
