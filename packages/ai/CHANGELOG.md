@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- Fixed fragmented Mistral tool calls splitting when continuation chunks omit the tool-call ID ([#8387](https://github.com/earendil-works/pi/issues/8387)).
+
 - Fixed OpenAI-compatible Chat Completions requests ignoring an explicitly requested `toolChoice` when no tools are defined.
 - Fixed thinking signature serialization to run once after the signature is complete ([#8671](https://github.com/earendil-works/pi/pull/8671)).
 
