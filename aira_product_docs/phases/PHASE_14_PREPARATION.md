@@ -432,13 +432,69 @@ Stage 3 captured provider configuration remains unchanged; Stage 4 durable tool
 effects remain outside MutationLine; Stage 6 operation observation, cancellation,
 and recovery remain the sole durable boundary. Goal/verifier authority,
 Workbench presentation, session import/reopen/fork behavior, and existing
-process UX were not redesigned. No Stage 8 TUI, Chord/Delta, remote, catalog,
-verifier, or Phase 15 work was started.
+process UX were not redesigned. Stage 8 was limited to the focused TUI and
+selector slices recorded below; no Chord/Delta, remote, catalog, verifier, or
+Phase 15 work was started.
 
 Focused validation passed for compaction (24 tests), Node execution (30 passed,
 1 platform skip), and managed execution (22 tests). The full regression/build,
 built-CLI dogfood, and final Stage 7 status are recorded with the implementation
 commits above. No push was performed.
+
+#### Stage 8 disposition — implemented
+
+Stage 8 was restricted to additive interaction improvements that fit Aira's
+existing fullscreen and Workbench ownership. The implementation was split into
+two semantic commits and left the runtime, verifier, remote, and presentation
+architecture unchanged:
+
+- `2d41163332c1a6d11c45911a92100fd2a55e4d1a` — Armin Ronacher,
+  `fix(tui): make fullscreen transcript search scale linearly` — **ADAPTED NOW**
+  in local commit `2545a445c`. Aira now caches the normalized transcript corpus,
+  maps matches through compact source spans, uses the ASCII fast path, and uses
+  binary search for retained search highlighting/navigation.
+- `79680533c6b898894f2d2421c7f640b212d3dfdd` — Armin Ronacher,
+  `feat(tui): add clickable jump-to-end indicator to fullscreen transcript` —
+  **ADAPTED NOW** in `2545a445c`. The indicator is opt-in and only applies to
+  the primary fullscreen transcript; its click target returns to the latest
+  output without affecting Inspector or Workbench viewports.
+- `ab9e6f89b45344f5e84e33eb6141f3e6e4c8d81e` — Alexey Zaytsev,
+  `feat(tui): accelerate Alt-modified wheel scrolling (#9166)` — **ADAPTED NOW**
+  in `2545a445c`, using Aira's existing mouse routing and a five-line multiplier.
+- `92d8e2d17d4f357788381c49ce2cdb3f4ed1f21c` — Ramiz Wachtler,
+  `fix(coding-agent): selector save keybindings (#9149)` — **ADAPTED NOW** in
+  local commit `b74a888ac`. Model and thinking selector save actions now use
+  configurable keybinding IDs and display configured hints.
+- `9841914c71a74d81abe07f751aefd271fd924e63` — Alexey Zaytsev,
+  `fix(tui): keep list selection unchanged on mouse hover` — **ALREADY ABSENT /
+  NOT APPLICABLE**. Aira's `SelectList` and `SettingsList` do not implement the
+  upstream hover-selection behavior, so no corrective hunk was needed.
+- `1d9787c11fb91ecf7c892050f4c0607a995dd15b` — Cristina Poncela Cubeiro,
+  `feat(tui): prettier Working... spinner (#8799)` — **ALREADY PRESENT in
+  Aira-native form** through `Loader` and `WorkingStatusIndicator`; no visual
+  transplant was made.
+- `457ae8c79c2e3c570a36d305095afa18d3791dd1` — Cristina Poncela Cubeiro,
+  `feat(tui): alt mode scrollbar but prettier (#8801)` — **ALREADY PRESENT /
+  DESIGN_ONLY**. Aira already owns fullscreen scrollbar settings, theme colors,
+  and Workbench layout; the broad upstream settings/theme refactor was not
+  compatible with those boundaries.
+- `f2a622789947b5b4297af6ac3b0091978cdd4216` — Ramiz Wachtler,
+  `feat(coding-agent): adjust TUI selections in thinking-mode, models and scoped
+  models (#8900)` — **PARTIALLY ALREADY PRESENT**. Aira already had the scoped
+  model markers/toggles; only the compatible configurable-save correction was
+  applied in `b74a888ac`.
+- `eb3e9feed1bd092535ae77232e9dd351bc781e23` — Mario Zechner,
+  `feat(coding-agent): split tool renderers and theme validation from their
+  implementations` — **DESIGN_ONLY**. The 26-file renderer/theme dependency
+  split would cross Aira's custom Workbench and tool-presentation boundary.
+
+Focused validation passed: 55 TUI tests and 6 selector/keybinding tests.
+`npm run check`, `npm run build`, built-CLI `--help`/`--version` dogfood, and
+`git diff --check` passed. The full `./test.sh` regression passed after rerun
+with local socket and browser permissions. The sandbox-only run reached 3,716
+passing tests before environment-only `EPERM` failures for loopback sockets,
+Unix-domain sockets, and Chrome startup; dependent cases timed out. No push was
+performed.
 
 ### Stage 2 — Session and Branch separation
 
