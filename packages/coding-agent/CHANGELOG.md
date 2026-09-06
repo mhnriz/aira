@@ -133,6 +133,7 @@
 
 - **Aira**: Versioning policy — Aira's own product version (`AIRA_VERSION`, currently 0.1.4) tracks updates; the Pi base version stays internal for syncing Aira's backend with upstream Pi bug/security fixes. The interactive startup update notice checks Aira's GitHub releases against `AIRA_VERSION` instead of the upstream pi.dev marker, so it no longer reports unrelated upstream Pi versions (e.g. "new version 0.84.4 is available" when the installed Aira build is already current). The notice links to the Aira release page and drops the stale "Run `aira update`" npm instruction.
 - Added environment variables and advanced settings for overriding auto-detected terminal hyperlink, image, and truecolor capabilities ([#8665](https://github.com/earendil-works/pi/issues/8665)).
+- Added `fullscreenCopyOnSelect` to disable automatic fullscreen selection copy; when disabled, `Ctrl+X` copies the active text selection before falling back to the last assistant message, while `/tree` still copies the selected message ([#7720](https://github.com/earendil-works/pi/issues/7720)).
 
 ### Fixed
 
