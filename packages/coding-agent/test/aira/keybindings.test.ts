@@ -27,4 +27,10 @@ describe("Aira mode keybinding defaults", () => {
 		// No keybinding conflict is reported between the two defaults.
 		expect(km.getConflicts()).toEqual([]);
 	});
+
+	it("keeps selector save actions configurable", () => {
+		const km = new KeybindingsManager();
+		expect(km.getKeys("app.models.save")).toEqual(["ctrl+s"]);
+		expect(km.getKeys("app.thinking.save")).toEqual(["ctrl+s"]);
+	});
 });

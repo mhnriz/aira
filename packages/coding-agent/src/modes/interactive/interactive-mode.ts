@@ -420,6 +420,11 @@ export function createInteractiveTui(options: InteractiveTuiOptions): TuiMainScr
 		return new TuiAltScreen(terminal, options.showHardwareCursor, options.logDirectory, {
 			searchMatchStyle: (text) => theme.underline(styleSearchMatch(text)),
 			searchCurrentMatchStyle: (text) => theme.bold(theme.inverse(styleSearchMatch(text))),
+			scrollToEndIndicator: () => {
+				const shortcut = keyDisplayText("tui.altScreen.bottom");
+				const label = ` ↓ Jump to latest message${shortcut ? ` · ${shortcut}` : ""} `;
+				return theme.bg("selectedBg", theme.fg("text", label));
+			},
 			openUrl: openBrowser,
 			onRightClickPaste: options.onRightClickPaste,
 			copyOnSelect: options.fullscreenCopyOnSelect,
