@@ -1119,3 +1119,47 @@ diagnostic presentation can still show placeholder objective wording and
 browser-evidence commentary when browser evidence is not applicable; this is
 presentation wording only and is tracked as backlog item B-011, not a
 lifecycle change.
+
+## ADR-047 — Session mutation authority is serialized; external effects stay outside it
+
+**Status:** accepted · Phase 14
+
+**Context.** Session, branch, lane, generation, tool, and operation state must
+publish one coherent committed view while providers, tools, hooks, timers, and
+event delivery remain independently cancellable and observable. Running those
+effects inside a durable callback would make retries and crash recovery depend
+on callback timing and could allow an effect before its intent is committed.
+
+**Decision.** A Session-owned `MutationLine` serializes durable read-decide-
+write transitions and exposes only committed state to ordinary readers.
+Nested mutations and external effects inside the mutation scope are rejected.
+Provider and tool effects run after their durable intent transition and settle
+through compare-and-set records; backend transactions remain responsible for
+atomic publication and rollback.
+
+**Consequences.** Recovery can identify pending or uncertain effects without
+claiming exactly-once provider execution. Session/Branch/AgentLane ownership,
+durable generation, durable tools, named forks, and the operation boundary all
+use this authority without importing Pi's Drive runtime.
+
+## ADR-048 — Aira keeps a local durable operation model instead of adopting Pi Drive
+
+**Status:** accepted · Phase 14
+
+**Context.** Pi's later Drive, Chord, Delta, and remote-presentation work is a
+coordinated distributed/runtime architecture. Aira currently owns local
+Session, Branch, AgentLane, Workbench, client/server, and verifier boundaries;
+there is no current consumer for Chord services, replicated Delta state, or a
+multi-process presentation worker.
+
+**Decision.** Aira uses its existing Session record protocol, MutationLine,
+lane-owned generation/tool state, and `DurableOperationBoundary` for local
+durability and recovery. Pi Drive, Chord, Delta, replicated state, facet
+distribution, Radius, and remote presentation remain design input and are not
+introduced as placeholder APIs or parallel authorities.
+
+**Consequences.** Local recovery, cancellation, fork ownership, and operation
+observation remain testable without a speculative transport or replication
+layer. Reconsider the deferred families only when Aira has a concrete
+multi-process, plugin-service-host, mobile-handoff, or remote-presentation
+consumer that justifies a coordinated architecture migration.

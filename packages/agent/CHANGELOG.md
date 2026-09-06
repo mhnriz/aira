@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Added
+
+- Add durable session/runtime ownership and recovery across sessions, branches,
+  lanes, generation, tools, forks, and durable operations.
+
+### Fixed
+
+- Report signal-killed processes as failures with truthful exit semantics.
+
 ## [0.84.4] - 2026-08-28
 
 ### Breaking Changes

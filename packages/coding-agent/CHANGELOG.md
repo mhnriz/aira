@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+### New Features
+
+- Add durable session/runtime ownership and recovery across sessions, branches,
+  lanes, generation, tools, forks, and durable operations.
+- Improve fullscreen transcript navigation with cached search, jump-to-latest,
+  and accelerated Alt-wheel scrolling.
+- Add configurable save bindings for model and thinking selectors.
+
+### Fixed
+
+- Cancel active compaction cleanly during session abort.
+- Report signal-killed processes as failures with truthful exit semantics.
+
+### Changed
+
+- Preserve Pi 0.85.1 compatibility while retaining Aira's native runtime,
+  Workbench, and recovery architecture.
+
 ## [0.84.4] - 2026-08-28
 
 ### Fixed

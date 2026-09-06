@@ -521,6 +521,9 @@ efficient for daily engineering use without adding a second state authority.
 
 ## Phase 14 — Compaction and Knowledge
 
+**Status:** closed 2026-09-06. Pi 0.85.1 integration and Stages 1–9 are
+complete; see [PHASE_14_CLOSEOUT.md](phases/PHASE_14_CLOSEOUT.md).
+
 ### Goal
 
 Maintain engineering continuity over long sessions.
