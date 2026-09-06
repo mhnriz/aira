@@ -265,6 +265,71 @@ from the preparation baseline and should be refreshed before implementation.
   and version startup passed; and `git diff --check` passed. No push was
   performed.
 
+#### Stage 6 disposition — implemented
+
+The chronological upstream operation family was inspected in order:
+
+- `9b23c65834e0345ff1d7de055500d6928f65e118` — Mario Zechner,
+  `feat(agent): add structural drive foundation`. **SUPERSEDED** by the later
+  lane-inbox and simplified operation graph; Aira did not copy the broad Drive
+  runtime transplant.
+- `3a68f018c045ccb8308dc13ac953ec836bcc8994` — Mario Zechner,
+  `docs(agent): redesign WP05 around lane inbox, result records, and neutral leaves`.
+  **DESIGN INPUT**. Aira adopted one tagged lane-owned inbox and neutral
+  observation over its existing append-only records.
+- `c60dd63fdff6a26331c993422de99732cd109b07` — Mario Zechner,
+  `feat(agent): simplify durable operation graph`. **ADAPTED**. Family-specific
+  runtime routing was not copied; Aira keeps generation/tool state records and
+  adds one boundary dispatcher above them.
+- `0f0ca0f6b78019b11f494b1476b0263a03a59597` — Mario Zechner,
+  `feat(agent): make run boundaries atomic`. **ADAPTED**. The existing Aira
+  MutationLine compare-and-set transitions remain the durable result boundary;
+  no provider or tool effect runs in it.
+- `3625e5b14645a42e2572b62a40df27c535421153` — Mario Zechner,
+  `docs(agent): resolve M7 cancellation decisions`. **ADAPTED**. Cancellation
+  is an explicit durable abort request and terminal ownership is decided by the
+  serialized transition that wins, not by an AbortController alone.
+- `8b6910732992521bcf907ce39101f8a633a5ba8d` — Mario Zechner,
+  `feat(agent): make durable drive total`. **ADAPTED**. Recovery dispatch is
+  exhaustive over generation/tool states and distinguishes resume, wait,
+  materialize, cancellation reconciliation, interruption, terminal, and unknown.
+- `89356540fb7318e04e9599a1bc742f5e8f358fe2` — Mario Zechner,
+  `feat(agent): expose durable lane operations`. **ADAPTED**. Aira exposes the
+  narrow `AgentLane.operations` surface without exposing mutable runtime state.
+- `d09576def8ccc7774acfd998c051965948c88092` — Mario Zechner,
+  `fix(agent): finalize durable lane replication`. **ADAPTED**. Durable facts
+  remain authoritative; event/presentation delivery is outside mutation scope.
+- `c5a35eabbfcb706fc240ac9417a1815aec4b13ff` — Mario Zechner,
+  `feat(agent): fuse structural boundary routing`. **ADAPTED**. No second
+  routing graph was introduced; one explicit boundary dispatcher is used.
+
+Aira Stage 6 adds `DurableOperationBoundary` over the existing Session record
+protocol. `queue_enqueued` records form an ordered tagged lane inbox;
+`queue_consumed` is committed only after an operation exists, so a crash before
+consumption leaves intent recoverable and a crash after consumption cannot
+consume it twice. Existing operation IDs remain stable across generation,
+tool, retry, deferred, and terminal records. Observation distinguishes unknown,
+pending, cancellation-requested, interrupted, and immutable terminal results.
+Recovery is total over supported generation/tool states and fails closed for
+unknown identities. Memory, JSONL, and SQLite use the same semantics without a
+schema migration; old sessions remain readable because the new record is
+optional and append-only.
+
+Stage 3 generation and Stage 4 tool execution remain unchanged in effect
+ownership: provider/tool calls occur outside MutationLine, while their
+compare-and-set durable transitions provide the race winner. Compaction,
+existing steer/follow-up APIs, Goal/task/verifier orchestration, Workbench, and
+child scheduling were not redesigned. No Pi Drive runtime, Stage 7 provider or
+process work, verifier redesign, or Phase 15 work was included.
+
+Tests cover inbox ordering, reopen, crash-before-consume, duplicate-consume
+rejection, terminal observation, cancellation reconciliation, total recovery,
+Memory/JSONL conformance, SQLite persistence, reducer validation, and existing
+generation/tool/compaction regressions. Focused validation passed: 8 files,
+178 tests, plus the 3-file boundary/reducer/SQLite run with 136 tests. Final
+build, full test results, built-CLI dogfood, and commit details are recorded in
+the Stage 6 implementation record. No push was performed.
+
 ### Stage 2 — Session and Branch separation
 
 - Define explicit global `Session` and path-only `Branch` interfaces.

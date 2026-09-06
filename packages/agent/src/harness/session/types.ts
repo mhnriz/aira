@@ -241,6 +241,13 @@ export interface QueueCancelledRecord extends RecordBase {
 	entryId: string;
 }
 
+export interface QueueConsumedRecord extends RecordBase {
+	type: "queue_consumed";
+	operationId: string;
+	queue: QueueEnqueuedRecord["queue"];
+	entryId: string;
+}
+
 export interface WriteDeferredRecord extends RecordBase {
 	type: "write_deferred";
 	runId: string;
@@ -270,6 +277,7 @@ export type LaneRecord =
 	| ToolExecutionStateRecord
 	| QueueEnqueuedRecord
 	| QueueCancelledRecord
+	| QueueConsumedRecord
 	| WriteDeferredRecord
 	| UsageRecord;
 export type NewRecord<TRecord extends LaneRecord = LaneRecord> = TRecord extends LaneRecord

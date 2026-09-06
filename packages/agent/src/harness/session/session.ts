@@ -18,6 +18,8 @@ import type {
 	OperationFinishedRecord,
 	OperationStartedRecord,
 	ProvisionedEntry,
+	QueueConsumedRecord,
+	QueueEnqueuedRecord,
 	RecordBase,
 	RecordQuery,
 	SessionMetadata,
@@ -476,6 +478,103 @@ export class Session<TMetadata extends SessionMetadata = SessionMetadata> implem
 	async findOpenOperations(lane: string, options?: { limit?: number }): Promise<OperationStartedRecord[]> {
 		assertValidLimit(options?.limit);
 		return this.storage.findOpenOperations(lane, options);
+	}
+
+	async enqueueInboxItem(
+		lane: string,
+		queue: QueueEnqueuedRecord["queue"],
+		target: ProvisionedEntry,
+		runId?: string,
+	): Promise<QueueEnqueuedRecord> {
+		if (queue !== "nextRun" && runId === undefined) {
+			throw new SessionError("invalid_payload", `${queue} inbox items require an operation id`);
+		}
+		return this.appendRecord({
+			type: "queue_enqueued",
+			id: this.idGenerator.next(),
+			lane,
+			queue,
+			target: structuredClone(target),
+			...(queue === "nextRun" ? {} : { runId }),
+		} as NewRecord<QueueEnqueuedRecord>);
+	}
+
+	async listInbox(lane: string): Promise<QueueEnqueuedRecord[]> {
+		const records = await this.findRecords({ lane, order: "oldestFirst" });
+		const cancelled = new Set(
+			records.filter((record) => record.type === "queue_cancelled").map((record) => record.entryId),
+		);
+		const consumed = new Set(
+			records.filter((record) => record.type === "queue_consumed").map((record) => record.entryId),
+		);
+		return records.filter(
+			(record): record is QueueEnqueuedRecord =>
+				record.type === "queue_enqueued" && !cancelled.has(record.target.id) && !consumed.has(record.target.id),
+		);
+	}
+
+	async consumeInbox(lane: string, operationId: string, entryIds: readonly string[]): Promise<boolean> {
+		return this.mutate(async () => {
+			const open = await this.storage.findOpenOperations(lane, { limit: 2 });
+			if (open.length !== 1 || open[0]?.id !== operationId) return false;
+			const records = await this.storage.findRecords({ lane, order: "oldestFirst" });
+			const cancelled = new Set(
+				records.filter((record) => record.type === "queue_cancelled").map((record) => record.entryId),
+			);
+			const consumed = new Set(
+				records.filter((record) => record.type === "queue_consumed").map((record) => record.entryId),
+			);
+			const pending = new Map(
+				records
+					.filter(
+						(record): record is QueueEnqueuedRecord =>
+							record.type === "queue_enqueued" &&
+							!cancelled.has(record.target.id) &&
+							!consumed.has(record.target.id),
+					)
+					.map((record) => [record.target.id, record]),
+			);
+			if (entryIds.some((entryId) => !pending.has(entryId))) return false;
+			for (const entryId of entryIds) {
+				const item = pending.get(entryId)!;
+				await this.storage.appendRecord<QueueConsumedRecord>({
+					type: "queue_consumed",
+					id: this.idGenerator.next(),
+					lane,
+					operationId,
+					queue: item.queue,
+					entryId,
+				});
+			}
+			return true;
+		});
+	}
+
+	async requestAbort(
+		lane: string,
+		operationId: string,
+	): Promise<"requested" | "already_requested" | "already_terminal" | "unknown"> {
+		return this.mutate(async () => {
+			const started = (
+				await this.storage.findRecords({ lane, type: "operation_started", order: "newestFirst" })
+			).find((record) => record.id === operationId);
+			if (!started) return "unknown";
+			const finished = (
+				await this.storage.findRecords({ lane, type: "operation_finished", order: "newestFirst" })
+			).find((record) => record.runId === operationId);
+			if (finished) return "already_terminal";
+			const abort = (await this.storage.findRecords({ lane, type: "abort_requested", order: "newestFirst" })).find(
+				(record) => record.runId === operationId,
+			);
+			if (abort) return "already_requested";
+			await this.storage.appendRecord({
+				type: "abort_requested",
+				id: this.idGenerator.next(),
+				lane,
+				runId: operationId,
+			});
+			return "requested";
+		});
 	}
 
 	async getLog(options?: LogOptions): Promise<LogItem[]> {

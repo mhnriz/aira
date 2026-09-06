@@ -23,6 +23,7 @@ const RECORD_TYPES = new Set<LaneRecord["type"]>([
 	"tool_execution_state",
 	"queue_enqueued",
 	"queue_cancelled",
+	"queue_consumed",
 	"write_deferred",
 	"usage",
 ]);
@@ -172,6 +173,14 @@ function parseRecordMutation(
 		}
 	}
 	if (type === "operation_finished") requireString(value.runId, "runId");
+	if (type === "queue_consumed") {
+		requireString(value.operationId, "operationId");
+		requireString(value.entryId, "entryId");
+		const queue = requireString(value.queue, "queue");
+		if (queue !== "steer" && queue !== "followUp" && queue !== "nextRun") {
+			throw new JsonlDecodeError("schema", `has invalid queue ${queue}`);
+		}
+	}
 	const { kind: _kind, ...recordFields } = value;
 	return {
 		kind: "record",

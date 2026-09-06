@@ -13,6 +13,7 @@ import type {
 import type { AgentMessage, AgentTool, QueueMode, ThinkingLevel } from "../types.ts";
 import type { CompactionSettings } from "./compaction/compaction.ts";
 import { DurableGeneration } from "./generation.ts";
+import { DurableOperationBoundary } from "./operation-boundary.ts";
 import { type Result as ResultValue, TaggedError } from "./result.ts";
 import type {
 	Branch,
@@ -277,6 +278,7 @@ export interface AgentLane {
 	readonly branch: Branch;
 	readonly generation: DurableGeneration;
 	readonly toolExecution: DurableToolExecution;
+	readonly operations: DurableOperationBoundary;
 	getLeafId(): Promise<string | null>;
 	prompt(text: string, images?: ImageContent[]): Promise<RunResult>;
 	prompt(message: AgentMessage | AgentMessage[]): Promise<RunResult>;
@@ -315,6 +317,7 @@ export class AgentHarness {
 	readonly branch: Branch;
 	readonly generation: DurableGeneration;
 	readonly toolExecution: DurableToolExecution;
+	readonly operations: DurableOperationBoundary;
 	readonly hooks: Hooks;
 	readonly events: Events;
 	private readonly durableSession: Session;
@@ -338,6 +341,7 @@ export class AgentHarness {
 		this.branch = new SessionBranch(options.session, "main");
 		this.generation = new DurableGeneration(options.session, "main");
 		this.toolExecution = new DurableToolExecution(options.session, "main");
+		this.operations = new DurableOperationBoundary(options.session, "main");
 		this.hooks = new UnavailableRegistry("hooks.on", () => this.closed);
 		this.events = new UnavailableRegistry("events.on", () => this.closed);
 		this.model = options.model;
@@ -359,7 +363,7 @@ export class AgentHarness {
 		this.followUpMode = options.followUpMode ?? "one-at-a-time";
 		this.laneHandles.set(
 			"main",
-			new AgentLaneHandle(this, this.branch, this.session, this.generation, this.toolExecution),
+			new AgentLaneHandle(this, this.branch, this.session, this.generation, this.toolExecution, this.operations),
 		);
 	}
 
@@ -471,6 +475,7 @@ export class AgentHarness {
 			this.durableSession.view(name),
 			new DurableGeneration(this.durableSession, name),
 			new DurableToolExecution(this.durableSession, name),
+			new DurableOperationBoundary(this.durableSession, name),
 		);
 		this.laneHandles.set(name, handle);
 		return handle;
@@ -513,6 +518,7 @@ export class AgentHarness {
 				this.durableSession.view(name),
 				new DurableGeneration(this.durableSession, name),
 				new DurableToolExecution(this.durableSession, name),
+				new DurableOperationBoundary(this.durableSession, name),
 			);
 		this.laneHandles.set(name, handle);
 		return handle;
@@ -580,6 +586,7 @@ class AgentLaneHandle implements AgentLane {
 	readonly branch: Branch;
 	readonly generation: DurableGeneration;
 	readonly toolExecution: DurableToolExecution;
+	readonly operations: DurableOperationBoundary;
 	readonly session: SessionTree;
 	private readonly harness: AgentHarness;
 
@@ -589,12 +596,14 @@ class AgentLaneHandle implements AgentLane {
 		session: SessionTree,
 		generation: DurableGeneration,
 		tools: DurableToolExecution,
+		operations: DurableOperationBoundary,
 	) {
 		this.harness = harness;
 		this.name = branch.name;
 		this.branch = branch;
 		this.generation = generation;
 		this.toolExecution = tools;
+		this.operations = operations;
 		this.session = session;
 	}
 

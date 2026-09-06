@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createNodeSqliteFactory, SqliteSessionRepository } from "../../../session-backends/sqlite-node/src/index.ts";
 import { NodeExecutionEnv } from "../../src/harness/env/nodejs.ts";
 import { DurableGeneration, generationConfiguration } from "../../src/harness/generation.ts";
+import { DurableOperationBoundary } from "../../src/harness/operation-boundary.ts";
 
 const roots: string[] = [];
 
@@ -34,6 +35,44 @@ afterEach(() => {
 });
 
 describe("SQLite durable generation", () => {
+	it("persists and consumes the lane inbox without replay after reopen", async () => {
+		const root = mkdtempSync(join(tmpdir(), "aira-operation-sqlite-"));
+		roots.push(root);
+		let repository = new SqliteSessionRepository({
+			env: new NodeExecutionEnv({ cwd: root }),
+			sqlite: createNodeSqliteFactory(),
+			databasePath: join(root, "sessions.sqlite"),
+		});
+		try {
+			let session = await repository.create({ id: "sqlite-operation", cwd: root });
+			const boundary = new DurableOperationBoundary(session, "main");
+			await boundary.enqueue("nextRun", {
+				type: "message",
+				id: "sqlite-queued",
+				message: { role: "user", content: [{ type: "text", text: "queued" }], timestamp: 1 },
+			});
+			await session.appendRecord({
+				type: "operation_started",
+				id: "sqlite-operation-id",
+				lane: "main",
+				sourceLeafId: null,
+				intent: { kind: "run", originalPrompt: [], initialMessages: [] },
+			});
+			expect(await boundary.consumeInbox("sqlite-operation-id", ["sqlite-queued"])).toBe(true);
+			const metadata = await session.getMetadata();
+			await repository.close();
+			repository = new SqliteSessionRepository({
+				env: new NodeExecutionEnv({ cwd: root }),
+				sqlite: createNodeSqliteFactory(),
+				databasePath: join(root, "sessions.sqlite"),
+			});
+			session = await repository.open(metadata);
+			expect(await new DurableOperationBoundary(session, "main").listInbox()).toEqual([]);
+		} finally {
+			await repository.close();
+		}
+	});
+
 	it("reopens pending generation state and settles it once", async () => {
 		const root = mkdtempSync(join(tmpdir(), "aira-generation-sqlite-"));
 		roots.push(root);

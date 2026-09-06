@@ -27,6 +27,7 @@ export type RecordLogCorruptionReason =
 	| "invalid_compaction_reason"
 	| "queue_after_abort"
 	| "invalid_queue_cancellation"
+	| "invalid_queue_consumption"
 	| "inconsistent_step"
 	| "tool_call_mismatch"
 	| "duplicate_tool_invocation"
@@ -320,6 +321,7 @@ export function validateRecordLog(input: RecordLogSlice): void {
 	const finishedAt = new Map<string, number>();
 	const abortedAt = new Map<string, number>();
 	const queueEnqueues = new Map<string, Extract<LaneRecord, { type: "queue_enqueued" }>>();
+	const queueConsumptions = new Set<string>();
 	const latestAttempt = new Map<string, AttemptSeries>();
 	const toolInvocations = new Set<string>();
 	const records = [...input.records].sort((left, right) => left.seq - right.seq);
@@ -378,6 +380,21 @@ export function validateRecordLog(input: RecordLogSlice): void {
 				) {
 					corrupt("invalid_queue_cancellation", `Queue cancellation ${record.id} has no pending matching enqueue`);
 				}
+				break;
+			}
+			case "queue_consumed": {
+				const enqueue = queueEnqueues.get(record.entryId);
+				if (
+					!starts.has(record.operationId) ||
+					(finishedAt.get(record.operationId) !== undefined && record.seq > finishedAt.get(record.operationId)!) ||
+					!enqueue ||
+					enqueue.seq >= record.seq ||
+					enqueue.queue !== record.queue ||
+					queueConsumptions.has(record.entryId)
+				) {
+					corrupt("invalid_queue_consumption", `Queue consumption ${record.id} has no pending matching enqueue`);
+				}
+				queueConsumptions.add(record.entryId);
 				break;
 			}
 			case "write_deferred":
@@ -513,11 +530,15 @@ export function reduceLaneState(input: LaneReductionInput): LaneReductionResult 
 	const cancelledQueueIds = new Set(
 		records.filter((record) => record.type === "queue_cancelled").map((record) => record.entryId),
 	);
+	const consumedQueueIds = new Set(
+		records.filter((record) => record.type === "queue_consumed").map((record) => record.entryId),
+	);
 	const pendingQueueRecords = records.filter(
 		(record): record is QueueEnqueuedRecord =>
 			record.type === "queue_enqueued" &&
 			!entriesById.has(record.target.id) &&
-			!cancelledQueueIds.has(record.target.id),
+			!cancelledQueueIds.has(record.target.id) &&
+			!consumedQueueIds.has(record.target.id),
 	);
 	const started = input.openOperations[0];
 	const capturedInitialMessageIds = new Set(
