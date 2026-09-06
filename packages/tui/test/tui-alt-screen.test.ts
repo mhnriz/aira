@@ -1,6 +1,6 @@
 import assert from "node:assert";
 import { describe, it } from "node:test";
-import { findAltScreenSearchMatches } from "../src/alt-screen-search.ts";
+import { AltScreenSearchIndex, findAltScreenSearchMatches } from "../src/alt-screen-search.ts";
 import { HStack } from "../src/components/h-stack.ts";
 import { Image } from "../src/components/image.ts";
 import { ScrollView } from "../src/components/scroll-view.ts";
@@ -175,6 +175,20 @@ describe("TuiAltScreen", () => {
 			terminal.getViewport().map((line) => line.trimEnd()),
 			["a4        b3", "a5        b4", "a6        b5", "a7        b6"],
 		);
+		tui.stop();
+	});
+
+	it("accelerates Alt-modified wheel scrolling without changing normal wheel speed", async () => {
+		const terminal = new VirtualTerminal(20, 4);
+		const tui = new TuiAltScreen(terminal);
+		tui.addChild(new Text(Array.from({ length: 12 }, (_, index) => `line ${index + 1}`).join("\n"), 0, 0));
+		tui.start();
+		await terminal.waitForRender();
+		assert.strictEqual(tui.viewportTop, 8);
+
+		terminal.sendInput("\x1b[<72;1;1M");
+		await terminal.waitForRender();
+		assert.strictEqual(tui.viewportTop, 3);
 		tui.stop();
 	});
 
@@ -413,6 +427,36 @@ describe("TuiAltScreen", () => {
 				],
 			},
 		]);
+	});
+
+	it("caches the transcript search corpus until lines or query change", () => {
+		const index = new AltScreenSearchIndex();
+		const initial = index.search(["alpha needle", "omega"], "needle");
+		assert.strictEqual(initial.changed, true);
+		const cached = index.search(["alpha needle", "omega"], "needle");
+		assert.strictEqual(cached.changed, false);
+		assert.strictEqual(cached.matches, initial.matches);
+		const changed = index.search(["alpha needle", "omega"], "omega");
+		assert.strictEqual(changed.changed, true);
+		assert.deepStrictEqual(changed.matches[0]?.segments, [{ row: 1, startCol: 0, endCol: 5 }]);
+	});
+
+	it("shows and activates the fullscreen jump-to-latest indicator", async () => {
+		const terminal = new VirtualTerminal(30, 4);
+		const tui = new TuiAltScreen(terminal, undefined, undefined, {
+			scrollToEndIndicator: () => " latest ",
+		});
+		tui.addChild(new Text(Array.from({ length: 12 }, (_, index) => `line ${index + 1}`).join("\n"), 0, 0));
+		tui.start();
+		await terminal.waitForRender();
+		tui.scrollBy(-1);
+		await terminal.waitForRender();
+		assert.ok(terminal.getViewport().some((line) => line.includes("latest")));
+
+		terminal.sendInput("\x1b[<0;13;4M");
+		await terminal.waitForRender();
+		assert.strictEqual(tui.isFollowingOutput, true);
+		tui.stop();
 	});
 
 	it("uses configured styles for current and non-current search matches", async () => {
