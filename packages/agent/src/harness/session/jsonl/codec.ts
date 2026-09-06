@@ -20,6 +20,7 @@ const RECORD_TYPES = new Set<LaneRecord["type"]>([
 	"operation_finished",
 	"step_attempt",
 	"tool_started",
+	"tool_execution_state",
 	"queue_enqueued",
 	"queue_cancelled",
 	"write_deferred",

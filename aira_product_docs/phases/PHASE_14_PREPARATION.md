@@ -189,6 +189,37 @@ from the preparation baseline and should be refreshed before implementation.
   concurrent-resume crash-boundary behavior is covered by unit tests.
 - Local implementation commit: this Stage 3 commit. No push was performed.
 
+#### Stage 4 disposition — implemented
+
+- `eb1185d93eec09ceb9369373ac02d31e9ca41785` — **IMPLEMENTED**. Mario
+  Zechner, authored and committed 2026-08-25 20:13:16 +0200, exact subject
+  `feat(agent): add durable tool execution`. The upstream change was inspected
+  in full. Related settled-tool and lane-snapshot handoffs `6e8b9c8` and
+  `e26afb6` were reviewed as design evidence but not copied; the later drive
+  graph commits remain deferred because Aira has no compatible runtime owner.
+- Aira implementation: lane-owned `DurableToolExecution` persists validated
+  tool intent, invocation identity, replay policy, bounded checkpoints, staged
+  outcomes, and terminal placement state. Tool preparation and argument
+  validation are deterministic. The external tool effect runs only after the
+  `effect_pending` mutation commits and outside the MutationLine. Unknown or
+  missing tools become explicit durable failures. `safe` replay is opt-in;
+  unknown or `never` replay policies recover an uncertain effect as
+  `interrupted`, making the crash ambiguity visible instead of silently
+  duplicating an external effect.
+- Parallel tool outcomes are staged independently and materialized in source
+  order. A settled tool is not replayed while a sibling is pending, and
+  cancellation preserves a durable terminal outcome. Existing tool signatures,
+  permission/workspace/PLAN ownership, coding-agent UX, and Stage 3 generation
+  state remain unchanged. Existing Memory, JSONL, and SQLite record formats
+  remain extensible without migration.
+- Tests: focused durable-tool coverage verifies intent/effect ordering,
+  mutation-line exclusion, safe and unsafe recovery, checkpoints, parallel
+  placement, missing tools, cancellation, and reopen behavior. Existing
+  session and generation suites remain the backend compatibility boundary.
+- Validation and dogfood are recorded in the Stage 4 execution report. Stage 5,
+  verifier redesign, fork changes, TUI/catalog/Chord/Delta work, packaging,
+  and broad drive integration remain deferred. No push was performed.
+
 ### Stage 2 — Session and Branch separation
 
 - Define explicit global `Session` and path-only `Branch` interfaces.

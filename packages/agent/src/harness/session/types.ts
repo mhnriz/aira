@@ -189,6 +189,36 @@ export interface ToolStartedRecord extends RecordBase {
 	replay: "never" | "safe";
 }
 
+export type ToolEffectReplay = "never" | "safe";
+
+export type ToolExecutionStatus =
+	| "planned"
+	| "effect_pending"
+	| "checkpointed"
+	| "outcome_ready"
+	| "completed"
+	| "failed"
+	| "cancelled"
+	| "interrupted";
+
+/** Durable tool invocation state. External effects are never represented as exactly-once. */
+export interface ToolExecutionStateRecord extends RecordBase {
+	type: "tool_execution_state";
+	runId: string;
+	assistantEntryId: string;
+	toolIndex: number;
+	toolCallId: string;
+	toolName: string;
+	invocationId: string;
+	resultEntryId: string;
+	args: { [key: string]: JsonValue };
+	replay: ToolEffectReplay;
+	status: ToolExecutionStatus;
+	checkpoint?: JsonValue;
+	outcome?: JsonValue;
+	errorMessage?: string;
+}
+
 export type QueueEnqueuedRecord = RecordBase &
 	(
 		| {
@@ -237,6 +267,7 @@ export type LaneRecord =
 	| OperationFinishedRecord
 	| StepAttemptRecord
 	| ToolStartedRecord
+	| ToolExecutionStateRecord
 	| QueueEnqueuedRecord
 	| QueueCancelledRecord
 	| WriteDeferredRecord

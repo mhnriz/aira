@@ -106,6 +106,7 @@ export {
 	startAiSpan,
 	startHarnessSpan,
 } from "./harness/telemetry.ts";
+export * from "./harness/tool-execution.ts";
 export * from "./harness/tools/index.ts";
 export {
 	type AgentHarnessResources,

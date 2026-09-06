@@ -9,6 +9,7 @@ import type {
 	GenerationConfiguration,
 	GenerationStateRecord,
 	IdGenerator,
+	JsonValue,
 	LanePointer,
 	LaneRecord,
 	LogItem,
@@ -23,6 +24,9 @@ import type {
 	SessionStats,
 	SessionStorage,
 	SessionTree,
+	ToolEffectReplay,
+	ToolExecutionStateRecord,
+	ToolExecutionStatus,
 } from "./types.ts";
 import { SessionError } from "./types.ts";
 
@@ -311,6 +315,152 @@ export class Session<TMetadata extends SessionMetadata = SessionMetadata> implem
 			await this.storage.appendRecord(options.usage);
 			await this.storage.appendRecord(options.nextState);
 			if (options.finish !== undefined) await this.storage.appendRecord(options.finish);
+			return true;
+		});
+	}
+
+	async startToolExecution(options: {
+		lane: string;
+		runId: string;
+		assistantEntryId: string;
+		toolIndex: number;
+		toolCallId: string;
+		toolName: string;
+		args: { [key: string]: JsonValue };
+		replay: ToolEffectReplay;
+	}): Promise<ToolExecutionStateRecord> {
+		return this.mutate(async () => {
+			const invocationId = this.idGenerator.next();
+			const resultEntryId = this.idGenerator.next();
+			await this.storage.appendRecord({
+				type: "tool_started",
+				id: this.idGenerator.next(),
+				lane: options.lane,
+				runId: options.runId,
+				assistantEntryId: options.assistantEntryId,
+				toolIndex: options.toolIndex,
+				toolCallId: options.toolCallId,
+				toolName: options.toolName,
+				effectiveArgs: structuredClone(options.args),
+				resultEntryId,
+				replay: options.replay,
+			});
+			return this.storage.appendRecord<ToolExecutionStateRecord>({
+				type: "tool_execution_state",
+				id: this.idGenerator.next(),
+				lane: options.lane,
+				runId: options.runId,
+				assistantEntryId: options.assistantEntryId,
+				toolIndex: options.toolIndex,
+				toolCallId: options.toolCallId,
+				toolName: options.toolName,
+				invocationId,
+				resultEntryId,
+				args: structuredClone(options.args),
+				replay: options.replay,
+				status: "planned",
+			});
+		});
+	}
+
+	async transitionToolExecution(
+		lane: string,
+		expected: Pick<ToolExecutionStateRecord, "id" | "status">,
+		next: NewRecord<ToolExecutionStateRecord>,
+	): Promise<ToolExecutionStateRecord | undefined> {
+		return this.mutate(async () => {
+			const records = (await this.storage.findRecords({
+				lane,
+				type: "tool_execution_state",
+				order: "oldestFirst",
+			})) as ToolExecutionStateRecord[];
+			const latestByInvocation = new Map<string, ToolExecutionStateRecord>();
+			for (const record of records) latestByInvocation.set(record.invocationId, record);
+			const current = latestByInvocation.get(
+				records.find((record) => record.id === expected.id)?.invocationId ?? "",
+			);
+			if (current?.id !== expected.id || current.status !== expected.status) return undefined;
+			return this.storage.appendRecord<ToolExecutionStateRecord>(next);
+		});
+	}
+
+	async checkpointToolExecution(
+		lane: string,
+		expected: Pick<ToolExecutionStateRecord, "id" | "status">,
+		checkpoint: JsonValue,
+	): Promise<ToolExecutionStateRecord | undefined> {
+		return this.mutate(async () => {
+			const records = (await this.storage.findRecords({
+				lane,
+				type: "tool_execution_state",
+				order: "oldestFirst",
+			})) as ToolExecutionStateRecord[];
+			const expectedRecord = records.find((record) => record.id === expected.id);
+			const current = expectedRecord
+				? records.filter((record) => record.invocationId === expectedRecord.invocationId).at(-1)
+				: undefined;
+			if (current?.id !== expected.id || current.status !== expected.status) return undefined;
+			return this.storage.appendRecord<ToolExecutionStateRecord>({
+				...current,
+				id: this.idGenerator.next(),
+				status: "checkpointed",
+				checkpoint: structuredClone(checkpoint),
+			});
+		});
+	}
+
+	async commitToolOutcome(options: {
+		lane: string;
+		expected: Pick<ToolExecutionStateRecord, "id" | "status">;
+		state: ToolExecutionStateRecord;
+		outcome: JsonValue;
+		status?: Extract<ToolExecutionStatus, "outcome_ready" | "failed" | "cancelled" | "interrupted">;
+	}): Promise<ToolExecutionStateRecord | undefined> {
+		return this.transitionToolExecution(options.lane, options.expected, {
+			...options.state,
+			id: this.idGenerator.next(),
+			status: options.status ?? "outcome_ready",
+			outcome: structuredClone(options.outcome),
+		});
+	}
+
+	async placeToolOutcome(options: {
+		lane: string;
+		state: ToolExecutionStateRecord;
+		result: ProvisionedEntry<Extract<Entry, { type: "message" }>>;
+	}): Promise<boolean> {
+		return this.mutate(async () => {
+			const current = (
+				await this.storage.findRecords({ lane: options.lane, type: "tool_execution_state", order: "oldestFirst" })
+			).filter(
+				(record) =>
+					record.assistantEntryId === options.state.assistantEntryId &&
+					record.toolIndex <= options.state.toolIndex,
+			) as ToolExecutionStateRecord[];
+			const state = current.find((record) => record.id === options.state.id);
+			if (
+				!state ||
+				(state.status !== "outcome_ready" &&
+					state.status !== "failed" &&
+					state.status !== "cancelled" &&
+					state.status !== "interrupted")
+			)
+				return false;
+			const latestByIndex = new Map<number, ToolExecutionStateRecord>();
+			for (const record of current) latestByIndex.set(record.toolIndex, record);
+			if (
+				[...latestByIndex.values()].some(
+					(record) => record.toolIndex < state.toolIndex && record.status !== "completed",
+				)
+			) {
+				return false;
+			}
+			await this.storage.appendEntry(options.result, options.lane);
+			await this.storage.appendRecord<ToolExecutionStateRecord>({
+				...state,
+				id: this.idGenerator.next(),
+				status: "completed",
+			});
 			return true;
 		});
 	}

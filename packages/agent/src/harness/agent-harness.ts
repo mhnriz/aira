@@ -26,6 +26,7 @@ import type {
 } from "./session/index.ts";
 import { SessionBranch } from "./session/index.ts";
 import type { TelemetryContext } from "./telemetry.ts";
+import { DurableToolExecution } from "./tool-execution.ts";
 import type { AgentHarnessResources, PromptTemplate, Skill } from "./types.ts";
 
 export class LaneBusy extends TaggedError("LaneBusy")<{
@@ -275,6 +276,7 @@ export interface AgentLane {
 	readonly name: string;
 	readonly branch: Branch;
 	readonly generation: DurableGeneration;
+	readonly toolExecution: DurableToolExecution;
 	getLeafId(): Promise<string | null>;
 	prompt(text: string, images?: ImageContent[]): Promise<RunResult>;
 	prompt(message: AgentMessage | AgentMessage[]): Promise<RunResult>;
@@ -312,6 +314,7 @@ export class AgentHarness {
 	readonly session: SessionTree;
 	readonly branch: Branch;
 	readonly generation: DurableGeneration;
+	readonly toolExecution: DurableToolExecution;
 	readonly hooks: Hooks;
 	readonly events: Events;
 	private readonly durableSession: Session;
@@ -334,6 +337,7 @@ export class AgentHarness {
 		this.session = options.session;
 		this.branch = new SessionBranch(options.session, "main");
 		this.generation = new DurableGeneration(options.session, "main");
+		this.toolExecution = new DurableToolExecution(options.session, "main");
 		this.hooks = new UnavailableRegistry("hooks.on", () => this.closed);
 		this.events = new UnavailableRegistry("events.on", () => this.closed);
 		this.model = options.model;
@@ -353,7 +357,10 @@ export class AgentHarness {
 		};
 		this.steeringMode = options.steeringMode ?? "one-at-a-time";
 		this.followUpMode = options.followUpMode ?? "one-at-a-time";
-		this.laneHandles.set("main", new AgentLaneHandle(this, this.branch, this.session, this.generation));
+		this.laneHandles.set(
+			"main",
+			new AgentLaneHandle(this, this.branch, this.session, this.generation, this.toolExecution),
+		);
 	}
 
 	static async create(
@@ -463,6 +470,7 @@ export class AgentHarness {
 			branch,
 			this.durableSession.view(name),
 			new DurableGeneration(this.durableSession, name),
+			new DurableToolExecution(this.durableSession, name),
 		);
 		this.laneHandles.set(name, handle);
 		return handle;
@@ -504,6 +512,7 @@ export class AgentHarness {
 				branch,
 				this.durableSession.view(name),
 				new DurableGeneration(this.durableSession, name),
+				new DurableToolExecution(this.durableSession, name),
 			);
 		this.laneHandles.set(name, handle);
 		return handle;
@@ -570,14 +579,22 @@ class AgentLaneHandle implements AgentLane {
 	readonly name: string;
 	readonly branch: Branch;
 	readonly generation: DurableGeneration;
+	readonly toolExecution: DurableToolExecution;
 	readonly session: SessionTree;
 	private readonly harness: AgentHarness;
 
-	constructor(harness: AgentHarness, branch: Branch, session: SessionTree, generation: DurableGeneration) {
+	constructor(
+		harness: AgentHarness,
+		branch: Branch,
+		session: SessionTree,
+		generation: DurableGeneration,
+		tools: DurableToolExecution,
+	) {
 		this.harness = harness;
 		this.name = branch.name;
 		this.branch = branch;
 		this.generation = generation;
+		this.toolExecution = tools;
 		this.session = session;
 	}
 
