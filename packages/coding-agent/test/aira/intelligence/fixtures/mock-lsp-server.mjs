@@ -66,11 +66,16 @@ function handleRequest(id, method, _params) {
 		return;
 	}
 	if (method === "textDocument/definition") {
-		sendResult(id, CANNED_DEFINITION);
+		const respond = () => sendResult(id, CANNED_DEFINITION);
+		if (delayNavigation) setTimeout(respond, 500);
+		else respond();
 		return;
 	}
 	if (method === "textDocument/references") {
-		sendResult(id, [CANNED_DEFINITION]);
+		const references = manyReferences ? [CANNED_DEFINITION, CANNED_DEFINITION, CANNED_DEFINITION] : [CANNED_DEFINITION];
+		const respond = () => sendResult(id, references);
+		if (delayNavigation) setTimeout(respond, 500);
+		else respond();
 		return;
 	}
 	if (method === "textDocument/documentSymbol") {
@@ -104,6 +109,8 @@ function handleNotification(method, params) {
 
 const crashOnInitialize = process.argv.includes("--crash-on-initialize");
 const crashAfterOpen = process.argv.includes("--crash-after-open");
+const manyReferences = process.argv.includes("--many-references");
+const delayNavigation = process.argv.includes("--delay-navigation");
 // Never respond to initialize (the client's handshake request times out).
 const ignoreInitialize = process.argv.includes("--ignore-initialize");
 // Write this process's pid to a file so tests can assert the child was killed.

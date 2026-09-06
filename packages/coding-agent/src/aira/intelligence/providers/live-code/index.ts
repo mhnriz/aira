@@ -19,7 +19,7 @@
  * warm-up.
  */
 import { readFile } from "node:fs/promises";
-import { extname } from "node:path";
+import { extname, relative } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { AiraFindingsStore } from "../../findings.ts";
 import {
@@ -60,6 +60,54 @@ export interface LiveCodeProviderStatusInfo {
 	evictionCount: number;
 }
 
+export type LiveCodeSemanticOperation = "definition" | "references" | "symbols";
+
+export interface LiveCodeSemanticQuery {
+	path: string;
+	operation: LiveCodeSemanticOperation;
+	/** LSP coordinates are zero-based. Either coordinates or symbol may identify the target. */
+	line?: number;
+	character?: number;
+	symbol?: string;
+	maxResults?: number;
+	signal?: AbortSignal;
+}
+
+export interface LiveCodeSemanticLocation {
+	uri: string;
+	path?: string;
+	line: number;
+	character: number;
+}
+
+export type LiveCodeSemanticResult =
+	| {
+			status: "ready";
+			operation: LiveCodeSemanticOperation;
+			path: string;
+			locations: LiveCodeSemanticLocation[];
+			symbol?: string;
+			truncated: boolean;
+	  }
+	| {
+			status:
+				| "no-results"
+				| "symbol-not-found"
+				| "unsupported-language"
+				| "server-unavailable"
+				| "timeout"
+				| "cancelled"
+				| "degraded";
+			operation: LiveCodeSemanticOperation;
+			path: string;
+			symbol?: string;
+			locations?: LiveCodeSemanticLocation[];
+			reason?: string;
+			truncated: false;
+	  };
+
+type LiveCodeSemanticFailureStatus = Exclude<LiveCodeSemanticResult["status"], "ready">;
+
 export interface LiveCodeProviderOptions {
 	/** How many documents to keep open per server (LRU; extras close first). */
 	maxOpenDocuments?: number;
@@ -85,6 +133,8 @@ const DEFAULT_IDLE_TIMEOUT_MS = 90_000;
 const IDLE_CHECK_SLACK_MS = 2;
 const DEFAULT_CRASH_COOLDOWN_MS = 30_000;
 const DEFAULT_DIAGNOSTIC_WAIT_MS = 1200;
+const DEFAULT_SEMANTIC_RESULT_LIMIT = 50;
+const MAX_SEMANTIC_RESULT_LIMIT = 100;
 
 export class LiveCodeProvider {
 	private readonly clients = new Map<string, LspClient>();
@@ -99,6 +149,7 @@ export class LiveCodeProvider {
 	private crashCount = 0;
 	private evictionCount = 0;
 	private disposed = false;
+	private generation = 0;
 
 	private readonly launchOverrides: Readonly<Record<string, LaunchSpec>>;
 	private readonly requestTimeoutMs: number;
@@ -177,7 +228,8 @@ export class LiveCodeProvider {
 	 * server is installed). Returns the client or undefined (unsupported
 	 * language / server not installed / crashed within cooldown).
 	 */
-	private async ensureClient(path: string): Promise<LspClient | undefined> {
+	private async ensureClient(path: string, signal?: AbortSignal): Promise<LspClient | undefined> {
+		signal?.throwIfAborted();
 		if (this.disposed) {
 			return undefined;
 		}
@@ -229,8 +281,13 @@ export class LiveCodeProvider {
 		this.spawnCount += 1;
 		this.setServerStatus(key, language, "starting", true);
 		try {
-			await client.start();
-		} catch {
+			await client.start(signal);
+		} catch (error) {
+			if (signal?.aborted) {
+				client.killChild();
+				this.clients.delete(key);
+				throw error;
+			}
 			// The handshake failed (e.g. initialize timed out). The client is
 			// abandoned, so the spawned child must be killed — an untracked
 			// server would otherwise hold the session's stdio pipes and orphan
@@ -239,6 +296,7 @@ export class LiveCodeProvider {
 			this.clients.delete(key);
 			return undefined;
 		}
+		signal?.throwIfAborted();
 		this.touch(key);
 		return client;
 	}
@@ -254,8 +312,11 @@ export class LiveCodeProvider {
 	}
 
 	/** Sync a file into the server (didOpen or didChange) and return its client. */
-	private async syncFile(path: string): Promise<{ client: LspClient | undefined; language: string | undefined }> {
-		const client = await this.ensureClient(path);
+	private async syncFile(
+		path: string,
+		signal?: AbortSignal,
+	): Promise<{ client: LspClient | undefined; language: string | undefined }> {
+		const client = await this.ensureClient(path, signal);
 		const language = this.languageForFile(path);
 		if (!client || !language) {
 			return { client: undefined, language };
@@ -268,8 +329,10 @@ export class LiveCodeProvider {
 			return { client: undefined, language };
 		}
 		if (this.openDocuments.has(path)) {
+			signal?.throwIfAborted();
 			await client.didChange(path, text);
 		} else {
+			signal?.throwIfAborted();
 			await client.didOpen(path, language, text);
 			this.openDocuments.set(path, language);
 			this.openOrder.push(path);
@@ -309,6 +372,94 @@ export class LiveCodeProvider {
 			return;
 		}
 		await this.waitForDiagnostics(path, waitMs ?? this.diagnosticWaitMs);
+	}
+
+	/**
+	 * Explicit semantic navigation. Unlike navigate(), this path is allowed to
+	 * cold-start the matching server and returns a truthful bounded result rather
+	 * than collapsing every failure into undefined.
+	 */
+	async semanticQuery(query: LiveCodeSemanticQuery): Promise<LiveCodeSemanticResult> {
+		const { path, operation, symbol, signal } = query;
+		const generation = this.generation;
+		const maxResults = Math.min(
+			MAX_SEMANTIC_RESULT_LIMIT,
+			Math.max(1, Math.floor(query.maxResults ?? DEFAULT_SEMANTIC_RESULT_LIMIT)),
+		);
+		const unsupported = (status: LiveCodeSemanticFailureStatus, reason?: string): LiveCodeSemanticResult => ({
+			status,
+			operation,
+			path,
+			...(symbol ? { symbol } : {}),
+			...(reason ? { reason } : {}),
+			truncated: false,
+		});
+
+		if (this.disposed) return unsupported("cancelled", "provider disposed");
+		if (!this.definitionForFile(path)) return unsupported("unsupported-language", "no registered server for file");
+		if (operation !== "symbols" && query.line === undefined && !symbol) {
+			return unsupported("symbol-not-found", "provide a symbol or zero-based line");
+		}
+
+		try {
+			signal?.throwIfAborted();
+			const synced = await this.syncFile(path, signal);
+			if (generation !== this.generation || this.disposed) {
+				return unsupported("cancelled", "provider disposed during query");
+			}
+			if (!synced.client) return unsupported("server-unavailable", "language server could not be started");
+			const client = synced.client;
+			if (operation === "symbols") {
+				const symbols = await client.documentSymbols(path, signal);
+				const locations = symbols.slice(0, maxResults).map((entry) => ({
+					uri: pathToFileURL(path).href,
+					path,
+					line: entry.selectionRange.start.line + 1,
+					character: entry.selectionRange.start.character + 1,
+				}));
+				if (generation !== this.generation || this.disposed)
+					return unsupported("cancelled", "provider disposed during query");
+				if (locations.length === 0) {
+					return { status: "no-results", operation, path, locations: [], truncated: false };
+				}
+				return { status: "ready", operation, path, locations, truncated: symbols.length > maxResults };
+			}
+
+			const position = await this.semanticPosition(path, client, symbol, query.line, query.character, signal);
+			if (!position) return unsupported("symbol-not-found", "symbol was not found in the synchronized document");
+			const locations =
+				operation === "definition"
+					? await client.definitions(path, position.line, position.character, signal)
+					: await client.references(path, position.line, position.character, false, signal);
+			const bounded = locations.slice(0, maxResults).map((location) => ({
+				uri: location.uri,
+				...(location.uri.startsWith("file:") ? { path: this.displayPath(location.uri) } : {}),
+				line: location.range.start.line + 1,
+				character: location.range.start.character + 1,
+			}));
+			if (generation !== this.generation || this.disposed)
+				return unsupported("cancelled", "provider disposed during query");
+			return bounded.length > 0
+				? {
+						status: "ready",
+						operation,
+						path,
+						...(symbol ? { symbol } : {}),
+						locations: bounded,
+						truncated: locations.length > maxResults,
+					}
+				: { status: "no-results", operation, path, ...(symbol ? { symbol } : {}), locations: [], truncated: false };
+		} catch (error) {
+			if (signal?.aborted || generation !== this.generation || this.disposed) {
+				return unsupported(
+					"cancelled",
+					signal?.aborted ? "semantic query aborted" : "provider disposed during query",
+				);
+			}
+			const message = error instanceof Error ? error.message : String(error);
+			if (message.includes("timed out")) return unsupported("timeout", message);
+			return unsupported("degraded", message);
+		}
 	}
 
 	/** Wait (bounded) for a publishDiagnostics for a path; resolves early when it lands. */
@@ -427,6 +578,49 @@ export class LiveCodeProvider {
 		return undefined;
 	}
 
+	private async semanticPosition(
+		path: string,
+		client: LspClient,
+		symbol: string | undefined,
+		line: number | undefined,
+		character: number | undefined,
+		signal?: AbortSignal,
+	): Promise<{ line: number; character: number } | undefined> {
+		if (line !== undefined) {
+			if (line < 0 || (character !== undefined && character < 0)) return undefined;
+			const content = await readFile(path, "utf8").catch(() => "");
+			const text = content.split("\n")[line] ?? "";
+			const column = character ?? (symbol ? text.indexOf(symbol) : text.search(/[A-Za-z_$]/));
+			if (column < 0) return undefined;
+			return { line, character: convertCharacterOffset(client.isPositionUtf8 ? "utf-8" : "utf-16", text, column) };
+		}
+		if (!symbol) return undefined;
+		const documentSymbols = await client.documentSymbols(path, signal);
+		const declared = documentSymbols.find((entry) => entry.name === symbol);
+		if (declared) return declared.selectionRange.start;
+		const content = await readFile(path, "utf8").catch(() => "");
+		for (const [index, text] of content.split("\n").entries()) {
+			const column = text.indexOf(symbol);
+			if (column >= 0) {
+				return {
+					line: index,
+					character: convertCharacterOffset(client.isPositionUtf8 ? "utf-8" : "utf-16", text, column),
+				};
+			}
+		}
+		return undefined;
+	}
+
+	private displayPath(uri: string): string {
+		try {
+			const absolute = new URL(uri).pathname;
+			const displayed = relative(this.projectRoot, absolute).replace(/\\/g, "/");
+			return displayed && !displayed.startsWith("..") ? displayed : absolute;
+		} catch {
+			return uri;
+		}
+	}
+
 	private ingestDiagnostics(uri: string, language: string, diagnostics: LspDiagnostic[]): void {
 		const path = uriToPath(uri);
 		if (!path) {
@@ -512,6 +706,7 @@ export class LiveCodeProvider {
 
 	/** Shut down every server (session end). */
 	async dispose(): Promise<void> {
+		this.generation += 1;
 		this.disposed = true;
 		for (const timer of this.idleTimers.values()) {
 			clearTimeout(timer);

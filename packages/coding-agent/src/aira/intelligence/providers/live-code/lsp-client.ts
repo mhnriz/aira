@@ -62,7 +62,12 @@ export class LspClient {
 	private buffer = Buffer.alloc(0);
 	private pending = new Map<
 		number,
-		{ resolve: (value: unknown) => void; reject: (reason: Error) => void; timer: NodeJS.Timeout }
+		{
+			resolve: (value: unknown) => void;
+			reject: (reason: Error) => void;
+			timer: NodeJS.Timeout;
+			removeAbort?: () => void;
+		}
 	>();
 	private nextId = 1;
 	private documentVersions = new Map<string, number>();
@@ -95,7 +100,8 @@ export class LspClient {
 	}
 
 	/** Spawn and handshake. Resolves when initialized (or rejects on failure). */
-	async start(): Promise<void> {
+	async start(signal?: AbortSignal): Promise<void> {
+		signal?.throwIfAborted();
 		if (this.status === "running" || this.status === "starting") {
 			return;
 		}
@@ -130,26 +136,30 @@ export class LspClient {
 			}
 		});
 
-		const initResult = (await this.request("initialize", {
-			processId: process.pid,
-			clientInfo: { name: "aira" },
-			rootUri: this.rootUri,
-			workspaceFolders: [{ uri: this.rootUri, name: this.projectRoot }],
-			capabilities: {
-				textDocument: {
-					definition: { dynamicRegistration: false },
-					references: { dynamicRegistration: false },
-					documentSymbol: { dynamicRegistration: false, hierarchicalDocumentSymbolSupport: true },
-					synchronization: { didSave: false },
+		const initResult = (await this.request(
+			"initialize",
+			{
+				processId: process.pid,
+				clientInfo: { name: "aira" },
+				rootUri: this.rootUri,
+				workspaceFolders: [{ uri: this.rootUri, name: this.projectRoot }],
+				capabilities: {
+					textDocument: {
+						definition: { dynamicRegistration: false },
+						references: { dynamicRegistration: false },
+						documentSymbol: { dynamicRegistration: false, hierarchicalDocumentSymbolSupport: true },
+						synchronization: { didSave: false },
+					},
+					// NOTE: do NOT advertise `workspace.workspaceFolders: true` here.
+					// Empirically, pyright (vscode-languageserver) suppresses
+					// textDocument/publishDiagnostics when the client declares the
+					// workspaceFolders capability (Phase 5 verification finding);
+					// the `workspaceFolders` array in the initialize params is
+					// sufficient and harmless.
 				},
-				// NOTE: do NOT advertise `workspace.workspaceFolders: true` here.
-				// Empirically, pyright (vscode-languageserver) suppresses
-				// textDocument/publishDiagnostics when the client declares the
-				// workspaceFolders capability (Phase 5 verification finding);
-				// the `workspaceFolders` array in the initialize params is
-				// sufficient and harmless.
 			},
-		})) as
+			signal,
+		)) as
 			| {
 					capabilities?: { positionEncoding?: string; textDocumentSync?: unknown };
 			  }
@@ -165,15 +175,31 @@ export class LspClient {
 	}
 
 	/** Send a request and await the response (bounded by a timeout). */
-	request(method: string, params: unknown): Promise<unknown> {
+	request(method: string, params: unknown, signal?: AbortSignal): Promise<unknown> {
+		signal?.throwIfAborted();
 		const id = this.nextId++;
 		const payload = JSON.stringify({ jsonrpc: "2.0", id, method, params });
 		return new Promise((resolve, reject) => {
+			const abort = () => {
+				const pending = this.pending.get(id);
+				if (!pending) return;
+				clearTimeout(pending.timer);
+				pending.removeAbort?.();
+				this.pending.delete(id);
+				reject(new Error(`LSP request cancelled: ${method}`));
+			};
 			const timer = setTimeout(() => {
 				this.pending.delete(id);
+				signal?.removeEventListener("abort", abort);
 				reject(new Error(`LSP request timed out: ${method}`));
 			}, this.requestTimeoutMs);
-			this.pending.set(id, { resolve, reject, timer });
+			this.pending.set(id, {
+				resolve,
+				reject,
+				timer,
+				removeAbort: signal ? () => signal.removeEventListener("abort", abort) : undefined,
+			});
+			signal?.addEventListener("abort", abort, { once: true });
 			this.write(payload);
 		});
 	}
@@ -209,29 +235,47 @@ export class LspClient {
 	}
 
 	/** Find definitions at a position. */
-	async definitions(path: string, line: number, character: number): Promise<LspLocation[]> {
-		const result = (await this.request("textDocument/definition", {
-			textDocument: { uri: this.fileUri(path) },
-			position: { line, character },
-		})) as LspLocation | LspLocation[] | undefined;
+	async definitions(path: string, line: number, character: number, signal?: AbortSignal): Promise<LspLocation[]> {
+		const result = (await this.request(
+			"textDocument/definition",
+			{
+				textDocument: { uri: this.fileUri(path) },
+				position: { line, character },
+			},
+			signal,
+		)) as LspLocation | LspLocation[] | undefined;
 		return normalizeLocations(result);
 	}
 
 	/** Find references at a position (optionally including the declaration). */
-	async references(path: string, line: number, character: number, includeDeclaration = false): Promise<LspLocation[]> {
-		const result = (await this.request("textDocument/references", {
-			textDocument: { uri: this.fileUri(path) },
-			position: { line, character },
-			context: { includeDeclaration },
-		})) as LspLocation[] | undefined;
+	async references(
+		path: string,
+		line: number,
+		character: number,
+		includeDeclaration = false,
+		signal?: AbortSignal,
+	): Promise<LspLocation[]> {
+		const result = (await this.request(
+			"textDocument/references",
+			{
+				textDocument: { uri: this.fileUri(path) },
+				position: { line, character },
+				context: { includeDeclaration },
+			},
+			signal,
+		)) as LspLocation[] | undefined;
 		return Array.isArray(result) ? result : [];
 	}
 
 	/** Document symbols (hierarchical when supported; flattened here). */
-	async documentSymbols(path: string): Promise<LspSymbol[]> {
-		const result = (await this.request("textDocument/documentSymbol", {
-			textDocument: { uri: this.fileUri(path) },
-		})) as LspSymbol[] | undefined;
+	async documentSymbols(path: string, signal?: AbortSignal): Promise<LspSymbol[]> {
+		const result = (await this.request(
+			"textDocument/documentSymbol",
+			{
+				textDocument: { uri: this.fileUri(path) },
+			},
+			signal,
+		)) as LspSymbol[] | undefined;
 		if (!Array.isArray(result)) {
 			return [];
 		}
@@ -244,6 +288,7 @@ export class LspClient {
 			return;
 		}
 		const child = this.child;
+		this.rejectPending(new Error("LSP client is shutting down."));
 		this.status = "closed";
 		this.callbacks.onStatusChange(this.status);
 		if (!child || child.exitCode !== null) {
@@ -310,6 +355,7 @@ export class LspClient {
 			}
 			this.pending.delete(message.id);
 			clearTimeout(pending.timer);
+			pending.removeAbort?.();
 			if (message.error) {
 				pending.reject(new Error(JSON.stringify(message.error)));
 			} else {
@@ -342,17 +388,22 @@ export class LspClient {
 			return;
 		}
 		this.status = "crashed";
-		for (const pending of this.pending.values()) {
-			clearTimeout(pending.timer);
-			pending.reject(new Error(`LSP server crashed: ${error}`));
-		}
-		this.pending.clear();
+		this.rejectPending(new Error(`LSP server crashed: ${error}`));
 		this.callbacks.onStatusChange(this.status, error);
 		// A crashed/abandoned server must never be left holding our stdio pipes
 		// (an untracked child would keep the host process alive after teardown
 		// and orphan on exit). Killing is safe: the server is already broken or
 		// gone (spawn failure / exit), or the handshake failed and it is useless.
 		this.killChild();
+	}
+
+	private rejectPending(error: Error): void {
+		for (const pending of this.pending.values()) {
+			clearTimeout(pending.timer);
+			pending.removeAbort?.();
+			pending.reject(error);
+		}
+		this.pending.clear();
 	}
 
 	/** Force-kill the spawned server child if it is still alive. */

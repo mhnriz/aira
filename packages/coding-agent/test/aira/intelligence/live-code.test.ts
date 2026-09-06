@@ -25,13 +25,18 @@ function launchSpec(extraArgs: string[] = []) {
 	return { command: "node", args: [MOCK_SERVER, ...extraArgs], argv0: process.execPath };
 }
 
-function providerFor(root: string, options: { crash?: boolean; extra?: Record<string, unknown> } = {}) {
+function providerFor(
+	root: string,
+	options: { crash?: boolean; extra?: Record<string, unknown>; serverArgs?: string[] } = {},
+) {
 	const findings = new AiraFindingsStore();
 	const provider = new LiveCodeProvider(root, findings, {
 		diagnosticWaitMs: 600,
 		idleTimeoutMs: 30_000,
 		crashCooldownMs: 0,
-		launchOverrides: { typescript: launchSpec(options.crash ? ["--crash-on-initialize"] : []) },
+		launchOverrides: {
+			typescript: launchSpec([...(options.crash ? ["--crash-on-initialize"] : []), ...(options.serverArgs ?? [])]),
+		},
 		...(options.extra ?? {}),
 	});
 	return { findings, provider };
@@ -145,6 +150,106 @@ describe("live-code provider (mock language server)", () => {
 			"stabilizeTray",
 		]);
 		await provider.dispose();
+	});
+
+	it("cold-starts explicit semantic queries and reuses the warm server", async () => {
+		const root = makeRoot("semantic-cold");
+		const file = join(root, "src", "tray.ts");
+		mkdirSync(join(root, "src"), { recursive: true });
+		writeFileSync(file, "export function detectionState() {}\n");
+		const { provider } = providerFor(root);
+
+		const definition = await provider.semanticQuery({
+			operation: "definition",
+			path: file,
+			symbol: "detectionState",
+		});
+		expect(definition.status).toBe("ready");
+		expect(provider.statusInfo().spawnCount).toBe(1);
+		const references = await provider.semanticQuery({
+			operation: "references",
+			path: file,
+			symbol: "detectionState",
+		});
+		expect(references.status).toBe("ready");
+		expect(provider.statusInfo().spawnCount).toBe(1);
+		await provider.dispose();
+	});
+
+	it("returns truthful semantic query states and bounded symbols", async () => {
+		const root = makeRoot("semantic-states");
+		const file = join(root, "src", "tray.ts");
+		mkdirSync(join(root, "src"), { recursive: true });
+		writeFileSync(file, "export function detectionState() {}\n");
+		const { provider } = providerFor(root, { serverArgs: ["--many-references"] });
+
+		const missing = await provider.semanticQuery({ operation: "definition", path: file, symbol: "missingSymbol" });
+		expect(missing.status).toBe("symbol-not-found");
+		const symbols = await provider.semanticQuery({ operation: "symbols", path: file });
+		expect(symbols.status).toBe("ready");
+		const references = await provider.semanticQuery({
+			operation: "references",
+			path: file,
+			symbol: "detectionState",
+			maxResults: 2,
+		});
+		expect(references.status).toBe("ready");
+		expect(references.truncated).toBe(true);
+		if (references.status === "ready") expect(references.locations).toHaveLength(2);
+		const unsupported = await provider.semanticQuery({
+			operation: "definition",
+			path: join(root, "src", "tray.txt"),
+			symbol: "x",
+		});
+		expect(unsupported.status).toBe("unsupported-language");
+		expect(provider.statusInfo().spawnCount).toBe(1);
+		await provider.dispose();
+	});
+
+	it("cancels an explicit semantic query without leaving a running request", async () => {
+		const root = makeRoot("semantic-cancel");
+		const file = join(root, "src", "tray.ts");
+		mkdirSync(join(root, "src"), { recursive: true });
+		writeFileSync(file, "export function detectionState() {}\n");
+		const { provider } = providerFor(root, { serverArgs: ["--delay-navigation"] });
+		const controller = new AbortController();
+		const query = provider.semanticQuery({
+			operation: "definition",
+			path: file,
+			symbol: "detectionState",
+			signal: controller.signal,
+		});
+		setTimeout(() => controller.abort(), 40);
+		expect((await query).status).toBe("cancelled");
+		await provider.dispose();
+	});
+
+	it("reports semantic request timeouts while keeping the server reusable", async () => {
+		const root = makeRoot("semantic-timeout");
+		const file = join(root, "src", "tray.ts");
+		mkdirSync(join(root, "src"), { recursive: true });
+		writeFileSync(file, "export function detectionState() {}\n");
+		const { provider } = providerFor(root, {
+			serverArgs: ["--delay-navigation"],
+			extra: { requestTimeoutMs: 100 },
+		});
+
+		const result = await provider.semanticQuery({ operation: "definition", path: file, symbol: "detectionState" });
+		expect(result.status).toBe("timeout");
+		expect(provider.statusInfo().status).toBe("ready");
+		await provider.dispose();
+	});
+
+	it("does not publish a result from an in-flight query after disposal", async () => {
+		const root = makeRoot("semantic-dispose");
+		const file = join(root, "src", "tray.ts");
+		mkdirSync(join(root, "src"), { recursive: true });
+		writeFileSync(file, "export function detectionState() {}\n");
+		const { provider } = providerFor(root, { serverArgs: ["--delay-navigation"] });
+		const query = provider.semanticQuery({ operation: "definition", path: file, symbol: "detectionState" });
+		await new Promise((resolve) => setTimeout(resolve, 80));
+		await provider.dispose();
+		expect((await query).status).toBe("cancelled");
 	});
 
 	it("degrades without findings when the server crashes at handshake", async () => {
