@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.84.4] - 2026-08-28
+
 ### Fixed
 - Fixed bundled Node.js builds failing to construct `HttpsProxyAgent` for proxied provider requests.
 - Fixed Windows process-tree termination spawning `taskkill` through PATH, which could crash when the child process emitted an unhandled spawn error.

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.84.4] - 2026-08-28
+
 ### Fixed
 
 - Fixed fragmented Mistral tool calls splitting when continuation chunks omit the tool-call ID ([#8387](https://github.com/earendil-works/pi/issues/8387)).
