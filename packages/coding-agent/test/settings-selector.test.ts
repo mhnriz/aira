@@ -7,6 +7,7 @@ import {
 	SettingsSelectorComponent,
 } from "../src/modes/interactive/components/settings-selector.ts";
 import { initTheme } from "../src/modes/interactive/theme/theme.ts";
+import { stripAnsi } from "../src/utils/ansi.ts";
 
 describe("SettingsSelectorComponent", () => {
 	beforeAll(() => {
@@ -47,5 +48,30 @@ describe("SettingsSelectorComponent", () => {
 		expect(onScrollbarChange.mock.calls.flat()).toEqual(["always", "hidden", "auto"]);
 		cycle("Fullscreen copy on select", 2);
 		expect(onCopyOnSelectChange.mock.calls.flat()).toEqual([false, true]);
+	});
+
+	it("keeps the configured theme marked while browsing", () => {
+		const config = {
+			fullscreenExitOutput: "transcript",
+			fullscreenScrollbar: "auto",
+			fullscreenCopyOnSelect: true,
+			warnings: {},
+			defaultModel: "not set",
+			availableDefaultModels: [],
+			availableThinkingLevels: [],
+			modelThinkingLevels: {},
+			currentTheme: "dark",
+			availableThemes: ["dark", "light"],
+		} as unknown as SettingsConfig;
+		const callbacks = { onThemePreview: vi.fn(), onCancel: () => {} } as unknown as SettingsCallbacks;
+		const list = new SettingsSelectorComponent(config, callbacks).getSettingsList();
+		list.selectItem("theme");
+		list.handleInput("\r");
+		let output = stripAnsi(list.render(120).join("\n"));
+		expect(output).toContain("→ ✓ dark");
+		list.handleInput("\x1b[B");
+		output = stripAnsi(list.render(120).join("\n"));
+		expect(output).toContain("  ✓ dark");
+		expect(output).toContain("→   light");
 	});
 });
