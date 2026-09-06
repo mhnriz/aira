@@ -1323,8 +1323,6 @@ function processBasetenModels(provider: ModelsDevProvider | undefined): Model<Ap
 			: supportsToggle
 				? toggleThinkingLevelMap
 				: getEffortThinkingLevelMap(reasoningOptions);
-		// Baseten's GLM-5.2 endpoints are text-only despite models.dev reporting image input.
-		const supportsImageInput = !isGlm52 && model.modalities?.input?.includes("image");
 
 		models.push({
 			id: modelId,
@@ -1334,7 +1332,7 @@ function processBasetenModels(provider: ModelsDevProvider | undefined): Model<Ap
 			baseUrl,
 			reasoning,
 			...(thinkingLevelMap ? { thinkingLevelMap } : {}),
-			input: supportsImageInput ? ["text", "image"] : ["text"],
+			input: model.modalities?.input?.includes("image") ? ["text", "image"] : ["text"],
 			cost: {
 				input: model.cost?.input || 0,
 				output: model.cost?.output || 0,
