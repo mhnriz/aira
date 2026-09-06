@@ -22,6 +22,7 @@
  *   across application restarts (Phase 6 scope).
  */
 import { spawn } from "node:child_process";
+import { constants as osConstants } from "node:os";
 import { stripAnsi } from "../../utils/ansi.ts";
 import {
 	getShellConfig,
@@ -361,7 +362,7 @@ export class AiraExecutionManager {
 		});
 		child.once("exit", (code, signal) => {
 			exited = true;
-			record.exitCode = code;
+			record.exitCode = code ?? (signal ? 128 + (osConstants.signals[signal] ?? 0) : null);
 			record.exitSignal = signal;
 			record.exitConfirmed = true;
 			record.exitedAt = this.now();

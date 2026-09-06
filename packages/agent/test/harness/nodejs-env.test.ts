@@ -449,6 +449,13 @@ describe("NodeExecutionEnv", () => {
 		expect(result).toEqual({ stdout: "", stderr: "", exitCode: 7 });
 	});
 
+	it.skipIf(process.platform === "win32")("maps signal-killed processes to a non-zero exit code", async () => {
+		const root = createTempDir();
+		const env = new NodeExecutionEnv({ cwd: root });
+		const result = getOrThrow(await env.exec("kill -9 $$"));
+		expect(result.exitCode).toBe(128 + 9);
+	});
+
 	it("returns timeout errors for commands exceeding the timeout", async () => {
 		const root = createTempDir();
 		const env = new NodeExecutionEnv({ cwd: root });

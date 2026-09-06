@@ -63,7 +63,7 @@ export interface AiraExecutionResult {
 	cwd: string;
 	startedAt: number;
 	durationMs: number;
-	/** Exit code when the process exited (null when terminated without a code). */
+	/** Exit code when the process exited; signal exits use the shell convention 128 + signal number. */
 	exitCode?: number | null;
 	/** Fatal signal when the process died from one. */
 	signal?: string | null;

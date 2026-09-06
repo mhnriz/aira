@@ -216,6 +216,23 @@ describe("Aira execution process manager (real child processes)", () => {
 		}
 	});
 
+	it.skipIf(process.platform === "win32")("maps signal exits to non-zero process results", async () => {
+		const ctx = makeManager();
+		try {
+			const result = await ctx.manager.start({
+				exe: process.execPath,
+				args: ["-e", "process.kill(process.pid, 'SIGTERM')"],
+				cwd: process.cwd(),
+			});
+			expect(result.status).toBe("exited");
+			expect(result.ok).toBe(false);
+			expect(result.exitCode).toBe(128 + 15);
+			expect(result.signal).toBe("SIGTERM");
+		} finally {
+			await finish(ctx);
+		}
+	});
+
 	it("reports a spawn failure truthfully (no pid, no exit code, ok=false)", async () => {
 		const ctx = makeManager();
 		try {
