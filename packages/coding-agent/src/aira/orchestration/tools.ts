@@ -28,6 +28,8 @@ import { wrapToolDefinition } from "../../core/tools/tool-definition-wrapper.ts"
 import { createWriteTool } from "../../core/tools/write.ts";
 import { airaCapabilityClassLabel } from "../capabilities.ts";
 import { type AiraProcessToolRuntime, createAiraProcessToolDefinitions } from "../execution/tools.ts";
+import type { AiraIntelligenceHandle } from "../intelligence/coordinator.ts";
+import { createAiraIntelligenceToolDefinitions } from "../intelligence/model-tools.ts";
 import type { AiraMode } from "../state.ts";
 import { airaChildRoleOf } from "./roles.ts";
 import type { AiraChildRole } from "./types.ts";
@@ -48,6 +50,8 @@ export interface AiraChildToolSetOptions {
 	mode: AiraMode;
 	/** Root execution manager (process tools bind to it; undefined = no process tools). */
 	executionManager?: AiraProcessToolRuntime;
+	/** Root intelligence coordinator shared by eligible children. */
+	intelligence?: AiraIntelligenceHandle;
 }
 
 export interface AiraChildToolSet {
@@ -76,6 +80,16 @@ export function buildAiraChildToolSet(options: AiraChildToolSetOptions): AiraChi
 		createLsTool(options.cwd),
 	];
 	const granted = new Set<string>(AIRA_CHILD_READ_TOOL_NAMES);
+	if (options.intelligence && (classes.includes("read-only") || classes.includes("diagnostic"))) {
+		for (const definition of Object.values(
+			createAiraIntelligenceToolDefinitions({ runtime: options.intelligence }),
+		)) {
+			if (!granted.has(definition.name)) {
+				granted.add(definition.name);
+				tools.push(wrapToolDefinition(definition));
+			}
+		}
+	}
 
 	if (classes.includes("mutating")) {
 		for (const tool of [createWriteTool(options.cwd), createEditTool(options.cwd)]) {

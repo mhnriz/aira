@@ -222,6 +222,14 @@ Repository intelligence answers:
 
 Phase 5 ships a native bounded file-level index (ADR-023): languages, symbols, imports/imported-by, source/test counterparts, lexical discovery, and git changed files, persisted as a JSON cache under the Aira home. It is a service (activation from the canonical project profile, ambient context selection) rather than a pile of tools. Embeddings/semantic retrieval and large graph machinery are deferred; no network or model call gates local understanding. Storage stays behind the provider boundary (`node:sqlite` is the zero-dependency upgrade path if a later phase needs SQL).
 
+The model-facing discovery funnel is a thin read-only projection of this
+service: `aira_symbol_search` exposes bounded lexical discovery and
+`aira_module_report` exposes bounded structural relationships. The coordinator
+owns routing, path containment, result limits, ambiguity, and next-step hints;
+the repository provider remains the only owner of the index. Hints are machine
+guidance, not automatic tool routing, and ordinary `read`/`grep`/`find`/`bash`
+remain valid fallbacks.
+
 ## 10. Live code intelligence
 
 Live code intelligence answers:
@@ -229,6 +237,14 @@ Live code intelligence answers:
 > What does the actual language/toolchain say about the code now?
 
 Phase 5 ships a native minimal LSP client with project-scoped, lazy, reused language servers (TypeScript/JavaScript, Python, Go, Rust, C/C++, C#), post-edit diagnostics, warm-only navigation, idle eviction, and crash degradation. Missing servers degrade to plain search. Health reporting never spawns a server: a supported project with a resolvable server reports `idle` (cold/unprobed), an actively running server reports `ready`, `unavailable` is reserved for when no relevant server actually resolves, and crashed/cooldown states report `degraded`. The reference implementations (pi-lens, pi-codeontime-code-intelligence) were studied as laboratory specimens; Aira does not depend on either.
+
+`aira_semantic_navigation` is the corresponding bounded model-facing seam for
+definition, references/call sites, and document symbols. It is routed by the
+coordinator to the existing `LiveCodeProvider`, preserves lazy server startup,
+supports symbol-only discovery before exact coordinates are known, and returns
+structured ambiguity/unavailable results. No `read_symbol` operation or second
+index is introduced; the live-code provider owns the language-server lifecycle
+and semantic result shape.
 
 ## 11. Execution runtime
 

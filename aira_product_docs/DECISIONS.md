@@ -1163,3 +1163,33 @@ observation remain testable without a speculative transport or replication
 layer. Reconsider the deferred families only when Aira has a concrete
 multi-process, plugin-service-host, mobile-handoff, or remote-presentation
 consumer that justifies a coordinated architecture migration.
+
+## ADR-049 — Model-facing code intelligence is a bounded read-only discovery funnel
+
+**Status:** accepted · Phase 14 follow-up
+
+**Context.** Aira already owns a repository index and a lazy live-code provider,
+but provider availability alone does not give the agent a callable semantic
+operation. Exposing provider methods directly would duplicate routing and
+policy at the tool boundary, while forcing every task through LSP would make
+ordinary text search less useful.
+
+**Decision.** `AgentSession` exposes three session-bound read-only projections:
+`aira_symbol_search` for lexical discovery, `aira_module_report` for bounded
+file structure, and `aira_semantic_navigation` for definition, references, and
+document symbols. One intelligence coordinator owns the routing, project-path
+containment, bounds, symbol-only handoff, ambiguity, and structured next-step
+guidance. RepositoryProvider remains the repository-index owner;
+LiveCodeProvider remains the language-server and semantic-operation owner.
+The guidance is not automatic routing, and `read`/`grep`/`find`/`bash` remain
+fallbacks. The same root coordinator is shared with eligible read-only child
+agents; no parallel index or `read_symbol` API is added.
+
+**Consequences.** The model receives a small, mode-classified tool surface
+without a second intelligence cache or a new LSP lifecycle. Symbol-only
+queries can discover a unique containing file before starting a lazy server;
+ambiguous and unavailable cases are explicit and bounded. Semantic results can
+transition live-code state from cold/idle to ready, while broad literal search
+continues to use the existing built-in tools. Future model-facing intelligence
+operations must preserve the coordinator/provider ownership boundary and the
+read-only/diagnostic capability classification.

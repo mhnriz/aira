@@ -19,6 +19,7 @@
  */
 import { randomUUID } from "node:crypto";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
+import type { AiraIntelligenceHandle } from "../intelligence/coordinator.ts";
 import type { AiraSessionState } from "../state.ts";
 import {
 	boundChildList,
@@ -76,6 +77,8 @@ export interface AiraOrchestrationManagerOptions {
 	}) => Promise<{ runtime: AiraChildRuntime; resolvedModel: string } | { unavailable: string } | undefined>;
 	/** Execution manager for process-class children (Phase 6 runtime reuse). */
 	executionManager?: AiraChildToolSetOptions["executionManager"];
+	/** Root intelligence coordinator shared by eligible children. */
+	intelligence?: AiraIntelligenceHandle;
 	/**
 	 * Phase 11 permission seam: root-owned deterministic child tool gate
 	 * (children never prompt; ask→deny upstream). Undefined = ungated
@@ -394,6 +397,7 @@ export class AiraOrchestrationManager implements AiraOrchestrationHandle {
 				role: spec.role,
 				mode: this.state.mode,
 				executionManager: this.options.executionManager,
+				intelligence: this.options.intelligence,
 			});
 			const envelope = buildAiraChildEnvelope({
 				role: spec.role,

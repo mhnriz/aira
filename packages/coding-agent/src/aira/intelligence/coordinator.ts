@@ -15,11 +15,14 @@
  */
 import { createHash } from "node:crypto";
 import { statSync } from "node:fs";
+import { realpath } from "node:fs/promises";
+import { relative, resolve as resolvePath } from "node:path";
 import type { Agent, AgentEvent } from "@earendil-works/pi-agent-core";
 import type { AiraSessionState } from "../state.ts";
 import { decideIntelligenceActivation, type IntelligenceActivation, isConservativeActivation } from "./activation.ts";
 import { buildIntelligenceContext } from "./context.ts";
 import { type AiraFindingSeverity, AiraFindingsStore, type AiraFreshnessVerdict } from "./findings.ts";
+import type { LiveCodeSemanticOperation, LiveCodeSemanticResult } from "./providers/live-code/index.ts";
 import { LiveCodeProvider } from "./providers/live-code/index.ts";
 import { RepositoryProvider } from "./providers/repository/index.ts";
 import type { GitChangeFileStats } from "./providers/repository/relationships.ts";
@@ -66,12 +69,67 @@ export interface AiraIntelligenceHandle {
 	 * repository index — token-free and free of extra git/scan processes.
 	 */
 	relevantSymbols(limit?: number): Array<{ path: string; name: string; kind: string; line: number }>;
+	searchSymbols(query: string, limit?: number): AiraSymbolSearchResult;
+	moduleReport(path: string, limit?: number): Promise<AiraModuleReportResult>;
+	semanticNavigation(query: AiraSemanticNavigationQuery): Promise<AiraSemanticNavigationResult>;
 	/** Subscribe to intelligence snapshot changes (Phase 12 UI seam). */
 	subscribe(listener: (status: AiraIntelligenceStatus) => void): () => void;
 	dispose(): Promise<void>;
 }
 
+export interface AiraSymbolSearchResult {
+	status: "ready" | "unavailable";
+	query: string;
+	results: Array<{ path: string; symbols: string[]; score: number }>;
+	truncated: boolean;
+	suggestedNext?: { tool: "aira_module_report"; path: string };
+}
+
+export interface AiraModuleReportResult {
+	status: "ready" | "not-found" | "invalid-path" | "unavailable";
+	path: string;
+	language?: string;
+	symbols: Array<{ name: string; kind: string; line: number }>;
+	imports: string[];
+	importedBy: string[];
+	counterparts: string[];
+	truncated: boolean;
+	suggestedNext?: {
+		tool: "aira_semantic_navigation" | "read";
+		operation?: LiveCodeSemanticOperation;
+		path?: string;
+		symbol?: string;
+	};
+	reason?: string;
+}
+
+export interface AiraSemanticNavigationQuery {
+	operation: LiveCodeSemanticOperation;
+	path?: string;
+	symbol?: string;
+	line?: number;
+	character?: number;
+	limit?: number;
+	signal?: AbortSignal;
+}
+
+export type AiraSemanticNavigationResult =
+	| (LiveCodeSemanticResult & { path: string; suggestedNext?: { tool: "read"; path: string; line?: number } })
+	| {
+			status: "ambiguous" | "not-found" | "invalid-path" | "unavailable";
+			operation: LiveCodeSemanticOperation;
+			path?: string;
+			symbol?: string;
+			candidates?: Array<{ path: string; symbols: string[]; score: number }>;
+			reason?: string;
+			truncated: boolean;
+	  };
+
 const DEFAULT_POST_EDIT_DEBOUNCE_MS = 400;
+
+function clampLimit(value: number, maximum: number): number {
+	return Math.max(1, Math.min(Math.floor(value), maximum));
+}
 
 export class IntelligenceCoordinator implements AiraIntelligenceHandle {
 	private activation: IntelligenceActivation = {
@@ -215,6 +273,191 @@ export class IntelligenceCoordinator implements AiraIntelligenceHandle {
 	 */
 	relevantSymbols(limit = 12): Array<{ path: string; name: string; kind: string; line: number }> {
 		return this.repository?.relevantSymbols(limit) ?? [];
+	}
+
+	searchSymbols(query: string, limit = 12): AiraSymbolSearchResult {
+		const boundedLimit = clampLimit(limit, 20);
+		if (!this.repository) return { status: "unavailable", query, results: [], truncated: false };
+		const hits = this.repository.discover(query, { limit: boundedLimit + 1 });
+		const truncated = hits.length > boundedLimit;
+		const results = hits.slice(0, boundedLimit).map((hit) => ({
+			path: hit.path,
+			symbols: hit.symbols,
+			score: hit.score,
+		}));
+		return {
+			status: "ready",
+			query,
+			results,
+			truncated,
+			...(results[0] ? { suggestedNext: { tool: "aira_module_report" as const, path: results[0].path } } : {}),
+		};
+	}
+
+	async moduleReport(path: string, limit = 20): Promise<AiraModuleReportResult> {
+		const boundedLimit = clampLimit(limit, 50);
+		const resolved = await this.resolveProjectPath(path);
+		if (!resolved.ok) {
+			return {
+				status: resolved.status,
+				path,
+				symbols: [],
+				imports: [],
+				importedBy: [],
+				counterparts: [],
+				truncated: false,
+				reason: resolved.reason,
+			};
+		}
+		const file = this.repository?.fileFor(resolved.path);
+		if (!file) {
+			return {
+				status: this.repository ? "not-found" : "unavailable",
+				path: this.relativePath(resolved.path),
+				symbols: [],
+				imports: [],
+				importedBy: [],
+				counterparts: [],
+				truncated: false,
+			};
+		}
+		const symbols = file.symbols.slice(0, boundedLimit).map((symbol) => ({ ...symbol }));
+		const imports = this.repository?.imports(resolved.path) ?? [];
+		const importedBy = this.repository?.importedBy(resolved.path) ?? [];
+		const counterparts = this.repository?.counterparts(resolved.path) ?? [];
+		const truncated =
+			file.truncated ||
+			file.symbols.length > boundedLimit ||
+			imports.length > boundedLimit ||
+			importedBy.length > boundedLimit ||
+			counterparts.length > boundedLimit;
+		const relativePath = this.relativePath(resolved.path);
+		const firstSymbol = symbols[0];
+		return {
+			status: "ready",
+			path: relativePath,
+			language: file.language,
+			symbols,
+			imports: imports.slice(0, boundedLimit).map((item) => this.relativePath(item)),
+			importedBy: importedBy.slice(0, boundedLimit).map((item) => this.relativePath(item)),
+			counterparts: counterparts.slice(0, boundedLimit).map((item) => this.relativePath(item)),
+			truncated,
+			...(firstSymbol
+				? {
+						suggestedNext: {
+							tool: "aira_semantic_navigation" as const,
+							operation: "definition" as const,
+							path: relativePath,
+							symbol: firstSymbol.name,
+						},
+					}
+				: { suggestedNext: { tool: "read" as const, path: relativePath } }),
+		};
+	}
+
+	async semanticNavigation(query: AiraSemanticNavigationQuery): Promise<AiraSemanticNavigationResult> {
+		if (query.operation === "symbols" && !query.path) {
+			return {
+				status: "invalid-path",
+				operation: query.operation,
+				truncated: false,
+				reason: "symbols requires a path",
+			};
+		}
+		if (!query.path && !query.symbol) {
+			return {
+				status: "not-found",
+				operation: query.operation,
+				truncated: false,
+				reason: "definition and references require a symbol or path",
+			};
+		}
+		let path = query.path;
+		if (!path && query.symbol) {
+			const search = this.searchSymbols(query.symbol, 20);
+			if (search.status === "unavailable") {
+				return { status: "unavailable", operation: query.operation, symbol: query.symbol, truncated: false };
+			}
+			const candidates = search.results.filter((candidate) => candidate.symbols.includes(query.symbol as string));
+			if (candidates.length === 0) {
+				return { status: "not-found", operation: query.operation, symbol: query.symbol, truncated: false };
+			}
+			if (candidates.length > 1) {
+				return {
+					status: "ambiguous",
+					operation: query.operation,
+					symbol: query.symbol,
+					candidates: candidates.slice(0, 10),
+					truncated: candidates.length > 10,
+				};
+			}
+			path = candidates[0].path;
+		}
+		const resolved = await this.resolveProjectPath(path as string);
+		if (!resolved.ok)
+			return {
+				status: resolved.status,
+				operation: query.operation,
+				path,
+				truncated: false,
+				reason: resolved.reason,
+			};
+		if (!this.liveCode)
+			return {
+				status: "unavailable",
+				operation: query.operation,
+				path: this.relativePath(resolved.path),
+				truncated: false,
+			};
+		const result = await this.liveCode.semanticQuery({
+			operation: query.operation,
+			path: resolved.path,
+			...(query.symbol !== undefined ? { symbol: query.symbol } : {}),
+			...(query.line !== undefined ? { line: query.line } : {}),
+			...(query.character !== undefined ? { character: query.character } : {}),
+			...(query.limit !== undefined ? { maxResults: clampLimit(query.limit, 50) } : {}),
+			signal: query.signal,
+		});
+		this.publishStatus();
+		const outputPath = this.relativePath(resolved.path);
+		return {
+			...result,
+			path: outputPath,
+			...(result.status === "ready" && result.locations[0]
+				? {
+						suggestedNext: {
+							tool: "read" as const,
+							path: result.locations[0].path ?? outputPath,
+							line: result.locations[0].line,
+						},
+					}
+				: {}),
+		};
+	}
+
+	private async resolveProjectPath(
+		input: string,
+	): Promise<{ ok: true; path: string } | { ok: false; status: "invalid-path" | "unavailable"; reason: string }> {
+		if (!this.repository)
+			return { ok: false, status: "unavailable", reason: "repository intelligence is unavailable" };
+		if (input.includes("\0")) return { ok: false, status: "invalid-path", reason: "path contains a NUL character" };
+		const root = this.repository.projectRoot;
+		const candidate = resolvePath(root, input);
+		const rootReal = await realpath(root).catch(() => root);
+		const targetReal = await realpath(candidate).catch(() => undefined);
+		if (!targetReal) return { ok: false, status: "invalid-path", reason: "path does not exist" };
+		const rel = relative(rootReal, targetReal).replace(/\\/g, "/");
+		if (!rel || rel.startsWith("..") || rel.includes("\0")) {
+			return { ok: false, status: "invalid-path", reason: "path is outside the project root" };
+		}
+		// Keep the provider's original root spelling for indexed lookups (macOS
+		// commonly aliases /var to /private/var); targetReal was used only for
+		// containment validation.
+		return { ok: true, path: candidate };
+	}
+
+	private relativePath(path: string): string {
+		return relative(this.repository?.projectRoot ?? path, path).replace(/\\/g, "/");
 	}
 
 	private onAgentEvent = (event: AgentEvent): void => {

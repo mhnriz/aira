@@ -10,5 +10,6 @@ export * from "./activation.ts";
 export * from "./context.ts";
 export * from "./coordinator.ts";
 export * from "./findings.ts";
+export * from "./model-tools.ts";
 export * from "./providers/index.ts";
 export * from "./status.ts";

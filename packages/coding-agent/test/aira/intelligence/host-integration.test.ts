@@ -83,6 +83,21 @@ describe("Aira ambient intelligence through the host (Phase 5)", () => {
 		expect(harness.session.airaSessionState.intelligence?.active).toBe(true);
 		expect(harness.session.airaSessionState.intelligence?.repository.filesIndexed).toBeGreaterThan(0);
 		expect(harness.session.airaSessionState.intelligence?.repository.status).toBe("ready");
+		const tools = harness.session.getAllTools();
+		expect(tools.map((tool) => tool.name)).toEqual(
+			expect.arrayContaining(["aira_symbol_search", "aira_module_report", "aira_semantic_navigation"]),
+		);
+		expect(tools.find((tool) => tool.name === "aira_semantic_navigation")?.description).toContain("go-to-definition");
+		const searchTool = harness.session.getToolDefinition("aira_symbol_search");
+		const result = await searchTool?.execute(
+			"search",
+			{ query: "detectionState" },
+			undefined,
+			undefined,
+			undefined as never,
+		);
+		const text = result?.content[0]?.type === "text" ? result.content[0].text : "";
+		expect(text).toContain("src/tray.ts");
 	});
 
 	it("injects a compact ambient context message on the first prompt", async () => {
@@ -145,6 +160,9 @@ describe("Aira ambient intelligence through the host (Phase 5)", () => {
 				"agents_cancel",
 				"agents_delegate",
 				"agents_status",
+				"aira_module_report",
+				"aira_semantic_navigation",
+				"aira_symbol_search",
 				"ask_user",
 				"browser_console",
 				"browser_navigate",

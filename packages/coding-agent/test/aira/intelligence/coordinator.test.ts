@@ -202,6 +202,40 @@ describe("ambient context selection", () => {
 });
 
 describe("intelligence coordinator", () => {
+	it("provides the discovery funnel and symbol-only semantic handoff", async () => {
+		const root = makeProject("funnel");
+		const file = join(root, "src", "runtime.ts");
+		const caller = join(root, "src", "caller.ts");
+		writeFileSync(file, "export class AgentSessionRuntime {}\n");
+		writeFileSync(caller, "import { AgentSessionRuntime } from './runtime';\nnew AgentSessionRuntime();\n");
+		const state = projectState(root);
+		const handle = createAiraIntelligence(state, undefined, {
+			cacheDir: join(tmpdir(), "funnel-cache"),
+			liveCodeOptions,
+		});
+		activeHarnesses.push({ state, handle });
+		await handle.activate();
+		await handle.waitUntilSettled();
+
+		const search = handle.searchSymbols("AgentSessionRuntime");
+		expect(search.status).toBe("ready");
+		expect(search.results[0]?.path).toBe("src/runtime.ts");
+		expect(search.suggestedNext).toEqual({ tool: "aira_module_report", path: "src/runtime.ts" });
+
+		const report = await handle.moduleReport("src/runtime.ts");
+		expect(report.status).toBe("ready");
+		expect(report.symbols.map((symbol) => symbol.name)).toContain("AgentSessionRuntime");
+		expect(report.suggestedNext).toMatchObject({ tool: "aira_semantic_navigation", path: "src/runtime.ts" });
+
+		const semantic = await handle.semanticNavigation({ operation: "definition", symbol: "AgentSessionRuntime" });
+		expect(semantic.status).toBe("ready");
+		expect(semantic.path).toBe("src/runtime.ts");
+		expect(state.intelligence?.liveCode.status).toBe("ready");
+
+		const unsafe = await handle.moduleReport("../outside.ts");
+		expect(unsafe.status).toBe("invalid-path");
+	});
+
 	it("activates, indexes the project, and publishes health into canonical state", async () => {
 		const root = makeProject("coord");
 		writeFileSync(join(root, "src", "a.ts"), "export function entry() {}");

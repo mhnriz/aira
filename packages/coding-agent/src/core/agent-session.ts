@@ -65,6 +65,7 @@ import {
 	type AiraIntelligenceHandle,
 	createAiraIntelligence,
 } from "../aira/intelligence/coordinator.ts";
+import { createAiraIntelligenceToolDefinitions } from "../aira/intelligence/model-tools.ts";
 import {
 	type AiraInteractionHandle,
 	type AiraInteractionManagerOptions,
@@ -557,6 +558,7 @@ export class AgentSession {
 			settings: () => this.settingsManager.getOrchestrationSettings(),
 			resolveRuntime: (request) => this.resolveAiraChildRuntime(request),
 			executionManager: this._airaExecution,
+			intelligence: this._airaIntelligence,
 			// Phase 11: children never bypass root authorization. The gate is
 			// deterministic (ask→deny) — children never prompt, so nested
 			// interactive storms are impossible.
@@ -3376,6 +3378,13 @@ export class AgentSession {
 		const airaTaskTools = this._airaTasks ? createAiraTaskToolDefinitions({ runtime: this._airaTasks }) : {};
 		Object.assign(baseToolDefinitions, airaTaskTools);
 
+		// Aira intelligence seam: read-only discovery, module orientation, and
+		// semantic navigation share this session's coordinator and providers.
+		const airaIntelligenceTools = this._airaIntelligence
+			? createAiraIntelligenceToolDefinitions({ runtime: this._airaIntelligence })
+			: {};
+		Object.assign(baseToolDefinitions, airaIntelligenceTools);
+
 		this._baseToolDefinitions = new Map(
 			Object.entries(baseToolDefinitions).map(([name, tool]) => [name, tool as ToolDefinition]),
 		);
@@ -3408,8 +3417,10 @@ export class AgentSession {
 					...Object.keys(airaOrchestrationTools),
 					...Object.keys(airaInteractionTools),
 					...Object.keys(airaTaskTools),
+					...Object.keys(airaIntelligenceTools),
 				]
 			: [
+					...Object.keys(airaIntelligenceTools),
 					"read",
 					"bash",
 					"edit",
@@ -3419,6 +3430,7 @@ export class AgentSession {
 					...Object.keys(airaOrchestrationTools),
 					...Object.keys(airaInteractionTools),
 					...Object.keys(airaTaskTools),
+					...Object.keys(airaIntelligenceTools),
 				];
 		const baseActiveToolNames = options.activeToolNames ?? defaultActiveToolNames;
 		this._refreshToolRegistry({

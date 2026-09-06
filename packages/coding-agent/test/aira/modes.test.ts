@@ -70,6 +70,9 @@ describe("Aira modes", () => {
 
 	it("keeps read-only inspection tools available", () => {
 		expect(AIRA_READ_ONLY_TOOLS).toEqual([
+			"aira_symbol_search",
+			"aira_module_report",
+			"aira_semantic_navigation",
 			"read",
 			"grep",
 			"find",

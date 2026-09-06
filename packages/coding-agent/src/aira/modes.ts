@@ -59,6 +59,9 @@ export const NEXT_AIRA_MODE: Record<AiraMode, AiraMode> = {
  * are session state, not project state; documented in the Phase 11 ADR).
  */
 export const AIRA_READ_ONLY_TOOLS: readonly string[] = [
+	"aira_symbol_search",
+	"aira_module_report",
+	"aira_semantic_navigation",
 	...BUILTIN_READ_ONLY_CAPABILITIES,
 	"browser_status",
 	"browser_observe",
