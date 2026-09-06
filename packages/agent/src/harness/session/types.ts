@@ -351,6 +351,17 @@ export interface SessionTree {
 	appendCustomEntry(customType: string, data?: unknown): Promise<string>;
 }
 
+/** Explicit path-oriented access to one durable branch in a Session. */
+export interface Branch {
+	readonly name: string;
+	getTipId(): Promise<string | null>;
+	getEntry(id: string): Promise<Entry | undefined>;
+	findEntries(query?: EntryQuery & BranchBounds): Promise<Entry[]>;
+	findEntry(query?: EntryQuery & BranchBounds): Promise<Entry | undefined>;
+	appendMessage(message: AgentMessage): Promise<string>;
+	appendCustomEntry(customType: string, data?: unknown): Promise<string>;
+}
+
 export interface SessionCreateOptions {
 	id?: string;
 	parentSessionId?: string;

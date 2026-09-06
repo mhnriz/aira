@@ -14,6 +14,7 @@ import type { AgentMessage, AgentTool, QueueMode, ThinkingLevel } from "../types
 import type { CompactionSettings } from "./compaction/compaction.ts";
 import { type Result as ResultValue, TaggedError } from "./result.ts";
 import type {
+	Branch,
 	BranchSummaryEntry,
 	CompactionEntry,
 	Entry,
@@ -22,6 +23,7 @@ import type {
 	Session,
 	SessionTree,
 } from "./session/index.ts";
+import { SessionBranch } from "./session/index.ts";
 import type { TelemetryContext } from "./telemetry.ts";
 import type { AgentHarnessResources, PromptTemplate, Skill } from "./types.ts";
 
@@ -270,6 +272,7 @@ export interface WatchHandle<TSnapshot> {
 
 export interface AgentLane {
 	readonly name: string;
+	readonly branch: Branch;
 	getLeafId(): Promise<string | null>;
 	prompt(text: string, images?: ImageContent[]): Promise<RunResult>;
 	prompt(message: AgentMessage | AgentMessage[]): Promise<RunResult>;
@@ -302,9 +305,10 @@ export interface AgentLane {
 	watch(): Promise<WatchHandle<LaneSnapshot>>;
 }
 
-export class AgentHarness implements AgentLane {
+export class AgentHarness {
 	readonly name = "main";
 	readonly session: SessionTree;
+	readonly branch: Branch;
 	readonly hooks: Hooks;
 	readonly events: Events;
 	private readonly durableSession: Session;
@@ -319,10 +323,13 @@ export class AgentHarness implements AgentLane {
 	private steeringMode: QueueMode;
 	private followUpMode: QueueMode;
 	private closed = false;
+	private readonly laneHandles = new Map<string, AgentLaneHandle>();
+	private readonly laneAcquisitions = new Map<string, Promise<AgentLane>>();
 
 	private constructor(options: AgentHarnessOptions) {
 		this.durableSession = options.session;
 		this.session = options.session;
+		this.branch = new SessionBranch(options.session, "main");
 		this.hooks = new UnavailableRegistry("hooks.on", () => this.closed);
 		this.events = new UnavailableRegistry("events.on", () => this.closed);
 		this.model = options.model;
@@ -342,6 +349,7 @@ export class AgentHarness implements AgentLane {
 		};
 		this.steeringMode = options.steeringMode ?? "one-at-a-time";
 		this.followUpMode = options.followUpMode ?? "one-at-a-time";
+		this.laneHandles.set("main", new AgentLaneHandle(this, this.branch, this.session));
 	}
 
 	static async create(
@@ -441,14 +449,48 @@ export class AgentHarness implements AgentLane {
 		return this.unavailable("watch");
 	}
 
-	async lane(_name: string): Promise<AgentLane | undefined> {
-		return this.unavailable("lane");
+	async lane(name: string): Promise<AgentLane | undefined> {
+		const existing = this.laneHandles.get(name);
+		if (existing !== undefined) return existing;
+		const branch = await this.durableSession.branch(name);
+		if (branch === undefined) return undefined;
+		const handle = new AgentLaneHandle(this, branch, this.durableSession.view(name));
+		this.laneHandles.set(name, handle);
+		return handle;
 	}
-	async createLane(_name: string, _at: string | null): Promise<CreateLaneResult> {
-		return this.unavailable("createLane");
+	async createLane(name: string, at: string | null): Promise<CreateLaneResult> {
+		if (this.closed) return { ok: false, error: new Closed({ message: "AgentHarness is closed" }) };
+		const existing = this.laneAcquisitions.get(name);
+		if (existing !== undefined) return { ok: true, value: await existing };
+		const acquisition = this.acquireLane(name, at);
+		this.laneAcquisitions.set(name, acquisition);
+		try {
+			return { ok: true, value: await acquisition };
+		} catch (error) {
+			return {
+				ok: false,
+				error:
+					error instanceof LaneExists || error instanceof InvalidLane
+						? error
+						: new InvalidLane({ lane: name, reason: String(error), message: String(error) }),
+			};
+		} finally {
+			this.laneAcquisitions.delete(name);
+		}
 	}
 	async lanes(): Promise<LaneInfo[]> {
-		return this.unavailable("lanes");
+		return (await this.durableSession.getLanes()).map((lane) => ({
+			name: lane.lane,
+			leafId: lane.leafId,
+			operation: null,
+		}));
+	}
+
+	private async acquireLane(name: string, at: string | null): Promise<AgentLane> {
+		const branch = await this.durableSession.acquireBranch(name, at);
+		const handle = this.laneHandles.get(name) ?? new AgentLaneHandle(this, branch, this.durableSession.view(name));
+		this.laneHandles.set(name, handle);
+		return handle;
 	}
 	async getTools(): Promise<HarnessTool[]> {
 		return [...this.tools];
@@ -504,5 +546,104 @@ export class AgentHarness implements AgentLane {
 	}
 	async close(): Promise<void> {
 		this.closed = true;
+	}
+}
+
+/** Explicit lane owner. The harness remains a runtime coordinator and is only the compatibility delegate. */
+class AgentLaneHandle implements AgentLane {
+	readonly name: string;
+	readonly branch: Branch;
+	readonly session: SessionTree;
+	private readonly harness: AgentHarness;
+
+	constructor(harness: AgentHarness, branch: Branch, session: SessionTree) {
+		this.harness = harness;
+		this.name = branch.name;
+		this.branch = branch;
+		this.session = session;
+	}
+
+	getLeafId(): Promise<string | null> {
+		return this.harness.getLeafId();
+	}
+	prompt(text: string, images?: ImageContent[]): Promise<RunResult>;
+	prompt(message: AgentMessage | AgentMessage[]): Promise<RunResult>;
+	prompt(input: string | AgentMessage | AgentMessage[], images?: ImageContent[]): Promise<RunResult> {
+		return this.harness.prompt(input as never, images);
+	}
+	skill(name: string, additionalInstructions?: string): Promise<RunResult> {
+		return this.harness.skill(name, additionalInstructions);
+	}
+	promptFromTemplate(name: string, args?: string[]): Promise<RunResult> {
+		return this.harness.promptFromTemplate(name, args);
+	}
+	compact(options?: { customInstructions?: string }): Promise<CompactionResult> {
+		return this.harness.compact(options);
+	}
+	navigateTree(targetId: string | null, options?: NavigateOptions): Promise<NavigationResult> {
+		return this.harness.navigateTree(targetId, options);
+	}
+	resume(): Promise<ResumeResult> {
+		return this.harness.resume();
+	}
+	abort(): Promise<AbortResult> {
+		return this.harness.abort();
+	}
+	steer(text: string, images?: ImageContent[]): Promise<QueueResult>;
+	steer(message: AgentMessage): Promise<QueueResult>;
+	steer(input: string | AgentMessage, images?: ImageContent[]): Promise<QueueResult> {
+		return this.harness.steer(input as never, images);
+	}
+	followUp(text: string, images?: ImageContent[]): Promise<QueueResult>;
+	followUp(message: AgentMessage): Promise<QueueResult>;
+	followUp(input: string | AgentMessage, images?: ImageContent[]): Promise<QueueResult> {
+		return this.harness.followUp(input as never, images);
+	}
+	nextRun(text: string, images?: ImageContent[]): Promise<QueueResult>;
+	nextRun(message: AgentMessage): Promise<QueueResult>;
+	nextRun(input: string | AgentMessage, images?: ImageContent[]): Promise<QueueResult> {
+		return this.harness.nextRun(input as never, images);
+	}
+	cancelQueued(entryId: string): Promise<CancelQueuedResult> {
+		return this.harness.cancelQueued(entryId);
+	}
+	recordUsage(usage: Usage, options?: { entryId?: string; details?: JsonValue }): Promise<RecordUsageResult> {
+		return this.harness.recordUsage(usage, options);
+	}
+	waitForIdle(): Promise<void> {
+		return this.harness.waitForIdle();
+	}
+	runWhenIdle(callback: () => void | Promise<void>): Promise<void> {
+		return this.harness.runWhenIdle(callback);
+	}
+	peekAction(): Promise<ActionInfo | undefined> {
+		return this.harness.peekAction();
+	}
+	executeAction(): Promise<ActionInfo | undefined> {
+		return this.harness.executeAction();
+	}
+	runToCompletion(): Promise<void> {
+		return this.harness.runToCompletion();
+	}
+	getModel(): Promise<Model<Api>> {
+		return this.harness.getModel();
+	}
+	setModel(model: Model<Api>): Promise<void> {
+		return this.harness.setModel(model);
+	}
+	getThinkingLevel(): Promise<ThinkingLevel> {
+		return this.harness.getThinkingLevel();
+	}
+	setThinkingLevel(level: ThinkingLevel): Promise<void> {
+		return this.harness.setThinkingLevel(level);
+	}
+	getActiveTools(): Promise<string[]> {
+		return this.harness.getActiveTools();
+	}
+	setActiveTools(names: string[]): Promise<void> {
+		return this.harness.setActiveTools(names);
+	}
+	watch(): Promise<WatchHandle<LaneSnapshot>> {
+		return this.harness.watch();
 	}
 }

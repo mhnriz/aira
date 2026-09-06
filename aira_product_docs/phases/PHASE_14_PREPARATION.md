@@ -116,6 +116,29 @@ from the preparation baseline and should be refreshed before implementation.
   atomic lane acquisition, and removal of implicit-main APIs. No Stage 2 work
   is included here.
 
+#### Stage 2 disposition — implemented
+
+- `423e20c` — **IMPLEMENTED**. Mario Zechner, `feat(agent): separate
+  sessions, branches, and lanes`. Aira adapted the ownership boundary to its
+  current storage-backed Session and scaffolded AgentHarness: explicit
+  SessionBranch access, one mutation-line-backed branch get-or-create path, and
+  explicit AgentLane handles with transitional harness delegation.
+- Local implementation commit: this Stage 2 commit.
+- Session owns global metadata, labels, storage access, branch acquisition, and
+  the existing MutationLine. Branch owns only named path identity, tip,
+  branch queries, and branch appends. AgentLane owns the explicit branch
+  reference and execution-facing lane surface; AgentHarness coordinates the
+  runtime and remains a compatibility delegate for existing callers.
+- Storage format: unchanged. Existing lane rows and branch tips are reused;
+  no migration or fork semantic change was introduced.
+- Tests: explicit global/branch ownership, reopen preservation, sibling
+  isolation, branch acquisition, and deterministic concurrent lane/branch
+  acquisition were added. Memory, JSONL, and SQLite behavior remains
+  conformant in focused coverage.
+- Stage 3 retry/deferred generation, Stage 4 durable tools, and Stage 5 fork
+  redesign remain deferred. Verifier, browser, Workbench, task, Goal, and
+  orchestration behavior were not redesigned.
+
 ### Stage 2 — Session and Branch separation
 
 - Define explicit global `Session` and path-only `Branch` interfaces.

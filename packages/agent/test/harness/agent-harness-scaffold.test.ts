@@ -170,9 +170,6 @@ describe("AgentHarness v2 scaffold", () => {
 			["executeAction", () => harness.executeAction()],
 			["runToCompletion", () => harness.runToCompletion()],
 			["watch", () => harness.watch()],
-			["lane", () => harness.lane("main")],
-			["createLane", () => harness.createLane("thread", null)],
-			["lanes", () => harness.lanes()],
 			["watchSession", () => harness.watchSession()],
 		];
 
@@ -185,6 +182,18 @@ describe("AgentHarness v2 scaffold", () => {
 		expect(callbackCalled).toBe(false);
 		expect(() => harness.hooks.on("before_run", () => {})).toThrow(HarnessNotImplemented);
 		expect(() => harness.events.on("event", () => {})).toThrow(HarnessNotImplemented);
+	});
+
+	it("acquires one explicit execution lane for concurrent callers", async () => {
+		const harness = await createHarness();
+		const results = await Promise.all(Array.from({ length: 16 }, () => harness.createLane("worker", null)));
+		const lanes = results.filter((result) => result.ok).map((result) => result.value);
+
+		expect(lanes).toHaveLength(16);
+		expect(new Set(lanes).size).toBe(1);
+		expect(lanes[0]?.branch.name).toBe("worker");
+		expect((await harness.lane("worker"))?.branch).toBe(lanes[0]?.branch);
+		expect((await harness.lanes()).filter((lane) => lane.name === "worker")).toHaveLength(1);
 	});
 
 	it("reports HarnessClosed for unfinished operations after close", async () => {

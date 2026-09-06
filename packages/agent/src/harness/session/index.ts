@@ -1,3 +1,4 @@
+export * from "./branch.ts";
 export * from "./context.ts";
 export type {
 	JsonlSessionCreateOptions,

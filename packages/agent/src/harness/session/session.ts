@@ -1,5 +1,6 @@
 import { uuidv7 } from "@earendil-works/pi-ai";
 import type { AgentMessage } from "../../types.ts";
+import { SessionBranch } from "./branch.ts";
 import { MutationLine } from "./mutation-line.ts";
 import type {
 	BranchBounds,
@@ -116,9 +117,10 @@ export class Session<TMetadata extends SessionMetadata = SessionMetadata> implem
 
 	view(lane: string): SessionTree {
 		if (lane === "main") return this;
+		const branch = new SessionBranch(this, lane);
 		return {
-			getLeafId: () => this.getLeafIdForLane(lane),
-			getEntry: (id) => this.getEntry(id),
+			getLeafId: () => branch.getTipId(),
+			getEntry: (id) => branch.getEntry(id),
 			getStats: () => this.getStats(),
 			getName: () => this.getName(),
 			setName: (name) => this.setName(name),
@@ -126,15 +128,39 @@ export class Session<TMetadata extends SessionMetadata = SessionMetadata> implem
 			setLabel: (targetId, label) => this.setLabel(targetId, label),
 			findEntries: (query) => this.queryEntries(query),
 			findEntry: async (query = {}) => (await this.queryEntries(query, 1))[0],
-			findEntriesOnBranch: (query) => this.queryBranchEntries(lane, query),
-			findEntryOnBranch: async (query = {}) => (await this.queryBranchEntries(lane, query, 1))[0],
-			appendMessage: (message) => this.appendMessageToLane(lane, message),
-			appendCustomEntry: (customType, data) => this.appendCustomEntryToLane(lane, customType, data),
+			findEntriesOnBranch: (query) => branch.findEntries(query),
+			findEntryOnBranch: (query = {}) => branch.findEntry(query),
+			appendMessage: (message) => branch.appendMessage(message),
+			appendCustomEntry: (customType, data) => branch.appendCustomEntry(customType, data),
 		};
 	}
 
+	/** Acquires an explicit branch without selecting an implicit main branch. */
+	async branch(name: string): Promise<SessionBranch | undefined> {
+		const exists = (await this.getLanes()).some((lane) => lane.lane === name);
+		return exists ? new SessionBranch(this, name) : undefined;
+	}
+
+	async createBranch(name: string, at: string | null): Promise<SessionBranch> {
+		await this.createLane(name, at);
+		return new SessionBranch(this, name);
+	}
+
+	/** Atomically gets or creates one named branch. */
+	async acquireBranch(name: string, at: string | null): Promise<SessionBranch> {
+		await this.mutate(async () => {
+			const exists = (await this.storage.getLanes()).some((lane) => lane.lane === name);
+			if (!exists) await this.storage.createLane(name, at);
+		});
+		return new SessionBranch(this, name);
+	}
+
 	async getLeafId(): Promise<string | null> {
-		return this.getLeafIdForLane("main");
+		return this.getTipId("main");
+	}
+
+	async getTipId(lane: string): Promise<string | null> {
+		return this.getLeafIdForLane(lane);
 	}
 
 	async getEntry(id: string): Promise<Entry | undefined> {
@@ -255,6 +281,14 @@ export class Session<TMetadata extends SessionMetadata = SessionMetadata> implem
 		return this.storage.findEntriesOnBranch({ ...storageQuery, start });
 	}
 
+	findEntriesOnBranchFor(lane: string, query: EntryQuery & BranchBounds = {}): Promise<Entry[]> {
+		return this.queryBranchEntries(lane, query);
+	}
+
+	findEntryOnBranchFor(lane: string, query: EntryQuery & BranchBounds = {}): Promise<Entry | undefined> {
+		return this.queryBranchEntries(lane, query, 1).then((entries) => entries[0]);
+	}
+
 	private async queryRecords(query: RecordQuery = {}): Promise<LaneRecord[]> {
 		assertValidLimit(query.limit);
 		assertValidCursor(query.afterSeq);
@@ -275,6 +309,10 @@ export class Session<TMetadata extends SessionMetadata = SessionMetadata> implem
 		return entry.id;
 	}
 
+	appendMessageTo(lane: string, message: AgentMessage): Promise<string> {
+		return this.appendMessageToLane(lane, message);
+	}
+
 	private async appendCustomEntryToLane(lane: string, customType: string, data?: unknown): Promise<string> {
 		const entry = await this.commitEntry(
 			data === undefined
@@ -283,6 +321,10 @@ export class Session<TMetadata extends SessionMetadata = SessionMetadata> implem
 			lane,
 		);
 		return entry.id;
+	}
+
+	appendCustomEntryTo(lane: string, customType: string, data?: unknown): Promise<string> {
+		return this.appendCustomEntryToLane(lane, customType, data);
 	}
 
 	private async commitEntry<TEntry extends Entry>(entry: ProvisionedEntry<TEntry>, lane: string): Promise<TEntry> {
