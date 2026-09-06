@@ -149,7 +149,8 @@ async function makeGoalHarness(
 	const root = makeProjectDir();
 	const harness = await createHarness({
 		cwd: root,
-		settings: { goals: options.goals } as never,
+		// Goal runtime tests explicitly opt in; production defaults are disabled.
+		settings: { goals: { enabled: true, ...options.goals } } as never,
 		airaVerificationOptions: {
 			runner: async () => {
 				const outcomes = options.verdicts ?? [PASS_OUTCOME];

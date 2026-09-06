@@ -11,9 +11,9 @@ import {
 import { SettingsManager } from "../../../src/core/settings-manager.ts";
 
 describe("Aira goal settings (Phase 10)", () => {
-	it("defaults: enabled, auto smart, max rounds 4, no token/duration budgets", () => {
+	it("defaults: disabled, auto smart, max rounds 4, no token/duration budgets", () => {
 		expect(DEFAULT_AIRA_GOAL_SETTINGS).toEqual({
-			enabled: true,
+			enabled: false,
 			auto: "smart",
 			maxRounds: 4,
 			tokenBudget: undefined,
@@ -56,7 +56,7 @@ describe("Aira goal settings (Phase 10)", () => {
 		});
 		// Out-of-range optional budgets normalize to unset (never break the runtime).
 		expect(normalizeAiraGoalSettings({ tokenBudget: 2_000_000_000, maxDurationMs: 10 })).toEqual({
-			enabled: true,
+			enabled: false,
 			auto: "smart",
 			maxRounds: 4,
 			tokenBudget: undefined,
@@ -68,7 +68,7 @@ describe("Aira goal settings (Phase 10)", () => {
 		const manager = SettingsManager.inMemory({});
 		const defaults = manager.getGoalSettings();
 		expect(defaults).toEqual({
-			enabled: true,
+			enabled: false,
 			auto: "smart",
 			maxRounds: 4,
 			tokenBudget: undefined,
@@ -93,7 +93,7 @@ describe("Aira goal settings (Phase 10)", () => {
 		// Invalid stored values normalize via the typed accessor too.
 		const raw = SettingsManager.inMemory({ goals: { auto: "banana", maxRounds: 0, tokenBudget: 3 } } as never);
 		expect(raw.getGoalSettings()).toEqual({
-			enabled: true,
+			enabled: false,
 			auto: "smart",
 			maxRounds: 4,
 			tokenBudget: undefined,
@@ -104,7 +104,7 @@ describe("Aira goal settings (Phase 10)", () => {
 	it("extracts from a host Settings record through the settings helper", () => {
 		expect(airaGoalSettingsFrom({} as never)).toEqual(DEFAULT_AIRA_GOAL_SETTINGS);
 		expect(airaGoalSettingsFrom({ goals: { auto: "always", maxRounds: 3 } } as never)).toEqual({
-			enabled: true,
+			enabled: false,
 			auto: "always",
 			maxRounds: 3,
 			tokenBudget: undefined,

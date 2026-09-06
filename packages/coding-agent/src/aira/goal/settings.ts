@@ -8,7 +8,7 @@
  * make the bounds explicit and conservative by default.
  *
  * Defaults:
- * - enabled:     true — the goal runtime is available.
+ * - enabled:     false — the goal runtime is opt-in.
  * - auto:        "smart" — a durable Goal is created only for non-trivial
  *                objectives (multi-step features, significant bugs, cross-
  *                module changes, browser behavior, refactors, delegated
@@ -42,7 +42,7 @@ export interface AiraGoalSettings {
 
 /** The canonical default goal settings (conservative). */
 export const DEFAULT_AIRA_GOAL_SETTINGS: AiraGoalSettings = {
-	enabled: true,
+	enabled: false,
 	auto: "smart",
 	maxRounds: 4,
 	tokenBudget: undefined,

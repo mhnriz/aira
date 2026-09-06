@@ -1314,7 +1314,7 @@ export class SettingsManager {
 	} {
 		const goals = this.settings.goals;
 		if (!goals || typeof goals !== "object") {
-			return { enabled: true, auto: "smart", maxRounds: 4, tokenBudget: undefined, maxDurationMs: undefined };
+			return { enabled: false, auto: "smart", maxRounds: 4, tokenBudget: undefined, maxDurationMs: undefined };
 		}
 		const auto = goals.auto === "off" || goals.auto === "always" ? goals.auto : "smart";
 		const rawRounds = goals.maxRounds;
@@ -1336,7 +1336,7 @@ export class SettingsManager {
 				? Math.floor(rawDuration)
 				: undefined;
 		return {
-			enabled: goals.enabled === undefined ? true : goals.enabled === true,
+			enabled: goals.enabled === undefined ? false : goals.enabled === true,
 			auto,
 			maxRounds,
 			tokenBudget,
