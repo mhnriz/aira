@@ -330,6 +330,116 @@ generation/tool/compaction regressions. Focused validation passed: 8 files,
 build, full test results, built-CLI dogfood, and commit details are recorded in
 the Stage 6 implementation record. No push was performed.
 
+#### Stage 7 disposition — implemented
+
+Stage 7 was limited to runtime, provider, and process-lifecycle behavior. The
+current HEAD audit found several requested upstream fixes already represented by
+Aira-native code or earlier local adaptations. Only the two remaining correctness
+gaps were changed:
+
+- `bea67d90d1a74dde8852c63cac72d476013d3879` — David Brailovsky,
+  `fix(coding-agent): cancel compaction on session abort`. **ADAPTED NOW** in
+  local commit `d69a95b81`. Session idle tracking now includes compaction and
+  branch summarization; `abort()` cancels those controllers and waits for cleanup
+  before resolving. Deterministic manual-compaction abort coverage passes.
+- `c2d3dc55b0b20af5aa3bb1d25774968116c9733f` — Qiaochu Hu,
+  `fix(agent): map signal-killed processes to non-zero exit codes (#8994)`.
+  **ADAPTED NOW** in local commit `702f8a21a`. `NodeExecutionEnv` and the Aira
+  execution manager preserve the signal and report `128 + signal number`, while
+  explicit user cancellation and timeout statuses remain distinct.
+
+### Stage 7 at-a-glance upstream disposition
+
+| Upstream | Disposition | Aira result |
+|---|---|---|
+| `bea67d9` | adapted now | compaction/branch-summary abort and idle cleanup |
+| `e44d75c` | design-only | retain Aira's existing branch-summary budget |
+| `2631b25` | already present | local `0bb06b350` preserves compaction boundaries across forks |
+| `1a773c8` | already present | local `d8b5f7ec3` protects imported-session collisions |
+| `2b768ba` | already present | local `f5056682f` restores external in-memory entries |
+| `6f35de5` | already present | local `87b575c67` isolates concurrent share exports |
+| `0095bce` | already present in Aira-native form | bounded execution-manager buffers and spill-backed shell capture |
+| `d14d6b2` | design-only | documentation/status follow-up depends on the upstream graph |
+| `c2d3dc5` | adapted now | truthful signal exit codes in agent and Aira runtimes |
+| `8b5899d` | already present in current provider contracts | provider-specific stream compatibility and event-stream tests |
+| `0fdec07` | already present in current provider contracts | thinking blocks/signatures and reasoning metadata are retained |
+| `4e69b0c` | already present in current turn snapshot path | per-turn reasoning is passed through the captured turn; no settings transplant |
+
+### Stage 7 deep audit
+
+Compaction/session lifecycle commits were inspected in order. `bea67d9` fixed a
+real Aira gap. `e44d75c20a51142abc056c243b13c1d7bb4be687` — Vegard Stikbakke,
+`fix(coding-agent): raise branch summary output cap` — changes the upstream
+branch-summary request to `min(4096, model.maxTokens)` and its settings contract.
+Aira's branch summarization and compaction budget are independently configured;
+the existing output cap was retained as **DESIGN_ONLY** rather than increasing
+token cost without a matching Aira budget decision.
+
+The session lifecycle commits were also inspected in full:
+
+- `1a773c8e7a535e35a15e9babc37231e515b18794` — wutongyuonce,
+  `fix(coding-agent): avoid overwriting imported sessions (#8985)`. Already
+  present as `d8b5f7ec3`; import collision safety is covered by runtime tests.
+- `2b768ba42cdbd7336474d6986a3ef1efbb0a44f7` — Julien Barbay,
+  `feat(coding-agent): ingest external entries in in-memory sessions (#8980)`.
+  Already present as `f5056682f`; external entries retain ids, parents, labels,
+  compaction references, and session headers.
+- `6f35de5b598037c28e05f52e23a00301e1275819` — wutongyuonce,
+  `fix(coding-agent): isolate concurrent session shares (#8613)`. Already
+  present as `87b575c67`; each share uses a private temporary directory and
+  cleanup is scoped to that directory.
+- `2631b25c34cbfcb660b1f05e1fe77170c1cf1f82` — yaogangqiang,
+  `fix(coding-agent): preserve compaction boundary when forking (#8990)`.
+  Already present as `0bb06b350`; forked compaction entries rewrite
+  `firstKeptEntryId` through removed-label replacements without duplicating or
+  losing the boundary.
+
+The process/output family was inspected in full:
+
+- `0095bce7db4fe6a63524b37535315f41b086656d` — Mario Zechner,
+  `fix(agent): bound shell execution output`. The upstream patch introduces a
+  producer-side adaptive publisher and spill/capture subsystem. Aira already
+  bounds managed stdout/stderr with `BoundedOutputBuffer`, retains tails, tracks
+  truncation, and uses spill-backed `executeShellWithCapture`; no duplicate
+  process subsystem was added.
+- `d14d6b22327d545d6a253f932165b63e48d7f9c8` — Mario Zechner,
+  `fix(agent): finalize bounded shell output integration`. This is a handoff,
+  documentation, and graph-budget follow-up to `0095bce`; it remains
+  **DESIGN_ONLY** for Aira.
+- `c2d3dc55b0b20af5aa3bb1d25774968116c9733f` — Qiaochu Hu, as above. Tests
+  cover SIGKILL in `NodeExecutionEnv` and SIGTERM in the managed process
+  manager. Aira cancellation still reports `cancelled` and timeout still
+  reports `timed-out`; external signal death is an exited, non-success result.
+
+The provider/stream family was inspected in full:
+
+- `8b5899dce26f9f6b8d313ee6a4b4a8dccbb9bfc2` — Armin Ronacher,
+  `fix(ai): restore stream compatibility`. The current Aira provider APIs use
+  the compatible stream failure and tool-call framing rules; the upstream
+  `AssistantMessageFrameEncoder` tree is not part of Aira's current package and
+  was not transplanted.
+- `0fdec07ba3973f9bd008cbfffb0eaa10ace8c5b3` — Armin Ronacher,
+  `fix(ai): preserve provider thinking level in frames`. Current Aira retains
+  thinking blocks, signatures, usage reasoning, and per-provider reasoning
+  metadata in the existing event stream and assistant message types.
+- `4e69b0c28060f0f02fbe38bfa7c21a2e2eb25057` — Mario Zechner,
+  `feat(ai): preserve Anthropic per-turn thinking effort`. Aira already owns
+  reasoning per turn through `prepareNextTurnWithContext` and captured generation
+  options, but its settings/provider composition differs from the 33-file
+  upstream change. No lockfile, settings UI, or catalog transplant was made.
+
+Stage 3 captured provider configuration remains unchanged; Stage 4 durable tool
+effects remain outside MutationLine; Stage 6 operation observation, cancellation,
+and recovery remain the sole durable boundary. Goal/verifier authority,
+Workbench presentation, session import/reopen/fork behavior, and existing
+process UX were not redesigned. No Stage 8 TUI, Chord/Delta, remote, catalog,
+verifier, or Phase 15 work was started.
+
+Focused validation passed for compaction (24 tests), Node execution (30 passed,
+1 platform skip), and managed execution (22 tests). The full regression/build,
+built-CLI dogfood, and final Stage 7 status are recorded with the implementation
+commits above. No push was performed.
+
 ### Stage 2 — Session and Branch separation
 
 - Define explicit global `Session` and path-only `Branch` interfaces.
