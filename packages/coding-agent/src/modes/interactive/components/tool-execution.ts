@@ -161,6 +161,11 @@ export class ToolExecutionComponent extends Container {
 		return this.toolName;
 	}
 
+	/** Human-facing label: the definition label when present, else the tool name. */
+	private get displayLabel(): string {
+		return this.toolDefinition?.label ?? this.builtInToolDefinition?.label ?? this.toolName;
+	}
+
 	/** Whether the settled result contains inline images (groups hide images while compact). */
 	hasImageResult(): boolean {
 		return (this.result?.content ?? []).some((content) => content.type === "image");
@@ -208,10 +213,10 @@ export class ToolExecutionComponent extends Container {
 
 	private createCallFallback(): Component {
 		if (this.expanded) {
-			return new Text(theme.fg("toolTitle", theme.bold(this.toolName)), 0, 0);
+			return new Text(theme.fg("toolTitle", theme.bold(this.displayLabel)), 0, 0);
 		}
 		return new Text(
-			buildCompactRow(theme, { status: COMPACT_STATUS[this.getStatus()], label: this.toolName, targetText: "" }),
+			buildCompactRow(theme, { status: COMPACT_STATUS[this.getStatus()], label: this.displayLabel, targetText: "" }),
 			0,
 			0,
 		);
@@ -472,7 +477,7 @@ export class ToolExecutionComponent extends Container {
 			const output = this.getTextOutput();
 			const row = buildCompactRow(theme, {
 				status: COMPACT_STATUS[this.getStatus()],
-				label: this.toolName,
+				label: this.displayLabel,
 				targetText: "",
 			});
 			const lines = output ? output.split("\n") : [];
@@ -484,7 +489,7 @@ export class ToolExecutionComponent extends Container {
 			return `${row}\n${preview.map((line) => theme.fg("toolOutput", line)).join("\n")}${remaining > 0 ? `\n${theme.fg("muted", `... (${remaining} more lines,`)} ${keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}` : ""}`;
 		}
 
-		let text = theme.fg("toolTitle", theme.bold(this.toolName));
+		let text = theme.fg("toolTitle", theme.bold(this.displayLabel));
 		const content = JSON.stringify(this.args, null, 2);
 		if (content) {
 			text += `\n\n${content}`;

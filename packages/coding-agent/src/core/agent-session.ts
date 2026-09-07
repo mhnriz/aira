@@ -102,6 +102,7 @@ import type { AiraVerificationHandle } from "../aira/verification/manager.ts";
 import { type AiraVerificationManagerOptions, createAiraVerificationManager } from "../aira/verification/manager.ts";
 import type { AiraVerifierRuntime } from "../aira/verification/verifier.ts";
 import { type AiraWorkspaceOwnershipHandle, createAiraWorkspaceOwnershipManager } from "../aira/workspace/ownership.ts";
+import { decorateAiraIntelligenceRenderers } from "../core/tools/aira-intelligence-renderers.ts";
 import { getThemeByName, theme } from "../modes/interactive/theme/theme.ts";
 import { stripFrontmatter } from "../utils/frontmatter.ts";
 import { sleep } from "../utils/sleep.ts";
@@ -3391,8 +3392,11 @@ export class AgentSession {
 
 		// Aira intelligence seam: read-only discovery, module orientation, and
 		// semantic navigation share this session's coordinator and providers.
+		// Presentation-only: friendly labels and compact renderers are attached
+		// by a decorate step; the model-facing tools and their raw results are
+		// unchanged.
 		const airaIntelligenceTools = this._airaIntelligence
-			? createAiraIntelligenceToolDefinitions({ runtime: this._airaIntelligence })
+			? decorateAiraIntelligenceRenderers(createAiraIntelligenceToolDefinitions({ runtime: this._airaIntelligence }))
 			: {};
 		Object.assign(baseToolDefinitions, airaIntelligenceTools);
 

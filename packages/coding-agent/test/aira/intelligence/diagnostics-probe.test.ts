@@ -3,8 +3,10 @@ import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import type { TUI } from "@earendil-works/pi-tui";
 import { afterEach, describe, expect, it } from "vitest";
 import { type AiraIntelligenceHandle, createAiraIntelligence } from "../../../src/aira/intelligence/coordinator.ts";
+import { createAiraIntelligenceToolDefinitions } from "../../../src/aira/intelligence/model-tools.ts";
 import {
 	commandOnPath,
 	resolveLaunchSpec,
@@ -12,6 +14,10 @@ import {
 } from "../../../src/aira/intelligence/providers/live-code/registry.ts";
 import { resolveAiraProjectInto } from "../../../src/aira/project/index.ts";
 import { type AiraSessionState, acquireAiraSessionState, disposeAiraSessionState } from "../../../src/aira/state.ts";
+import { decorateAiraIntelligenceRenderers } from "../../../src/core/tools/aira-intelligence-renderers.ts";
+import { ToolExecutionComponent } from "../../../src/modes/interactive/components/tool-execution.ts";
+import { initTheme } from "../../../src/modes/interactive/theme/theme.ts";
+import { stripAnsi } from "../../../src/utils/ansi.ts";
 
 /**
  * Focused real-language-server validation for the model-facing diagnostics
@@ -126,5 +132,68 @@ describe(
 			expect(state.intelligence?.liveCode.spawnCount).toBe(1);
 			expect(state.intelligence?.liveCode.crashCount).toBe(0);
 		});
+
+		it(
+			"dogfood: the real diagnostics payload renders polished in the conversation",
+			{ timeout: 60_000 },
+			async () => {
+				const root = makeProbeProject("rendered");
+				const state = projectState(root);
+				const handle = createAiraIntelligence(state, undefined, {
+					cacheDir: join(tmpdir(), "probe-cache-rendered"),
+					diagnosticsQueryWaitMs: 20_000,
+				});
+				activeHarnesses.push({ state, handle });
+				await handle.activate();
+				await handle.waitUntilSettled();
+
+				const payload = await handle.diagnostics({ paths: ["src/probe.ts"] });
+				expect(payload.status).toBe("ready");
+				const file = payload.files.find((entry) => entry.path === "src/probe.ts");
+				expect(file?.diagnostics[0]?.severity).toBe("error");
+
+				// The human conversation renders the REAL structured payload
+				// through the presentation layer. The model-facing content and
+				// details remain the raw JSON object.
+				initTheme("dark");
+				const definitions = decorateAiraIntelligenceRenderers(
+					createAiraIntelligenceToolDefinitions({ runtime: handle }),
+				);
+				const result = await (
+					definitions.aira_diagnostics.execute as (
+						id: string,
+						params: { paths: string[] },
+					) => Promise<{
+						content: Array<{ type: string; text: string }>;
+						details: unknown;
+					}>
+				)("dogfood-call", { paths: ["src/probe.ts"] });
+				expect(result.details).toEqual(payload);
+				expect(result.content[0].text).toBe(JSON.stringify(payload));
+
+				const component = new ToolExecutionComponent(
+					"aira_diagnostics",
+					"dogfood-call",
+					{ paths: ["src/probe.ts"] },
+					{},
+					definitions.aira_diagnostics,
+					{ requestRender: () => {} } as unknown as TUI,
+					root,
+				);
+				component.markExecutionStarted();
+				component.updateResult({ ...result, isError: false });
+				const lines = stripAnsi(component.render(120).join("\n")).split("\n");
+
+				// Polished compact view — no raw JSON dump.
+				expect(lines[0]).toContain("✓");
+				expect(lines[0]).toContain("Diagnostics");
+				expect(lines[0]).toContain("src/probe.ts");
+				expect(lines[0]).toContain("1 error");
+				expect(lines[1]).toContain("2322 · 1:7");
+				expect(lines[2]).toContain("Type 'number' is not assignable to type 'string'.");
+				expect(lines.join("\n")).not.toContain('"status"');
+				expect(lines.join("\n")).not.toContain('"diagnostics"');
+			},
+		);
 	},
 );
