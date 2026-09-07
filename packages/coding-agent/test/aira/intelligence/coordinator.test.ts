@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -406,5 +407,136 @@ describe("intelligence coordinator", () => {
 		});
 		expect(state.intelligence?.findings.errors).toBe(0);
 		disposeAiraSessionState(state.sessionId, state);
+	});
+
+	describe("diagnostics query", () => {
+		it("returns structured LSP diagnostics for explicit paths and publishes counts into state", async () => {
+			const root = makeProject("qdiag");
+			const bad = join(root, "src", "tray.ts");
+			const clean = join(root, "src", "clean.ts");
+			writeFileSync(bad, "export function stabilizeTray() { ERROR_MARKER }");
+			writeFileSync(clean, "export function fine() {}");
+			const state = projectState(root);
+			const handle = createAiraIntelligence(state, undefined, {
+				cacheDir: join(tmpdir(), "qdiag-cache"),
+				liveCodeOptions,
+			});
+			activeHarnesses.push({ state, handle });
+			await handle.activate();
+			await handle.waitUntilSettled();
+
+			const result = await handle.diagnostics({ paths: ["src/tray.ts", "src/clean.ts"] });
+			expect(result.status).toBe("ready");
+			expect(result.scope).toBe("explicit");
+			expect(result.truncated).toBe(false);
+			const badFile = result.files.find((f) => f.path === "src/tray.ts");
+			expect(badFile?.status).toBe("ready");
+			expect(badFile?.diagnostics[0]).toMatchObject({
+				severity: "error",
+				code: "mock-err",
+				source: "mock-lsp",
+				line: 1,
+				character: 1,
+			});
+			expect(badFile?.diagnostics[0]?.message).toContain("ERROR_MARKER");
+			const cleanFile = result.files.find((f) => f.path === "src/clean.ts");
+			expect(cleanFile?.status).toBe("ready");
+			expect(cleanFile?.diagnostics).toEqual([]);
+			expect(result.totals).toEqual({ errors: 1, warnings: 0, other: 0 });
+
+			// Engineering Context / Workbench state reflects the count.
+			expect(state.intelligence?.findings.errors).toBe(1);
+			const context = handle.providePromptContext("check the tray file");
+			expect(context).toContain("Diagnostics");
+			expect(context).toContain("ERROR_MARKER");
+		});
+
+		it("scopes the default query to the working set and reports per-file states", async () => {
+			const root = makeProject("qscope");
+			execFileSync("git", ["init", "-q"], { cwd: root });
+			writeFileSync(join(root, "src", "tray.ts"), "export function stabilizeTray() { ERROR_MARKER }");
+			writeFileSync(join(root, "src", "other.ts"), "export function other() {}");
+			const state = projectState(root);
+			const handle = createAiraIntelligence(state, undefined, {
+				cacheDir: join(tmpdir(), "qscope-cache"),
+				liveCodeOptions,
+			});
+			activeHarnesses.push({ state, handle });
+			await handle.activate();
+			await handle.waitUntilSettled();
+
+			// Everything in the fresh repo is untracked, so the git working set
+			// covers the project files; non-server file types degrade per file.
+			const result = await handle.diagnostics();
+			expect(result.status).toBe("ready");
+			expect(result.scope).toBe("working-set");
+			const tray = result.files.find((f) => f.path === "src/tray.ts");
+			expect(tray?.status).toBe("ready");
+			expect(tray?.diagnostics[0]?.message).toContain("ERROR_MARKER");
+			expect(result.totals.errors).toBeGreaterThanOrEqual(1);
+			// JSON files have no language server: truthful per-file status, not
+			// fabricated diagnostics.
+			expect(result.files.some((f) => f.path === "package.json" && f.status === "unsupported-language")).toBe(true);
+		});
+
+		it("flags invalid explicit paths without failing the whole query", async () => {
+			const root = makeProject("qinvalid");
+			writeFileSync(join(root, "src", "tray.ts"), "export function stabilizeTray() { ERROR_MARKER }");
+			const state = projectState(root);
+			const handle = createAiraIntelligence(state, undefined, {
+				cacheDir: join(tmpdir(), "qinvalid-cache"),
+				liveCodeOptions,
+			});
+			activeHarnesses.push({ state, handle });
+			await handle.activate();
+			await handle.waitUntilSettled();
+
+			const result = await handle.diagnostics({ paths: ["src/tray.ts", "missing.ts", "../outside.ts"] });
+			expect(result.status).toBe("ready");
+			expect(result.files.find((f) => f.path === "missing.ts")?.status).toBe("invalid-path");
+			expect(result.files.find((f) => f.path === "../outside.ts")?.status).toBe("invalid-path");
+			expect(result.files.find((f) => f.path === "src/tray.ts")?.status).toBe("ready");
+			expect(result.totals.errors).toBe(1);
+		});
+
+		it("reports unavailable when no language-server support is armed", async () => {
+			// A bare git repo with no code evidence is low confidence and
+			// conservative: the repository arms, the live-code provider never does.
+			const root = join(tmpdir(), `aira-intel-qunav-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+			mkdirSync(join(root, ".git"), { recursive: true });
+			writeFileSync(join(root, "README.md"), "nothing here");
+			mkdirSync(join(root, "src"), { recursive: true });
+			writeFileSync(join(root, "src", "tray.ts"), "export function a() {}");
+			const state = projectState(root);
+			const handle = createAiraIntelligence(state, undefined, { cacheDir: join(tmpdir(), "qunav-cache") });
+			activeHarnesses.push({ state, handle });
+			await handle.activate();
+			await handle.waitUntilSettled();
+			expect(state.intelligence?.active).toBe(true);
+			const result = await handle.diagnostics({ paths: ["src/tray.ts"] });
+			expect(result.status).toBe("unavailable");
+			expect(result.files).toEqual([]);
+			// The tool surface degrades; context stays useful.
+			expect(handle.providePromptContext("anything")).toBeDefined();
+		});
+
+		it("cancels promptly when the query signal is already aborted", async () => {
+			const root = makeProject("qcancel");
+			writeFileSync(join(root, "src", "tray.ts"), "export function stabilizeTray() { ERROR_MARKER }");
+			const state = projectState(root);
+			const handle = createAiraIntelligence(state, undefined, {
+				cacheDir: join(tmpdir(), "qcancel-cache"),
+				liveCodeOptions,
+			});
+			activeHarnesses.push({ state, handle });
+			await handle.activate();
+			await handle.waitUntilSettled();
+
+			const controller = new AbortController();
+			controller.abort();
+			const result = await handle.diagnostics({ paths: ["src/tray.ts"], signal: controller.signal });
+			expect(result.status).toBe("cancelled");
+			expect(result.files).toEqual([]);
+		});
 	});
 });

@@ -417,4 +417,150 @@ describe("live-code provider (mock language server)", () => {
 		}
 		await provider.dispose();
 	});
+
+	describe("live-code diagnostics query (batch)", () => {
+		it("returns structured diagnostics per file and empty lists for clean files", async () => {
+			const root = makeRoot("query-batch");
+			const bad = join(root, "src", "bad.ts");
+			const clean = join(root, "src", "clean.ts");
+			mkdirSync(join(root, "src"), { recursive: true });
+			writeFileSync(bad, "export function bad() { ERROR_MARKER }");
+			writeFileSync(clean, "export function clean() {}");
+
+			const { provider } = providerFor(root);
+			const result = await provider.requestDiagnostics([bad, clean]);
+			expect(result.status).toBe("ready");
+			expect(result.files).toHaveLength(2);
+			const badFile = result.files.find((f) => f.path === bad);
+			expect(badFile?.status).toBe("ready");
+			expect(badFile?.diagnostics[0]).toMatchObject({
+				line: 1,
+				character: 1,
+				severity: "error",
+				code: "mock-err",
+				source: "mock-lsp",
+			});
+			expect(badFile?.diagnostics[0]?.message).toContain("ERROR_MARKER");
+			const cleanFile = result.files.find((f) => f.path === clean);
+			// A publish arrived and the file is clean: ready with an empty list,
+			// never confused with a missing publish.
+			expect(cleanFile?.status).toBe("ready");
+			expect(cleanFile?.diagnostics).toEqual([]);
+			expect(result.totals).toEqual({ errors: 1, warnings: 0, other: 0 });
+			// One cold start serves both files.
+			expect(provider.statusInfo().spawnCount).toBe(1);
+			await provider.dispose();
+		});
+
+		it("distinguishes a clean publish from no publish within the budget", async () => {
+			const root = makeRoot("query-nopublish");
+			const silent = join(root, "src", "silent.ts");
+			mkdirSync(join(root, "src"), { recursive: true });
+			writeFileSync(silent, "export function silent() {}");
+
+			const { provider } = providerFor(root, { serverArgs: ["--no-publish"] });
+			const result = await provider.requestDiagnostics([silent], { waitMs: 150 });
+			expect(result.status).toBe("ready");
+			expect(result.files[0]?.status).toBe("no-publish");
+			expect(result.files[0]?.diagnostics).toEqual([]);
+			expect(result.totals).toEqual({ errors: 0, warnings: 0, other: 0 });
+			await provider.dispose();
+		});
+
+		it("clears diagnostic state when the file is fixed", async () => {
+			const root = makeRoot("query-fix");
+			const file = join(root, "src", "tray.ts");
+			mkdirSync(join(root, "src"), { recursive: true });
+			writeFileSync(file, "export function bad() { ERROR_MARKER }");
+
+			const { provider } = providerFor(root);
+			const first = await provider.requestDiagnostics([file]);
+			expect(first.files[0]?.diagnostics).toHaveLength(1);
+			expect(first.totals.errors).toBe(1);
+
+			writeFileSync(file, "export function bad() { /* fixed */ }");
+			const second = await provider.requestDiagnostics([file]);
+			expect(second.files[0]?.status).toBe("ready");
+			expect(second.files[0]?.diagnostics).toEqual([]);
+			expect(second.totals.errors).toBe(0);
+			await provider.dispose();
+		});
+
+		it("reports unsupported languages, unreadable files, and crashed servers per file", async () => {
+			const root = makeRoot("query-states");
+			const tsFile = join(root, "src", "ok.ts");
+			const textFile = join(root, "src", "notes.txt");
+			const missing = join(root, "src", "gone.ts");
+			mkdirSync(join(root, "src"), { recursive: true });
+			writeFileSync(tsFile, "export function ok() {}");
+			writeFileSync(textFile, "plain text");
+
+			const { provider } = providerFor(root);
+			const result = await provider.requestDiagnostics([tsFile, textFile, missing]);
+			expect(result.status).toBe("ready");
+			expect(result.files.map((f) => [f.path, f.status]).sort()).toEqual(
+				[
+					[tsFile, "ready"],
+					[textFile, "unsupported-language"],
+					[missing, "unreadable"],
+				].sort(),
+			);
+			await provider.dispose();
+
+			// A server crashing at handshake degrades truthfully: no fabricated
+			// diagnostics, distinct status, crash recorded in health.
+			const { provider: crashed } = providerFor(root, { crash: true });
+			const crashedResult = await crashed.requestDiagnostics([tsFile]);
+			expect(crashedResult.status).toBe("ready");
+			expect(crashedResult.files[0]?.status).toBe("server-unavailable");
+			expect(crashedResult.files[0]?.diagnostics).toEqual([]);
+			expect(crashedResult.totals.errors).toBe(0);
+			expect(crashed.statusInfo().crashCount).toBeGreaterThanOrEqual(1);
+			expect(crashed.statusInfo().status).toBe("degraded");
+			await crashed.dispose();
+		});
+
+		it("bounds files per query and diagnostics per file", async () => {
+			const root = makeRoot("query-bounds");
+			const files = Array.from({ length: 12 }, (_, i) => {
+				const file = join(root, "src", `f${i}.ts`);
+				mkdirSync(join(root, "src"), { recursive: true });
+				writeFileSync(file, "export function f() {}");
+				return file;
+			});
+
+			const { provider } = providerFor(root, { serverArgs: ["--many-diagnostics"] });
+			const result = await provider.requestDiagnostics(files, {
+				maxFiles: 3,
+				maxDiagnosticsPerFile: 5,
+			});
+			expect(result.status).toBe("ready");
+			expect(result.truncated).toBe(true);
+			expect(result.files).toHaveLength(3);
+			for (const file of result.files) {
+				expect(file.status).toBe("ready");
+				expect(file.diagnostics).toHaveLength(5);
+				expect(file.truncated).toBe(true);
+			}
+			expect(result.totals.errors).toBe(15);
+			await provider.dispose();
+		});
+
+		it("cancels an in-flight query on disposal without leaving waits hanging", async () => {
+			const root = makeRoot("query-dispose");
+			const file = join(root, "src", "tray.ts");
+			mkdirSync(join(root, "src"), { recursive: true });
+			writeFileSync(file, "export function a() {}");
+
+			// A server that never publishes keeps the wait budget open, so the
+			// query is still in-flight when disposal happens.
+			const { provider } = providerFor(root, { serverArgs: ["--no-publish"] });
+			const query = provider.requestDiagnostics([file], { waitMs: 5_000 });
+			await new Promise((resolve) => setTimeout(resolve, 120));
+			await provider.dispose();
+			const result = await query;
+			expect(result.status).toBe("cancelled");
+			expect(result.files).toEqual([]);
+		});
+	});
 });

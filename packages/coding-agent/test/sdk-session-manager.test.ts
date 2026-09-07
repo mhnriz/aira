@@ -188,7 +188,12 @@ describe("createAgentSession session manager defaults", () => {
 		try {
 			await session.prompt("inspect the project");
 			expect(capturedTools).toEqual(
-				expect.arrayContaining(["aira_symbol_search", "aira_module_report", "aira_semantic_navigation"]),
+				expect.arrayContaining([
+					"aira_symbol_search",
+					"aira_module_report",
+					"aira_semantic_navigation",
+					"aira_diagnostics",
+				]),
 			);
 		} finally {
 			session.dispose();

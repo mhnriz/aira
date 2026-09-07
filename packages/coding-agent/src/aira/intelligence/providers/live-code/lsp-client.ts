@@ -149,6 +149,13 @@ export class LspClient {
 						references: { dynamicRegistration: false },
 						documentSymbol: { dynamicRegistration: false, hierarchicalDocumentSymbolSupport: true },
 						synchronization: { didSave: false },
+						// Without this capability, modern servers (e.g.
+						// typescript-language-server v6) never push diagnostics —
+						// they gate publishDiagnostics delivery on the client
+						// declaring support (verification finding). Pull-based
+						// `textDocument.diagnostic` is deliberately NOT advertised:
+						// this client ingests push publications only.
+						publishDiagnostics: { relatedInformation: true },
 					},
 					// NOTE: do NOT advertise `workspace.workspaceFolders: true` here.
 					// Empirically, pyright (vscode-languageserver) suppresses

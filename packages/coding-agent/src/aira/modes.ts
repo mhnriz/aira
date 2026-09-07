@@ -44,6 +44,7 @@ export const AIRA_INTELLIGENCE_TOOLS: readonly string[] = [
 	"aira_symbol_search",
 	"aira_module_report",
 	"aira_semantic_navigation",
+	"aira_diagnostics",
 ];
 
 /**

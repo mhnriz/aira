@@ -73,6 +73,7 @@ describe("Aira modes", () => {
 			"aira_symbol_search",
 			"aira_module_report",
 			"aira_semantic_navigation",
+			"aira_diagnostics",
 			"read",
 			"grep",
 			"find",

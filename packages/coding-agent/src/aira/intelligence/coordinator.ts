@@ -22,7 +22,13 @@ import type { AiraSessionState } from "../state.ts";
 import { decideIntelligenceActivation, type IntelligenceActivation, isConservativeActivation } from "./activation.ts";
 import { buildIntelligenceContext } from "./context.ts";
 import { type AiraFindingSeverity, AiraFindingsStore, type AiraFreshnessVerdict } from "./findings.ts";
-import type { LiveCodeSemanticOperation, LiveCodeSemanticResult } from "./providers/live-code/index.ts";
+import type {
+	LiveCodeDiagnosticEntry,
+	LiveCodeDiagnosticsFileStatus,
+	LiveCodeDiagnosticsQueryResult,
+	LiveCodeSemanticOperation,
+	LiveCodeSemanticResult,
+} from "./providers/live-code/index.ts";
 import { LiveCodeProvider } from "./providers/live-code/index.ts";
 import { RepositoryProvider } from "./providers/repository/index.ts";
 import type { GitChangeFileStats } from "./providers/repository/relationships.ts";
@@ -40,6 +46,8 @@ export interface AiraIntelligenceOptions {
 	postEditDebounceMs?: number;
 	/** Live-code provider options (tests inject the mock server). */
 	liveCodeOptions?: ConstructorParameters<typeof LiveCodeProvider>[2];
+	/** Publish wait budget for explicit diagnostics queries (default 8s). */
+	diagnosticsQueryWaitMs?: number;
 }
 
 /** The host-facing handle (owned by AgentSession). */
@@ -72,6 +80,7 @@ export interface AiraIntelligenceHandle {
 	searchSymbols(query: string, limit?: number): AiraSymbolSearchResult;
 	moduleReport(path: string, limit?: number): Promise<AiraModuleReportResult>;
 	semanticNavigation(query: AiraSemanticNavigationQuery): Promise<AiraSemanticNavigationResult>;
+	diagnostics(query?: AiraDiagnosticsQuery): Promise<AiraDiagnosticsResult>;
 	/** Subscribe to intelligence snapshot changes (Phase 12 UI seam). */
 	subscribe(listener: (status: AiraIntelligenceStatus) => void): () => void;
 	dispose(): Promise<void>;
@@ -113,6 +122,36 @@ export interface AiraSemanticNavigationQuery {
 	signal?: AbortSignal;
 }
 
+/**
+ * Model-facing diagnostics query. Paths are project-relative; when omitted
+ * the working set (changed files) is diagnosed — never the whole repository.
+ */
+export interface AiraDiagnosticsQuery {
+	paths?: string[];
+	/** Maximum diagnostic entries per file (default 50). */
+	limit?: number;
+	signal?: AbortSignal;
+}
+
+export interface AiraDiagnosticsFileResult {
+	/** Project-relative path. */
+	path: string;
+	status: LiveCodeDiagnosticsFileStatus | "invalid-path";
+	diagnostics: LiveCodeDiagnosticEntry[];
+	truncated: boolean;
+	reason?: string;
+}
+
+export type AiraDiagnosticsResult = {
+	status: "ready" | "no-targets" | "unavailable" | "cancelled" | "degraded";
+	/** What the query targeted (explicit paths or the changed working set). */
+	scope: "explicit" | "working-set";
+	files: AiraDiagnosticsFileResult[];
+	totals: { errors: number; warnings: number; other: number };
+	truncated: boolean;
+	reason?: string;
+};
+
 export type AiraSemanticNavigationResult =
 	| (LiveCodeSemanticResult & { path: string; suggestedNext?: { tool: "read"; path: string; line?: number } })
 	| {
@@ -126,6 +165,11 @@ export type AiraSemanticNavigationResult =
 	  };
 
 const DEFAULT_POST_EDIT_DEBOUNCE_MS = 400;
+/** Explicit diagnostics queries may cold-start a server, so the publish
+ * budget is generous but bounded; it resolves early when publishes land. */
+const DEFAULT_DIAGNOSTICS_QUERY_WAIT_MS = 8000;
+const MAX_DIAGNOSTICS_QUERY_FILES = 10;
+const MAX_DIAGNOSTICS_QUERY_PER_FILE = 100;
 
 function clampLimit(value: number, maximum: number): number {
 	return Math.max(1, Math.min(Math.floor(value), maximum));
@@ -432,6 +476,100 @@ export class IntelligenceCoordinator implements AiraIntelligenceHandle {
 						},
 					}
 				: {}),
+		};
+	}
+
+	/**
+	 * Model-facing diagnostics: scope resolution (explicit paths or the
+	 * changed working set), then the live-code provider's existing sync +
+	 * publish-wait machinery. Never scans or diagnoses the whole repository.
+	 */
+	async diagnostics(query: AiraDiagnosticsQuery = {}): Promise<AiraDiagnosticsResult> {
+		const emptyTotals = { errors: 0, warnings: 0, other: 0 };
+		const scope: "explicit" | "working-set" = query.paths && query.paths.length > 0 ? "explicit" : "working-set";
+		if (!this.liveCode) {
+			return {
+				status: "unavailable",
+				scope,
+				files: [],
+				totals: emptyTotals,
+				truncated: false,
+				reason: "live-code intelligence is unavailable (no language server support armed)",
+			};
+		}
+		try {
+			query.signal?.throwIfAborted();
+		} catch {
+			return { status: "cancelled", scope, files: [], totals: emptyTotals, truncated: false };
+		}
+
+		const files: AiraDiagnosticsFileResult[] = [];
+		const targets: string[] = [];
+		if (query.paths && query.paths.length > 0) {
+			const seen = new Set<string>();
+			for (const input of query.paths.slice(0, MAX_DIAGNOSTICS_QUERY_FILES)) {
+				if (seen.has(input)) {
+					continue;
+				}
+				seen.add(input);
+				const resolved = await this.resolveProjectPath(input);
+				if (resolved.ok) {
+					targets.push(resolved.path);
+				} else {
+					files.push({
+						path: input,
+						status: "invalid-path",
+						diagnostics: [],
+						truncated: false,
+						reason: resolved.reason,
+					});
+				}
+			}
+		} else {
+			targets.push(...(this.repository?.changedAbsolutePaths() ?? []).slice(0, MAX_DIAGNOSTICS_QUERY_FILES));
+			if (targets.length === 0) {
+				return {
+					status: "no-targets",
+					scope,
+					files: [],
+					totals: emptyTotals,
+					truncated: false,
+					reason: "no changed or working-set files to diagnose",
+				};
+			}
+		}
+
+		let providerResult: LiveCodeDiagnosticsQueryResult;
+		try {
+			providerResult = await this.liveCode.requestDiagnostics(targets, {
+				waitMs:
+					this.options.diagnosticsQueryWaitMs ??
+					this.options.liveCodeOptions?.diagnosticWaitMs ??
+					DEFAULT_DIAGNOSTICS_QUERY_WAIT_MS,
+				maxFiles: MAX_DIAGNOSTICS_QUERY_FILES,
+				...(query.limit !== undefined
+					? { maxDiagnosticsPerFile: clampLimit(query.limit, MAX_DIAGNOSTICS_QUERY_PER_FILE) }
+					: {}),
+				signal: query.signal,
+			});
+		} catch (error) {
+			return {
+				status: "degraded",
+				scope,
+				files,
+				totals: emptyTotals,
+				truncated: false,
+				reason: error instanceof Error ? error.message : String(error),
+			};
+		}
+		this.publishStatus();
+		return {
+			status: providerResult.status,
+			scope,
+			files: [...files, ...providerResult.files.map((file) => ({ ...file, path: this.relativePath(file.path) }))],
+			totals: providerResult.totals,
+			truncated: providerResult.truncated || (query.paths?.length ?? 0) > MAX_DIAGNOSTICS_QUERY_FILES,
+			...(providerResult.reason ? { reason: providerResult.reason } : {}),
 		};
 	}
 

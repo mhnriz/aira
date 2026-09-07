@@ -77,6 +77,7 @@ const BUILTIN_AIRA_CAPABILITY_CLASSES = {
 	aira_symbol_search: "diagnostic",
 	aira_module_report: "diagnostic",
 	aira_semantic_navigation: "diagnostic",
+	aira_diagnostics: "diagnostic",
 	edit: "mutating",
 	write: "mutating",
 	bash: "process",

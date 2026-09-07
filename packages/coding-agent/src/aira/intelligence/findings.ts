@@ -37,6 +37,8 @@ export interface AiraFinding {
 	readonly severity: AiraFindingSeverity;
 	readonly message: string;
 	readonly code?: string | number;
+	/** The LSP source field the server attached to the diagnostic (e.g. "pyright"), when provided. */
+	readonly lspSource?: string;
 	readonly range?: { start: AiraFindingPosition; end: AiraFindingPosition };
 	/** LSP document version at collection time, when known. */
 	readonly version?: number;

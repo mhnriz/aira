@@ -52,6 +52,13 @@ function stubIntelligence(): AiraIntelligenceHandle {
 			truncated: false,
 		}),
 		semanticNavigation: async () => ({ status: "not-found", operation: "symbols", truncated: false }),
+		diagnostics: async () => ({
+			status: "unavailable",
+			scope: "explicit",
+			files: [],
+			totals: { errors: 0, warnings: 0, other: 0 },
+			truncated: false,
+		}),
 		subscribe: () => () => undefined,
 		dispose: async () => undefined,
 	};
@@ -74,6 +81,7 @@ describe("Aira child tool sets (Phase 9)", () => {
 			intelligence: stubIntelligence(),
 		});
 		expect(set.tools.map((tool) => tool.name).sort()).toEqual([
+			"aira_diagnostics",
 			"aira_module_report",
 			"aira_semantic_navigation",
 			"aira_symbol_search",

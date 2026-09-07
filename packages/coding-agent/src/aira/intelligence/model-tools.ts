@@ -28,9 +28,19 @@ const semanticNavigationSchema = Type.Object({
 	limit: Type.Optional(Type.Number({ description: "Maximum semantic locations (default 20)" })),
 });
 
+const diagnosticsSchema = Type.Object({
+	paths: Type.Optional(
+		Type.Array(Type.String({ description: "Project-relative source path" }), {
+			description: "Files to diagnose; defaults to changed/working-set files (never the whole repository)",
+		}),
+	),
+	limit: Type.Optional(Type.Number({ description: "Maximum diagnostics per file (default 50)" })),
+});
+
 type SymbolSearchParams = Static<typeof symbolSearchSchema>;
 type ModuleReportParams = Static<typeof moduleReportSchema>;
 type SemanticNavigationParams = Static<typeof semanticNavigationSchema>;
+type DiagnosticsParams = Static<typeof diagnosticsSchema>;
 
 function createDefinitions(runtimeForTools: AiraIntelligenceHandle) {
 	return {
@@ -74,6 +84,20 @@ function createDefinitions(runtimeForTools: AiraIntelligenceHandle) {
 			parameters: semanticNavigationSchema,
 			async execute(_toolCallId: string, params: SemanticNavigationParams, signal?: AbortSignal) {
 				return resultOf(await runtimeForTools.semanticNavigation({ ...params, signal }));
+			},
+		},
+		aira_diagnostics: {
+			name: "aira_diagnostics",
+			label: "aira_diagnostics",
+			description:
+				"Query live language-server diagnostics for specific or changed project files: severity, code, message, and 1-based line/character per finding, plus error/warning totals. Cold-starts the language server on demand; only the scoped files are diagnosed, never the whole repository. Per-file status is truthful: `ready` with an empty list means the file is clean, `no-publish` means the server produced nothing within the bounded budget, `server-unavailable` means the server could not start, `unsupported-language`/`invalid-path`/`unreadable` name the scope problem. Never runs compilers or builds.",
+			promptSnippet: "Query live LSP diagnostics for changed or specific files",
+			promptGuidelines: [
+				"Use after edits or before claiming a file is clean; pass project-relative paths, or omit `paths` to diagnose the changed/working-set files. Distinguish `ready` with no diagnostics (clean) from `no-publish`/`server-unavailable` before concluding.",
+			],
+			parameters: diagnosticsSchema,
+			async execute(_toolCallId: string, params: DiagnosticsParams, signal?: AbortSignal) {
+				return resultOf(await runtimeForTools.diagnostics({ ...params, signal }));
 			},
 		},
 	} satisfies Record<string, ToolDefinition>;

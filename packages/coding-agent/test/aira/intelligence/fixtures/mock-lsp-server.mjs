@@ -103,7 +103,20 @@ function handleNotification(method, params) {
 				message: "mock error: ERROR_MARKER present",
 			});
 		}
-		setTimeout(() => publishDiagnostics(doc.uri, doc.version, diagnostics), 40);
+		if (manyDiagnostics) {
+			for (let i = 0; i < 60; i += 1) {
+				diagnostics.push({
+					range: { start: { line: i, character: 0 }, end: { line: i, character: 1 } },
+					severity: 1,
+					code: `mock-${i}`,
+					source: "mock-lsp",
+					message: `mock diagnostic ${i}`,
+				});
+			}
+		}
+		if (!noPublish) {
+			setTimeout(() => publishDiagnostics(doc.uri, doc.version, diagnostics), 40);
+		}
 	}
 }
 
@@ -111,6 +124,8 @@ const crashOnInitialize = process.argv.includes("--crash-on-initialize");
 const crashAfterOpen = process.argv.includes("--crash-after-open");
 const manyReferences = process.argv.includes("--many-references");
 const delayNavigation = process.argv.includes("--delay-navigation");
+const noPublish = process.argv.includes("--no-publish");
+const manyDiagnostics = process.argv.includes("--many-diagnostics");
 // Never respond to initialize (the client's handshake request times out).
 const ignoreInitialize = process.argv.includes("--ignore-initialize");
 // Write this process's pid to a file so tests can assert the child was killed.

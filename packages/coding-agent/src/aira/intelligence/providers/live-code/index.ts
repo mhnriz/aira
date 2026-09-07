@@ -21,7 +21,7 @@
 import { readFile } from "node:fs/promises";
 import { extname, relative } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { AiraFindingsStore } from "../../findings.ts";
+import type { AiraFinding, AiraFindingSeverity, AiraFindingsStore } from "../../findings.ts";
 import {
 	convertCharacterOffset,
 	LSP_SEVERITY_ERROR,
@@ -108,6 +108,62 @@ export type LiveCodeSemanticResult =
 
 type LiveCodeSemanticFailureStatus = Exclude<LiveCodeSemanticResult["status"], "ready">;
 
+/** One structured LSP diagnostic, projected from the shared findings store. */
+export interface LiveCodeDiagnosticEntry {
+	/** 1-based line where the diagnostic starts. */
+	line?: number;
+	/** 1-based character where the diagnostic starts. */
+	character?: number;
+	severity: AiraFindingSeverity;
+	/** The server's diagnostic code when provided (e.g. "TS2322" / 2322). */
+	code?: string | number;
+	/** Origin: the server's own source field, else the language-server id. */
+	source: string;
+	message: string;
+}
+
+/**
+ * Per-file outcomes are truthful: `ready` with an empty list means the server
+ * published and the file is clean; `no-publish` means the server produced
+ * nothing inside the bounded budget; `server-unavailable` means it could not
+ * be started. Never fabricated.
+ */
+export type LiveCodeDiagnosticsFileStatus =
+	| "ready"
+	| "no-publish"
+	| "unsupported-language"
+	| "server-unavailable"
+	| "unreadable"
+	| "cancelled"
+	| "degraded";
+
+export interface LiveCodeDiagnosticsFileResult {
+	/** Absolute path (coordinator relativizes for the model surface). */
+	path: string;
+	status: LiveCodeDiagnosticsFileStatus;
+	diagnostics: LiveCodeDiagnosticEntry[];
+	truncated: boolean;
+	reason?: string;
+}
+
+export interface LiveCodeDiagnosticsQueryResult {
+	status: "ready" | "cancelled" | "degraded";
+	files: LiveCodeDiagnosticsFileResult[];
+	totals: { errors: number; warnings: number; other: number };
+	truncated: boolean;
+	reason?: string;
+}
+
+export interface LiveCodeDiagnosticsQueryOptions {
+	/** Publish wait budget per file (default: the provider's diagnosticWaitMs). */
+	waitMs?: number;
+	/** Hard cap on files diagnosed per query (default 10, max 20). */
+	maxFiles?: number;
+	/** Diagnostic entries cap per file (default 50, max 100). */
+	maxDiagnosticsPerFile?: number;
+	signal?: AbortSignal;
+}
+
 export interface LiveCodeProviderOptions {
 	/** How many documents to keep open per server (LRU; extras close first). */
 	maxOpenDocuments?: number;
@@ -135,6 +191,10 @@ const DEFAULT_CRASH_COOLDOWN_MS = 30_000;
 const DEFAULT_DIAGNOSTIC_WAIT_MS = 1200;
 const DEFAULT_SEMANTIC_RESULT_LIMIT = 50;
 const MAX_SEMANTIC_RESULT_LIMIT = 100;
+const DEFAULT_DIAGNOSTICS_MAX_FILES = 10;
+const MAX_DIAGNOSTICS_MAX_FILES = 20;
+const DEFAULT_DIAGNOSTICS_MAX_PER_FILE = 50;
+const MAX_DIAGNOSTICS_MAX_PER_FILE = 100;
 
 export class LiveCodeProvider {
 	private readonly clients = new Map<string, LspClient>();
@@ -142,6 +202,8 @@ export class LiveCodeProvider {
 	private readonly openDocuments = new Map<string, string>(); // path -> language
 	private readonly openOrder: string[] = [];
 	private readonly pendingDiagnostics = new Map<string, { timer: NodeJS.Timeout; waiters: Set<() => void> }>();
+	/** When each path last received a publishDiagnostics (truthful ready/no-publish split). */
+	private readonly diagnosticsPublishedAt = new Map<string, number>();
 	private readonly idleTimers = new Map<string, NodeJS.Timeout>();
 	private lastActivityAt = new Map<string, number>();
 	private crashedAt = new Map<string, number>();
@@ -315,6 +377,8 @@ export class LiveCodeProvider {
 	private async syncFile(
 		path: string,
 		signal?: AbortSignal,
+		/** Preloaded content; avoids a second read and avoids spawning for unreadable files. */
+		preloadedText?: string,
 	): Promise<{ client: LspClient | undefined; language: string | undefined }> {
 		const client = await this.ensureClient(path, signal);
 		const language = this.languageForFile(path);
@@ -322,10 +386,8 @@ export class LiveCodeProvider {
 			return { client: undefined, language };
 		}
 		this.touch(client.serverId);
-		let text: string;
-		try {
-			text = await readFile(path, "utf8");
-		} catch {
+		const text = preloadedText ?? (await readFile(path, "utf8").catch(() => undefined));
+		if (text === undefined) {
 			return { client: undefined, language };
 		}
 		if (this.openDocuments.has(path)) {
@@ -460,6 +522,145 @@ export class LiveCodeProvider {
 			if (message.includes("timed out")) return unsupported("timeout", message);
 			return unsupported("degraded", message);
 		}
+	}
+
+	/**
+	 * Explicit diagnostics query: sync each scoped file (cold-starting its
+	 * language server on demand, reusing the warm client), wait a bounded
+	 * budget for publishes, and project the store's findings back per file.
+	 * Only the requested files are diagnosed — never the whole repository.
+	 * Per-file statuses distinguish a clean publish (`ready`, empty list)
+	 * from no publish within budget (`no-publish`) and from a server that
+	 * could not start (`server-unavailable`).
+	 */
+	async requestDiagnostics(
+		paths: readonly string[],
+		options: LiveCodeDiagnosticsQueryOptions = {},
+	): Promise<LiveCodeDiagnosticsQueryResult> {
+		const waitMs = options.waitMs ?? this.diagnosticWaitMs;
+		const maxFiles = Math.max(
+			1,
+			Math.min(MAX_DIAGNOSTICS_MAX_FILES, Math.floor(options.maxFiles ?? DEFAULT_DIAGNOSTICS_MAX_FILES)),
+		);
+		const maxPerFile = Math.max(
+			1,
+			Math.min(
+				MAX_DIAGNOSTICS_MAX_PER_FILE,
+				Math.floor(options.maxDiagnosticsPerFile ?? DEFAULT_DIAGNOSTICS_MAX_PER_FILE),
+			),
+		);
+		const emptyTotals = { errors: 0, warnings: 0, other: 0 };
+		const cancelled = (reason: string): LiveCodeDiagnosticsQueryResult => ({
+			status: "cancelled",
+			files: [],
+			totals: emptyTotals,
+			truncated: false,
+			reason,
+		});
+
+		if (this.disposed) {
+			return cancelled("provider disposed");
+		}
+		if (paths.length === 0) {
+			return { status: "ready", files: [], totals: emptyTotals, truncated: false };
+		}
+
+		const generation = this.generation;
+		const scope = paths.slice(0, maxFiles);
+		const truncatedFiles = paths.length > scope.length;
+		const startedAt = Date.now();
+		const files: LiveCodeDiagnosticsFileResult[] = [];
+		const syncedPaths: string[] = [];
+
+		// Sequential syncs: a cold start must never race two spawns for one
+		// server id (ensureClient has no in-flight dedup); later files reuse
+		// the warm client. Publish waits below run in parallel.
+		const signal = options.signal;
+		for (const path of scope) {
+			if (this.disposed || generation !== this.generation) {
+				return cancelled("provider disposed during query");
+			}
+			try {
+				signal?.throwIfAborted();
+			} catch {
+				return cancelled("diagnostics query aborted");
+			}
+			if (!this.definitionForFile(path)) {
+				files.push({
+					path,
+					status: "unsupported-language",
+					diagnostics: [],
+					truncated: false,
+					reason: "no registered language server for this file type",
+				});
+				continue;
+			}
+			const text = await readFile(path, "utf8").catch(() => undefined);
+			if (text === undefined) {
+				files.push({ path, status: "unreadable", diagnostics: [], truncated: false });
+				continue;
+			}
+			const synced = await this.syncFile(path, signal, text);
+			if (this.disposed || generation !== this.generation) {
+				return cancelled("provider disposed during query");
+			}
+			if (!synced.client) {
+				files.push({
+					path,
+					status: "server-unavailable",
+					diagnostics: [],
+					truncated: false,
+					reason: this.unavailableReason(path),
+				});
+				continue;
+			}
+			syncedPaths.push(path);
+		}
+
+		// Bounded parallel publish wait (resolves early per path on publish).
+		await Promise.all(syncedPaths.map((path) => this.waitForDiagnostics(path, waitMs)));
+		if (this.disposed || generation !== this.generation) {
+			return cancelled("provider disposed during query");
+		}
+		if (signal?.aborted) {
+			return cancelled("diagnostics query aborted");
+		}
+
+		const totals = { errors: 0, warnings: 0, other: 0 };
+		for (const path of syncedPaths) {
+			const published = (this.diagnosticsPublishedAt.get(path) ?? 0) >= startedAt;
+			const found = this.findings.forPath(path);
+			const entries = found.slice(0, maxPerFile).map((finding) => diagnosticsEntry(finding));
+			for (const entry of entries) {
+				if (entry.severity === "error") totals.errors += 1;
+				else if (entry.severity === "warning") totals.warnings += 1;
+				else totals.other += 1;
+			}
+			files.push({
+				path,
+				status: published ? "ready" : "no-publish",
+				diagnostics: entries,
+				truncated: found.length > maxPerFile,
+			});
+		}
+		return { status: "ready", files, totals, truncated: truncatedFiles };
+	}
+
+	/** Why a server could not be reached for a file (truthful reason strings). */
+	private unavailableReason(path: string): string | undefined {
+		const definition = this.definitionForFile(path);
+		if (!definition) {
+			return undefined;
+		}
+		const crashedAt = this.crashedAt.get(definition.id);
+		if (crashedAt) {
+			return "language server crashed recently; respawn is on cooldown";
+		}
+		const spec = this.launchOverrides?.[definition.id] ?? resolveLaunchSpec(definition, this.projectRoot);
+		if (!spec) {
+			return "language server is not installed";
+		}
+		return "language server could not be started";
 	}
 
 	/** Wait (bounded) for a publishDiagnostics for a path; resolves early when it lands. */
@@ -626,7 +827,8 @@ export class LiveCodeProvider {
 		if (!path) {
 			return;
 		}
-		const collectedAt = Date.now();
+		this.diagnosticsPublishedAt.set(path, Date.now());
+		const collectedAt = this.diagnosticsPublishedAt.get(path) ?? Date.now();
 		this.findings.replaceForPath(
 			path,
 			diagnostics.map((diagnostic) => ({
@@ -636,6 +838,7 @@ export class LiveCodeProvider {
 				severity: diagnosticSeverity(diagnostic),
 				message: diagnostic.message,
 				code: diagnostic.code,
+				...(diagnostic.source !== undefined ? { lspSource: diagnostic.source } : {}),
 				range: {
 					start: { line: diagnostic.range.start.line, character: diagnostic.range.start.character },
 					end: { line: diagnostic.range.end.line, character: diagnostic.range.end.character },
@@ -714,8 +917,14 @@ export class LiveCodeProvider {
 		this.idleTimers.clear();
 		for (const latch of this.pendingDiagnostics.values()) {
 			clearTimeout(latch.timer);
+			// Release in-flight waiters so pending diagnostic awaits settle
+			// instead of hanging past teardown (disposal/cancellation contract).
+			for (const waiter of latch.waiters) {
+				waiter();
+			}
 		}
 		this.pendingDiagnostics.clear();
+		this.diagnosticsPublishedAt.clear();
 		await Promise.all([...this.clients.keys()].map((key) => this.shutdownServer(key)));
 	}
 
@@ -815,4 +1024,16 @@ function diagnosticSeverity(diagnostic: LspDiagnostic): "error" | "warning" | "i
 		return "warning";
 	}
 	return "information";
+}
+
+/** Project one stored finding into the model-facing diagnostic entry shape. */
+function diagnosticsEntry(finding: AiraFinding): LiveCodeDiagnosticEntry {
+	const start = finding.range?.start;
+	return {
+		...(start !== undefined ? { line: start.line + 1, character: start.character + 1 } : {}),
+		severity: finding.severity,
+		...(finding.code !== undefined && finding.code !== null ? { code: finding.code } : {}),
+		source: finding.lspSource ?? finding.providerId,
+		message: finding.message,
+	};
 }

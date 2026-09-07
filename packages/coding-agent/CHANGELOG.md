@@ -9,6 +9,11 @@
 - Improve fullscreen transcript navigation with cached search, jump-to-latest,
   and accelerated Alt-wheel scrolling.
 - Add configurable save bindings for model and thinking selectors.
+- **Aira**: Expose live language-server diagnostics to the model through the new
+  `aira_diagnostics` tool: bounded per-file severity/code/message/location
+  payloads for changed or explicitly queried files, with truthful per-file
+  states (clean publish, no publish within budget, server unavailable).
+  Workbench/Engineering Context surfaces the diagnostic counts.
 
 ### Fixed
 
