@@ -18,7 +18,7 @@ describe("Aira context-cost audit", () => {
 		expect(
 			buildAiraContextCostAudit([
 				{ id: "mode-envelope", activation: "mode", text: "<aira-runtime mode=build />" },
-				{ id: "workbench", activation: "ui-only", text: "ENGINEERING CONTEXT" },
+				{ id: "workbench", activation: "ui-only", text: "SESSION CONTEXT" },
 			]),
 		).toEqual([
 			{ id: "mode-envelope", activation: "mode", chars: 27, estimatedTokens: 7 },
@@ -177,7 +177,7 @@ describe("Aira context-cost audit", () => {
 					activation: "host-only",
 					text: "capability compatibility is checked before provider spend",
 				},
-				{ id: "workbench", activation: "ui-only", text: "ENGINEERING CONTEXT" },
+				{ id: "workbench", activation: "ui-only", text: "SESSION CONTEXT" },
 			]);
 
 			expect(sections.slice(0, 5).every((section) => section.chars > 0)).toBe(true);

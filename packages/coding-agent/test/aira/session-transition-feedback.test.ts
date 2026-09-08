@@ -71,7 +71,7 @@ function makeKeyHandlersContext(): KeyHandlersContext {
 	});
 }
 
-describe("Engineering Context keyboard resize wiring", () => {
+describe("Session Context keyboard resize wiring", () => {
 	it("registers wider/narrower handlers next to the Workbench toggle", () => {
 		const ctx = makeKeyHandlersContext();
 		prototype.setupKeyHandlers.call(ctx);
@@ -93,7 +93,7 @@ describe("Engineering Context keyboard resize wiring", () => {
 		)?.[1] as () => void;
 		handler();
 		expect(ctx.workbench?.resizeBy).toHaveBeenCalledWith(4);
-		expect(ctx.showStatus).toHaveBeenCalledWith("Engineering Context 46 cols");
+		expect(ctx.showStatus).toHaveBeenCalledWith("Session Context 46 cols");
 	});
 
 	it("narrower handler resizes the controller by -4 and reports the new width", () => {
@@ -108,7 +108,7 @@ describe("Engineering Context keyboard resize wiring", () => {
 		)?.[1] as () => void;
 		handler();
 		expect(ctx.workbench?.resizeBy).toHaveBeenCalledWith(-4);
-		expect(ctx.showStatus).toHaveBeenCalledWith("Engineering Context 38 cols");
+		expect(ctx.showStatus).toHaveBeenCalledWith("Session Context 38 cols");
 	});
 
 	it("reports hidden state when the sidebar is auto-hidden (narrow terminal)", () => {
@@ -122,7 +122,7 @@ describe("Engineering Context keyboard resize wiring", () => {
 			([action]) => action === "app.workbench.wider",
 		)?.[1] as () => void;
 		handler();
-		expect(ctx.showStatus).toHaveBeenCalledWith("hidden · Engineering Context 46 cols");
+		expect(ctx.showStatus).toHaveBeenCalledWith("hidden · Session Context 46 cols");
 	});
 
 	it("toggle handler still drives the controller toggle", () => {

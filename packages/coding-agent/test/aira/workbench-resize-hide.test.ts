@@ -159,13 +159,27 @@ describe("Workbench controller preferred vs effective width", () => {
 		expect(controller.sidebarWidthFor(160)).toBe(DEFAULT_WORKBENCH_WIDTH + 4);
 	});
 
-	it("responsive growth on very wide terminals grows the effective width only", () => {
-		const { controller, stored } = createController();
-		controller.resizeBy(4); // 46
-		const wide = 200 + 30;
-		const effective = controller.sidebarWidthFor(wide);
-		expect(effective).toBeGreaterThan(DEFAULT_WORKBENCH_WIDTH + 4);
+	it("responsive width follows the explicit preference at every terminal width", () => {
+		const { controller, stored } = createController(); // preferred 42
+		expect(controller.sidebarWidthFor(230)).toBe(DEFAULT_WORKBENCH_WIDTH);
+		expect(stored.width).toBe(DEFAULT_WORKBENCH_WIDTH);
+		controller.resizeBy(4); // explicit 46 → preference is authoritative
+		expect(controller.sidebarWidthFor(230)).toBe(DEFAULT_WORKBENCH_WIDTH + 4);
+		expect(controller.sidebarWidthFor(160)).toBe(DEFAULT_WORKBENCH_WIDTH + 4);
 		expect(stored.width).toBe(DEFAULT_WORKBENCH_WIDTH + 4);
+	});
+
+	it("explicit resize changes the effective width on very wide terminals", () => {
+		// Regression: on 180+ column terminals an adaptive rule used to pin
+		// the pane at 27-30% of the width (floor 54-60), masking every resize.
+		const { controller } = createController();
+		expect(controller.sidebarWidthFor(200)).toBe(DEFAULT_WORKBENCH_WIDTH);
+		controller.resizeBy(4);
+		expect(controller.sidebarWidthFor(200)).toBe(46);
+		controller.resizeBy(4);
+		expect(controller.sidebarWidthFor(200)).toBe(50);
+		controller.resizeBy(-4);
+		expect(controller.sidebarWidthFor(200)).toBe(46);
 	});
 
 	it("a wider preferred width raises the narrow auto-hide threshold", () => {

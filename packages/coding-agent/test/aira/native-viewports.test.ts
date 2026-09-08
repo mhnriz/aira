@@ -32,7 +32,7 @@ describe("Aira native multi-pane viewports (Phase 12.1)", () => {
 			"CANONICAL STATE · TOKEN-FREE",
 		);
 		expect(plain(renderWorkbenchTitle(40, { focused: true, viewingHistory: false })[0] ?? "")).toContain(
-			"ENGINEERING CONTEXT",
+			"SESSION CONTEXT",
 		);
 		expect(plain(renderWorkbenchTitle(40, { focused: false, viewingHistory: true })[1] ?? "")).toContain(
 			"LIVE STATE · VIEWING HISTORY",
@@ -127,7 +127,7 @@ describe("Aira native multi-pane viewports (Phase 12.1)", () => {
 		// The focus mark moved to the Workbench title (conversation column is
 		// 38 cols wide; the Workbench title lives at the end of the same row).
 		const rows = terminal.getViewport().map(plain);
-		expect(rows.some((line) => line.includes("ENGINEERING CONTEXT") && line.includes("●"))).toBe(true);
+		expect(rows.some((line) => line.includes("SESSION CONTEXT") && line.includes("●"))).toBe(true);
 		expect(rows.some((line) => line.startsWith("CONVERSATION") && line.slice(0, 38).includes("●"))).toBe(false);
 		tui.stop();
 	});

@@ -143,8 +143,8 @@ export function renderWorkbenchTitle(
 	const safeWidth = Math.max(4, Math.trunc(width));
 	const innerWidth = contentWidth(safeWidth);
 	const title = state.focused
-		? `${theme.bold(roleColor("text", "ENGINEERING"))} ${theme.bold(roleColor("copper", "CONTEXT"))} ${theme.fg("copperBright", "●")}`
-		: `${theme.bold(roleColor("text", "ENGINEERING"))} ${theme.bold(roleColor("copper", "CONTEXT"))}`;
+		? `${theme.bold(roleColor("text", "SESSION"))} ${theme.bold(roleColor("copper", "CONTEXT"))} ${theme.fg("copperBright", "●")}`
+		: `${theme.bold(roleColor("text", "SESSION"))} ${theme.bold(roleColor("copper", "CONTEXT"))}`;
 	const subtitle = state.viewingHistory ? "LIVE STATE · VIEWING HISTORY" : "CANONICAL STATE · TOKEN-FREE";
 	return [
 		railLine(title, safeWidth),

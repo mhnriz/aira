@@ -1081,11 +1081,11 @@ export class InteractiveMode {
 		return `${count} ${count === 1 ? "message" : "messages"}`;
 	}
 
-	/** Keyboard Engineering Context resize (fixed 4-column steps, clamped). */
+	/** Keyboard Session Context resize (fixed 4-column steps, clamped). */
 	private resizeWorkbench(delta: number): void {
 		const width = this.workbench?.resizeBy(delta);
 		if (width !== undefined) {
-			this.showStatus(`${this.workbench?.isVisibleNow() ? "" : "hidden · "}Engineering Context ${width} cols`);
+			this.showStatus(`${this.workbench?.isVisibleNow() ? "" : "hidden · "}Session Context ${width} cols`);
 		}
 	}
 

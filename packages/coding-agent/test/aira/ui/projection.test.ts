@@ -168,11 +168,14 @@ describe("Workbench visibility policy", () => {
 		).toBe(true);
 	});
 
-	it("expands the sidebar on wide terminals while preserving the configured minimum", () => {
+	it("the explicit preference is authoritative at every terminal width", () => {
 		expect(responsiveWorkbenchWidth(120, 42)).toBe(42);
-		expect(responsiveWorkbenchWidth(160, 42)).toBe(43);
-		expect(responsiveWorkbenchWidth(220, 42)).toBe(60);
-		expect(responsiveWorkbenchWidth(220, 60)).toBe(60);
+		expect(responsiveWorkbenchWidth(160, 42)).toBe(42);
+		expect(responsiveWorkbenchWidth(230, 42)).toBe(42);
+		expect(responsiveWorkbenchWidth(230, 46)).toBe(46);
+		expect(responsiveWorkbenchWidth(165, 50)).toBe(50);
+		expect(responsiveWorkbenchWidth(10, 20)).toBe(34); // clamped min
+		expect(responsiveWorkbenchWidth(10, 80)).toBe(60); // clamped max
 	});
 
 	it("respects workbench.enabled=false as a hard off", () => {

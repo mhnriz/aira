@@ -129,17 +129,17 @@ export const KEYBINDINGS = {
 		// cross-platform hide/show shortcut (no Ctrl+Shift combos: Windows
 		// Terminal collapses some Ctrl+Shift+letter pairs into Ctrl+letter).
 		defaultKeys: ["ctrl+shift+o", "alt+\\"],
-		description: "Toggle Workbench sidebar",
+		description: "Toggle Session Context sidebar",
 	},
 	"app.workbench.wider": {
 		// Alt+] / Alt+[ are free of existing bindings and stay printable on
 		// both macOS and Windows Terminal (unlike Ctrl+Shift letters).
 		defaultKeys: "alt+]",
-		description: "Widen Engineering Context sidebar",
+		description: "Widen Session Context sidebar",
 	},
 	"app.workbench.narrower": {
 		defaultKeys: "alt+[",
-		description: "Narrow Engineering Context sidebar",
+		description: "Narrow Session Context sidebar",
 	},
 	"app.viewport.focusCycle": {
 		// Cycle keyboard viewport focus between the conversation and the

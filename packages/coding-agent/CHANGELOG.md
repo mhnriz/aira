@@ -13,7 +13,7 @@
   `aira_diagnostics` tool: bounded per-file severity/code/message/location
   payloads for changed or explicitly queried files, with truthful per-file
   states (clean publish, no publish within budget, server unavailable).
-  Workbench/Engineering Context surfaces the diagnostic counts.
+  Workbench/Session Context surfaces the diagnostic counts.
 - **Aira**: Composer paste expansion. Large pastes still collapse to a compact
   `[paste #N ...]` marker; a second Ctrl+V (or same-content terminal paste)
   within one second expands the preceding collapsed paste in place as ordinary
@@ -24,13 +24,14 @@
 - **Aira**: Verification is disabled by default for fresh sessions (consistent
   with Goals); it remains fully available when explicitly enabled, and
   explicitly saved user settings keep winning over defaults.
-- **Aira**: The Workbench/Engineering Context surface separates fresh from
+- **Aira**: The Workbench/Session Context surface separates fresh from
   stale diagnostics: the primary current totals count fresh findings only,
   stale findings are shown as a separate muted count that never inflates the
   current totals, and stale per-finding details render muted.
-- **Aira**: Engineering Context keyboard resizing and hide/show. Alt+] widens
-  and Alt+[ narrows the sidebar in fixed 4-column steps (clamped to a safe
-  range); Alt+\ toggles it. Resizing moves a persisted preferred width; the
+- **Aira**: Session Context keyboard resizing and hide/show. Alt+] widens and
+  Alt+[ narrows the sidebar in fixed 4-column steps (clamped to a safe
+  range); Alt+\ toggles it. Resizing moves a persisted preferred width that
+  is authoritative at every terminal width with room for the pane; the
   effective width still clamps to the terminal, and narrow-terminal auto-hide
   is preserved (re-expanding the terminal restores the preferred width). No
   mouse or Ctrl+Shift chords involved.
@@ -42,6 +43,11 @@
 
 ### Fixed
 
+- Apply Session Context keyboard resizing at every terminal width: the
+  previous adaptive sidebar growth (27-30% of very wide terminals) pinned the
+  pane at 54-60 columns on 180+ column screens, masking every preference
+  change. The explicit preferred width now rules whenever the terminal has
+  room for the pane.
 - Cancel active compaction cleanly during session abort.
 - Report signal-killed processes as failures with truthful exit semantics.
 
