@@ -104,7 +104,7 @@ async function makeVerifyHarness(
 	}
 	const harness = await createHarness({
 		cwd: root,
-		settings: { verification: { auto: "smart", ...options.settings } } as never,
+		settings: { verification: { auto: "smart", enabled: true, ...options.settings } } as never,
 		airaVerificationOptions: options.native
 			? undefined
 			: {

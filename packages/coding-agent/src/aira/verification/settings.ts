@@ -8,7 +8,9 @@
  * settings make that cost explicit and configurable.
  *
  * Defaults:
- * - enabled:       true — verification is available.
+ * - enabled:       false — verification is OFF for fresh/default sessions;
+ *                  it remains fully available and runs only when explicitly
+ *                  enabled (verification.enabled=true).
  * - auto:          "smart" — non-trivial engineering work is verified at
  *                  meaningful completion boundaries; trivial work (docs,
  *                  comments, one-line renames with clean diagnostics) skips
@@ -32,7 +34,7 @@ export interface AiraVerificationSettings {
 
 /** The canonical default verification settings. */
 export const DEFAULT_AIRA_VERIFICATION_SETTINGS: AiraVerificationSettings = {
-	enabled: true,
+	enabled: false,
 	auto: "smart",
 	contextBudget: "compact",
 };

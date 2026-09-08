@@ -1230,7 +1230,7 @@ export class SettingsManager {
 	} {
 		const verification = this.settings.verification;
 		if (!verification || typeof verification !== "object") {
-			return { enabled: true, auto: "smart", contextBudget: "compact" };
+			return { enabled: false, auto: "smart", contextBudget: "compact" };
 		}
 		const auto = verification.auto === "off" || verification.auto === "always" ? verification.auto : "smart";
 		const contextBudget =
@@ -1240,7 +1240,7 @@ export class SettingsManager {
 					? "expanded"
 					: "compact";
 		return {
-			enabled: verification.enabled === undefined ? true : verification.enabled === true,
+			enabled: verification.enabled === undefined ? false : verification.enabled === true,
 			auto,
 			contextBudget,
 		};
