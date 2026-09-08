@@ -1075,6 +1075,20 @@ export class InteractiveMode {
 		this.workbench?.toggle();
 	}
 
+	/** In-memory message count label for transient transition notices (no traversal). */
+	private sessionCountLabel(): string {
+		const count = this.session.messages.length;
+		return `${count} ${count === 1 ? "message" : "messages"}`;
+	}
+
+	/** Keyboard Engineering Context resize (fixed 4-column steps, clamped). */
+	private resizeWorkbench(delta: number): void {
+		const width = this.workbench?.resizeBy(delta);
+		if (width !== undefined) {
+			this.showStatus(`${this.workbench?.isVisibleNow() ? "" : "hidden · "}Engineering Context ${width} cols`);
+		}
+	}
+
 	/** /workbench [on|off] — restrained native command. */
 	private handleWorkbenchCommand(): void {
 		const workbench = this.workbench;
@@ -2160,7 +2174,7 @@ export class InteractiveMode {
 						const result = await this.runtimeHost.fork(entryId, options);
 						if (!result.cancelled) {
 							this.editor.setText(result.selectedText ?? "");
-							this.showStatus("Forked to new session");
+							this.showStatus(`Forked session · ${this.sessionCountLabel()}`);
 						}
 						return { cancelled: result.cancelled };
 					} catch (error: unknown) {
@@ -3210,6 +3224,8 @@ export class InteractiveMode {
 		this.defaultEditor.onAction("app.model.select", () => this.showModelSelector());
 		this.defaultEditor.onAction("app.tools.expand", () => this.toggleToolOutputExpansion());
 		this.defaultEditor.onAction("app.workbench.toggle", () => this.toggleWorkbench());
+		this.defaultEditor.onAction("app.workbench.wider", () => this.resizeWorkbench(4));
+		this.defaultEditor.onAction("app.workbench.narrower", () => this.resizeWorkbench(-4));
 		this.defaultEditor.onAction("app.viewport.focusCycle", () => this.cycleViewportFocus());
 		this.defaultEditor.onAction("app.thinking.toggle", () => this.toggleThinkingBlockVisibility());
 		this.defaultEditor.onAction("app.editor.external", () => void this.handleOpenExternalEditor());
@@ -6304,7 +6320,7 @@ export class InteractiveMode {
 						}
 
 						this.editor.setText(result.selectedText ?? "");
-						this.showStatus("Forked to new session");
+						this.showStatus(`Forked session · ${this.sessionCountLabel()}`);
 					} catch (error: unknown) {
 						this.showError(error instanceof Error ? error.message : String(error));
 					}
@@ -6334,7 +6350,7 @@ export class InteractiveMode {
 			}
 
 			this.editor.setText("");
-			this.showStatus("Cloned to new session");
+			this.showStatus(`Cloned session · ${this.sessionCountLabel()}`);
 		} catch (error: unknown) {
 			this.showError(error instanceof Error ? error.message : String(error));
 		}
@@ -6532,7 +6548,7 @@ export class InteractiveMode {
 			if (result.cancelled) {
 				return result;
 			}
-			this.showStatus("Resumed session");
+			this.showStatus(`Resumed session · ${this.sessionCountLabel()}`);
 			return result;
 		} catch (error: unknown) {
 			if (error instanceof MissingSessionCwdError) {
@@ -6549,7 +6565,7 @@ export class InteractiveMode {
 				if (result.cancelled) {
 					return result;
 				}
-				this.showStatus("Resumed session in current cwd");
+				this.showStatus(`Resumed session in current cwd · ${this.sessionCountLabel()}`);
 				return result;
 			}
 			return this.handleFatalRuntimeError("Failed to resume session", error);

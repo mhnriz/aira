@@ -6,6 +6,7 @@ type CloneCommandContext = {
 	runtimeHost: {
 		fork: (entryId: string, options?: { position?: "before" | "at" }) => Promise<{ cancelled: boolean }>;
 	};
+	session: { messages: unknown[] };
 	renderCurrentSessionState: () => void;
 	editor: { setText: (text: string) => void };
 	showStatus: (message: string) => void;
@@ -31,19 +32,21 @@ describe("InteractiveMode /clone", () => {
 		const context: CloneCommandContext = {
 			sessionManager: { getLeafId: () => "leaf-123" },
 			runtimeHost: { fork },
+			session: { messages: [] },
 			renderCurrentSessionState,
 			editor: { setText },
 			showStatus,
 			showError,
 			ui: { requestRender },
 		};
+		Object.setPrototypeOf(context, InteractiveMode.prototype);
 
 		await interactiveModePrototype.handleCloneCommand.call(context);
 
 		expect(fork).toHaveBeenCalledWith("leaf-123", { position: "at" });
 		expect(renderCurrentSessionState).not.toHaveBeenCalled();
 		expect(setText).toHaveBeenCalledWith("");
-		expect(showStatus).toHaveBeenCalledWith("Cloned to new session");
+		expect(showStatus).toHaveBeenCalledWith("Cloned session · 0 messages");
 		expect(showError).not.toHaveBeenCalled();
 		expect(requestRender).not.toHaveBeenCalled();
 	});
@@ -56,6 +59,7 @@ describe("InteractiveMode /clone", () => {
 		const context: CloneCommandContext = {
 			sessionManager: { getLeafId: () => null },
 			runtimeHost: { fork },
+			session: { messages: [] },
 			renderCurrentSessionState: vi.fn(),
 			editor: { setText: vi.fn() },
 			showStatus,

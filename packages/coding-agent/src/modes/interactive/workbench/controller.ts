@@ -186,6 +186,27 @@ export class WorkbenchController {
 		this.reconcile();
 	}
 
+	/**
+	 * Adjust the PREFERRED sidebar width (persisted) in fixed 4-column steps,
+	 * clamped to the safe range. Effective width is computed separately per
+	 * render (responsive/clamped), so a temporarily narrow terminal never
+	 * overwrites the preference; the offset applies to the preferred value
+	 * only, never to the responsive effective width.
+	 *
+	 * @returns the new preferred width.
+	 */
+	resizeBy(delta: number): number {
+		const step = Math.sign(delta) * 4;
+		const next = Math.max(MIN_WORKBENCH_WIDTH, Math.min(MAX_WORKBENCH_WIDTH, this.sidebarWidth + step));
+		if (next === this.sidebarWidth) return this.sidebarWidth;
+		this.sidebarWidth = next;
+		this.session.settingsManager.setWorkbenchSettings({ width: next });
+		this.refreshOverlayWidth();
+		this.options.layoutChanged();
+		this.reconcile();
+		return next;
+	}
+
 	syncSettings(): void {
 		const settings = this.session.settingsManager.getWorkbenchSettings();
 		const widthChanged =

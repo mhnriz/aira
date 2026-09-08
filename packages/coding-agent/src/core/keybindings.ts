@@ -23,6 +23,8 @@ export interface AppKeybindings {
 	"app.model.select": true;
 	"app.tools.expand": true;
 	"app.workbench.toggle": true;
+	"app.workbench.wider": true;
+	"app.workbench.narrower": true;
 	"app.viewport.focusCycle": true;
 	"app.thinking.toggle": true;
 	"app.thinking.save": true;
@@ -123,9 +125,21 @@ export const KEYBINDINGS = {
 	"app.tools.expand": { defaultKeys: "ctrl+o", description: "Toggle tool output" },
 	"app.workbench.toggle": {
 		// The Workbench has its own semantic binding. Ctrl+O remains the
-		// established tool-output expansion action.
-		defaultKeys: "ctrl+shift+o",
+		// established tool-output expansion action. Alt+Backslash is the
+		// cross-platform hide/show shortcut (no Ctrl+Shift combos: Windows
+		// Terminal collapses some Ctrl+Shift+letter pairs into Ctrl+letter).
+		defaultKeys: ["ctrl+shift+o", "alt+\\"],
 		description: "Toggle Workbench sidebar",
+	},
+	"app.workbench.wider": {
+		// Alt+] / Alt+[ are free of existing bindings and stay printable on
+		// both macOS and Windows Terminal (unlike Ctrl+Shift letters).
+		defaultKeys: "alt+]",
+		description: "Widen Engineering Context sidebar",
+	},
+	"app.workbench.narrower": {
+		defaultKeys: "alt+[",
+		description: "Narrow Engineering Context sidebar",
 	},
 	"app.viewport.focusCycle": {
 		// Cycle keyboard viewport focus between the conversation and the

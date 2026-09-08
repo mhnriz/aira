@@ -589,16 +589,26 @@ export function intelligencePanel(state: AiraSessionState): WorkbenchPanel | und
 	if (findings.total > 0) {
 		rows.push({
 			label: "Diagnostics",
-			value: `${findings.errors}E ${findings.warnings}W${findings.stale > 0 ? ` · ${findings.stale} stale` : ""}`,
+			value: `${findings.errors}E ${findings.warnings}W`,
 			role: findings.errors > 0 ? "red" : findings.warnings > 0 ? "yellow" : "muted",
 		});
+		if (findings.stale > 0) {
+			rows.push({
+				label: "Stale",
+				value: `${findings.stale}`,
+				role: "muted",
+				detail: "not counted in current totals",
+			});
+		}
 		for (const finding of findings.top.slice(0, 3)) {
 			const location = `${finding.path ?? "unknown"}${finding.line ? `:${finding.line}` : ""}`;
 			const freshness = finding.freshness === "fresh" ? "" : ` · ${finding.freshness}`;
 			rows.push({
 				label: finding.severity === "error" ? "error" : "warning",
 				value: location,
-				role: finding.freshness !== "fresh" ? "yellow" : finding.severity === "error" ? "red" : "yellow",
+				// Stale details are subordinate to current findings; indeterminate
+				// findings stay visually distinct without claiming staleness.
+				role: finding.freshness === "stale" ? "muted" : finding.severity === "error" ? "red" : "yellow",
 				detail: `${finding.code !== undefined ? `${finding.code} · ` : ""}${finding.message}${freshness}`,
 			});
 		}

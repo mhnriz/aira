@@ -21,6 +21,24 @@
   it back to collapsed form. The gesture expires on any intervening input,
   cursor movement, unrelated paste, or the timer; the model payload is
   identical whether a paste stays collapsed or is expanded for editing.
+- **Aira**: Verification is disabled by default for fresh sessions (consistent
+  with Goals); it remains fully available when explicitly enabled, and
+  explicitly saved user settings keep winning over defaults.
+- **Aira**: The Workbench/Engineering Context surface separates fresh from
+  stale diagnostics: the primary current totals count fresh findings only,
+  stale findings are shown as a separate muted count that never inflates the
+  current totals, and stale per-finding details render muted.
+- **Aira**: Engineering Context keyboard resizing and hide/show. Alt+] widens
+  and Alt+[ narrows the sidebar in fixed 4-column steps (clamped to a safe
+  range); Alt+\ toggles it. Resizing moves a persisted preferred width; the
+  effective width still clamps to the terminal, and narrow-terminal auto-hide
+  is preserved (re-expanding the terminal restores the preferred width). No
+  mouse or Ctrl+Shift chords involved.
+- **Aira**: Transient session-transition feedback via the existing status
+  line: successful `/resume`, fork, and clone transitions report the new
+  session's in-memory message count (e.g. "Resumed session · 18 messages");
+  cancelled or failed transitions stay silent. Notices are presentation-only
+  and never enter the conversation or the model payload.
 
 ### Fixed
 

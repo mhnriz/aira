@@ -667,8 +667,17 @@ export class IntelligenceCoordinator implements AiraIntelligenceHandle {
 	private publishStatus(): void {
 		const repo = this.repository?.statusInfo();
 		const live = this.liveCode?.statusInfo();
-		const counts = this.findings.counts();
 		const stale = this.findings.refreshAll((path) => fileMtimeMs(path)).stale;
+		const counts = this.findings.counts();
+		// Primary error/warning totals are FRESH-only: stale findings must never
+		// inflate the current totals (a stale error is not a current error).
+		let freshErrors = 0;
+		let freshWarnings = 0;
+		for (const finding of this.findings.all()) {
+			if (finding.freshness === "stale") continue;
+			if (finding.severity === "error") freshErrors += 1;
+			else if (finding.severity === "warning") freshWarnings += 1;
+		}
 		const top = topAiraFindings(this.findings.all());
 		this.status = {
 			active: this.activation.active,
@@ -696,8 +705,8 @@ export class IntelligenceCoordinator implements AiraIntelligenceHandle {
 			},
 			findings: {
 				total: counts.paths === 0 ? 0 : this.findings.size,
-				errors: counts.errors,
-				warnings: counts.warnings,
+				errors: freshErrors,
+				warnings: freshWarnings,
 				stale,
 				top,
 			},
