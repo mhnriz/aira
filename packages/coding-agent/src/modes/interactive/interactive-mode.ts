@@ -3270,7 +3270,10 @@ export class InteractiveMode {
 
 			const text = await readClipboardText();
 			if (text) {
-				this.editor.insertTextAtCursor?.(text);
+				// Route text through the bracketed-paste path so large clipboard
+				// content collapses to a paste marker exactly like terminal-level
+				// paste (and the second Ctrl+V can expand it in place).
+				this.editor.handleInput?.(`\x1b[200~${text}\x1b[201~`);
 				this.ui.requestRender();
 			}
 		} catch {

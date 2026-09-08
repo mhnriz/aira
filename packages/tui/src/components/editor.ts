@@ -24,6 +24,24 @@ const PASTE_MARKER_REGEX = /\[paste #(\d+)( (\+\d+ lines|\d+ chars))?\]/g;
 /** Non-global version for single-segment testing. */
 const PASTE_MARKER_SINGLE = /^\[paste #(\d+)( (\+\d+ lines|\d+ chars))?\]$/;
 
+/**
+ * Window (ms) during which a second paste gesture expands the immediately
+ * preceding collapsed paste in place instead of pasting again.
+ */
+const PASTE_EXPAND_WINDOW_MS = 1000;
+
+let pasteGestureClock: () => number = () => Date.now();
+
+/**
+ * Replace the clock used by the paste-expansion gesture.
+ *
+ * Tests use a deterministic fake clock instead of sleeping; production uses
+ * Date.now().
+ */
+export function setPasteGestureClock(clock: () => number): void {
+	pasteGestureClock = clock;
+}
+
 /** Check if a segment is a paste marker (i.e. was merged by segmentWithMarkers). */
 function isPasteMarker(segment: string): boolean {
 	return segment.length >= 10 && PASTE_MARKER_SINGLE.test(segment);
@@ -225,6 +243,40 @@ interface LayoutLine {
 	cursorPos?: number;
 }
 
+/**
+ * Anchor for the most recent collapsed paste. While the anchor is eligible
+ * (window, cursor, and edit fingerprint), a further paste gesture expands the
+ * marker in place with the full pasted text.
+ */
+interface CollapsedPasteAnchor {
+	id: number;
+	marker: string;
+	/** Buffer line holding the marker. */
+	line: number;
+	/** Cursor column directly after the marker. */
+	col: number;
+	/** Undo-stack length at collapse time; any edit since invalidates the gesture. */
+	undoLength: number;
+	/** Input sequence at collapse time; any further input invalidates the gesture. */
+	inputSequence: number;
+	at: number;
+}
+
+/**
+ * Anchor for the most recent expanded paste. While eligible, a further paste
+ * gesture re-collapses the expanded text into a fresh marker (toggle).
+ */
+interface ExpandedPasteAnchor {
+	text: string;
+	startLine: number;
+	startCol: number;
+	endLine: number;
+	endCol: number;
+	undoLength: number;
+	inputSequence: number;
+	at: number;
+}
+
 export interface EditorTheme {
 	borderColor: (str: string) => string;
 	selectList: SelectListTheme;
@@ -308,6 +360,19 @@ export class Editor implements Component, Focusable {
 	// Paste tracking for large pastes
 	private pastes: Map<number, string> = new Map();
 	private pasteCounter: number = 0;
+
+	// Paste-expansion gesture (second paste within the window expands the
+	// preceding collapsed paste in place).
+	private lastCollapsedPaste: CollapsedPasteAnchor | null = null;
+	private lastExpandedPaste: ExpandedPasteAnchor | null = null;
+	private pasteKeypressAt: number | null = null;
+	private pasteKeypressSeq: number | null = null;
+	private pasteInFlight = false;
+	private expandQueued = false;
+
+	// Monotonic counter for input events; the paste gesture requires that no
+	// other input (typing, cursor movement, anything) happened since the paste.
+	private inputSequence = 0;
 
 	// Bracketed paste mode buffering
 	private pasteBuffer: string = "";
@@ -612,6 +677,10 @@ export class Editor implements Component, Focusable {
 
 	handleInput(data: string): void {
 		const kb = getKeybindings();
+
+		// Count the input event: the paste gesture requires that no other input
+		// happened between the paste and the expansion press.
+		this.inputSequence++;
 
 		// Handle character jump mode (awaiting next character to jump to)
 		if (this.jumpMode !== null) {
@@ -1040,6 +1109,7 @@ export class Editor implements Component, Focusable {
 		}
 		this.pastes.clear();
 		this.pasteCounter = 0;
+		this.resetPasteGesture();
 		this.setTextInternal(normalized);
 	}
 
@@ -1175,18 +1245,18 @@ export class Editor implements Component, Focusable {
 		}
 	}
 
-	private handlePaste(pastedText: string): void {
-		this.cancelAutocomplete();
-		this.exitHistoryBrowsing();
-		this.lastAction = null;
-
-		this.pushUndoSnapshot();
-
-		// Some terminals (e.g. tmux popups with extended-keys-format=csi-u) re-encode
-		// control bytes inside bracketed paste as CSI-u Ctrl+<letter> sequences
-		// (ESC [ <codepoint> ; 5 u). Decode those back to their literal byte so the
-		// per-char filter below preserves newlines instead of stripping ESC and
-		// leaking the printable tail (e.g. "[106;5u") into the editor.
+	/**
+	 * Normalize and filter raw pasted text for editor storage:
+	 * - some terminals (e.g. tmux popups with extended-keys-format=csi-u)
+	 *   re-encode control bytes inside bracketed paste as CSI-u Ctrl+<letter>
+	 *   sequences (ESC [ <codepoint> ; 5 u); decode those back to their literal
+	 *   byte so the per-char filter below preserves newlines instead of
+	 *   stripping ESC and leaking the printable tail (e.g. "[106;5u") into the
+	 *   editor
+	 * - normalize line endings (\r\n and \r -> \n), expand tabs to 4 spaces
+	 * - filter out non-printable characters except newlines
+	 */
+	private cleanPasteText(pastedText: string): string {
 		const decodedText = pastedText.replace(/\x1b\[(\d+);5u/g, (match, code) => {
 			const cp = Number(code);
 			if (cp >= 97 && cp <= 122) return String.fromCharCode(cp - 96);
@@ -1198,31 +1268,335 @@ export class Editor implements Component, Focusable {
 		const cleanText = this.normalizeText(decodedText);
 
 		// Filter out non-printable characters except newlines
-		let filteredText = cleanText
+		return cleanText
 			.split("")
 			.filter((char) => char === "\n" || char.charCodeAt(0) >= 32)
 			.join("");
+	}
+
+	/**
+	 * Rebuild the text currently occupying an expanded-paste anchor's span.
+	 */
+	private expandedSpanText(anchor: ExpandedPasteAnchor): string {
+		if (anchor.startLine === anchor.endLine) {
+			const line = this.state.lines[anchor.startLine] ?? "";
+			return line.slice(anchor.startCol, anchor.endCol);
+		}
+		const first = this.state.lines[anchor.startLine] ?? "";
+		const last = this.state.lines[anchor.endLine] ?? "";
+		const middle = this.state.lines.slice(anchor.startLine + 1, anchor.endLine).join("\n");
+		return `${first.slice(anchor.startCol)}\n${middle}\n${last.slice(0, anchor.endCol)}`;
+	}
+
+	/** True while the collapsed-paste anchor can still be expanded in place. */
+	private isCollapsedPasteEligible(anchor: CollapsedPasteAnchor, now: number): boolean {
+		if (now - anchor.at > PASTE_EXPAND_WINDOW_MS) return false;
+		// This input must be the immediate successor of the paste: any input
+		// between them (typing, cursor movement, another paste, ...) invalidates
+		// the gesture, as does any edit and any cursor drift away from the marker.
+		if (this.inputSequence - anchor.inputSequence !== 1) return false;
+		if (this.undoStack.length !== anchor.undoLength) return false;
+		if (this.state.cursorLine !== anchor.line || this.state.cursorCol !== anchor.col) return false;
+		if (!this.pastes.has(anchor.id)) return false;
+		const line = this.state.lines[anchor.line] ?? "";
+		const markerStart = anchor.col - anchor.marker.length;
+		return markerStart >= 0 && line.slice(markerStart, anchor.col) === anchor.marker;
+	}
+
+	/** True while the expanded-paste anchor can still be re-collapsed. */
+	private isExpandedPasteEligible(anchor: ExpandedPasteAnchor, now: number): boolean {
+		if (now - anchor.at > PASTE_EXPAND_WINDOW_MS) return false;
+		if (this.inputSequence - anchor.inputSequence !== 1) return false;
+		if (this.undoStack.length !== anchor.undoLength) return false;
+		if (this.state.cursorLine !== anchor.endLine || this.state.cursorCol !== anchor.endCol) return false;
+		return this.expandedSpanText(anchor) === anchor.text;
+	}
+
+	/**
+	 * Called by hosts synchronously on a paste keybinding press (e.g. Ctrl+V)
+	 * before any clipboard read.
+	 *
+	 * The first press is an ordinary paste. A second press inside the gesture
+	 * window expands the immediately preceding collapsed paste in place; a
+	 * further press toggles it back to collapsed form. Returns true when the
+	 * press was consumed by the gesture so the host can skip reading the
+	 * clipboard entirely (the gesture never duplicates clipboard content).
+	 */
+	tryPasteGesture(): boolean {
+		const now = pasteGestureClock();
+		// The paste keybinding press is itself an input event; count it before
+		// evaluating so the eligibility comparison sees this press as the
+		// immediate successor (sequence diff 1) of the paste.
+		this.inputSequence++;
+
+		if (this.lastExpandedPaste && this.isExpandedPasteEligible(this.lastExpandedPaste, now)) {
+			this.recollapseExpandedPaste();
+			return true;
+		}
+
+		if (this.lastCollapsedPaste && this.isCollapsedPasteEligible(this.lastCollapsedPaste, now)) {
+			this.expandCollapsedPaste(this.lastCollapsedPaste);
+			return true;
+		}
+
+		// The previous paste keypress is still in flight (the clipboard read
+		// has not resolved yet) and this press is its immediate successor:
+		// queue the expansion so it fires as soon as the collapsed paste
+		// lands. The press is consumed without touching the clipboard again.
+		if (
+			this.pasteInFlight &&
+			this.pasteKeypressAt !== null &&
+			this.pasteKeypressSeq !== null &&
+			this.inputSequence - this.pasteKeypressSeq === 1 &&
+			now - this.pasteKeypressAt <= PASTE_EXPAND_WINDOW_MS &&
+			!this.expandQueued
+		) {
+			this.expandQueued = true;
+			this.pasteInFlight = false;
+			return true;
+		}
+
+		// Ordinary paste: this press anchors a fresh gesture.
+		this.pasteKeypressAt = now;
+		this.pasteKeypressSeq = this.inputSequence;
+		this.pasteInFlight = true;
+		this.expandQueued = false;
+		return false;
+	}
+
+	/**
+	 * Drop all paste-gesture state. Called when the composer's contents are
+	 * replaced wholesale (setText) or submitted, so a stale paste is never
+	 * expanded into a different conversation.
+	 */
+	private resetPasteGesture(): void {
+		this.lastCollapsedPaste = null;
+		this.lastExpandedPaste = null;
+		this.pasteKeypressAt = null;
+		this.pasteKeypressSeq = null;
+		this.pasteInFlight = false;
+		this.expandQueued = false;
+	}
+
+	/**
+	 * Replace a collapsed paste marker with its full text, making it ordinary
+	 * editable composer content. The registry entry is removed (with the usual
+	 * id renumbering) so the expanded text is a plain buffer edit; the whole
+	 * operation is a single undo unit.
+	 */
+	private expandCollapsedPaste(anchor: CollapsedPasteAnchor): void {
+		const pastedText = this.pastes.get(anchor.id);
+		if (pastedText === undefined) return;
+		const line = this.state.lines[anchor.line] ?? "";
+		const markerStart = anchor.col - anchor.marker.length;
+		if (markerStart < 0 || line.slice(markerStart, anchor.col) !== anchor.marker) return;
+
+		this.cancelAutocomplete();
+		this.pushUndoSnapshot();
+
+		// Replace the marker with a placeholder that survives the registry
+		// renumbering below (the renumber rewrites `[paste #N ...]` tokens in
+		// place, which can shift later positions when a multi-digit id loses a
+		// digit). The placeholder is a NUL-delimited token: NUL cannot appear in
+		// editor text (it is filtered from pastes and untypable), so it cannot
+		// collide with the surrounding content.
+		const placeholder = `\x00paste:${anchor.id}\x00`;
+		this.state.lines[anchor.line] = line.slice(0, markerStart) + placeholder + line.slice(anchor.col);
+
+		// Remove the registry entry (with the usual id renumbering) so the
+		// expanded content is a plain buffer edit: marker-like text inside the
+		// content can never be double-expanded at submit time.
+		this.removePasteRegistryEntry(anchor.id);
+
+		// Locate the placeholder and replace it with the full pasted content.
+		const placeholderLine = this.state.lines[anchor.line] ?? "";
+		const placeholderStart = placeholderLine.indexOf(placeholder);
+		if (placeholderStart === -1) return;
+		const before = placeholderLine.slice(0, placeholderStart);
+		const after = placeholderLine.slice(placeholderStart + placeholder.length);
+		const contentLines = pastedText.split("\n");
+		let endLine: number;
+		let endCol: number;
+		if (contentLines.length === 1) {
+			this.state.lines[anchor.line] = before + pastedText + after;
+			endLine = anchor.line;
+			endCol = placeholderStart + pastedText.length;
+		} else {
+			this.state.lines = [
+				// All lines before the marker line
+				...this.state.lines.slice(0, anchor.line),
+
+				// First content line merged with the text before the marker
+				before + (contentLines[0] ?? ""),
+
+				// Middle content lines
+				...contentLines.slice(1, -1),
+
+				// Last content line merged with the text after the marker
+				(contentLines[contentLines.length - 1] ?? "") + after,
+
+				// All lines after the marker line
+				...this.state.lines.slice(anchor.line + 1),
+			];
+			endLine = anchor.line + contentLines.length - 1;
+			endCol = (contentLines[contentLines.length - 1] ?? "").length;
+		}
+		this.state.cursorLine = endLine;
+		this.setCursorCol(endCol);
+
+		this.lastExpandedPaste = {
+			text: pastedText,
+			startLine: anchor.line,
+			startCol: placeholderStart,
+			endLine,
+			endCol,
+			undoLength: this.undoStack.length,
+			inputSequence: this.inputSequence,
+			at: pasteGestureClock(),
+		};
+		this.lastCollapsedPaste = null;
+
+		if (this.onChange) this.onChange(this.getText());
+	}
+
+	/**
+	 * Re-collapse the most recent expanded paste into a fresh marker. The
+	 * expanded text is replaced by a new registry entry and marker, so a
+	 * further paste gesture toggles back to the expanded form.
+	 */
+	private recollapseExpandedPaste(): void {
+		const anchor = this.lastExpandedPaste;
+		if (!anchor) return;
+
+		// Verify the anchored span still holds the expanded text before mutating.
+		if (this.expandedSpanText(anchor) !== anchor.text) return;
+
+		this.cancelAutocomplete();
+		this.pushUndoSnapshot();
+
+		this.pasteCounter++;
+		const pasteId = this.pasteCounter;
+		this.pastes.set(pasteId, anchor.text);
+		const pastedLines = anchor.text.split("\n");
+		const marker =
+			pastedLines.length > 10
+				? `[paste #${pasteId} +${pastedLines.length} lines]`
+				: `[paste #${pasteId} ${anchor.text.length} chars]`;
+
+		// Replace the expanded span with the marker.
+		if (anchor.startLine === anchor.endLine) {
+			const line = this.state.lines[anchor.startLine] ?? "";
+			this.state.lines[anchor.startLine] = line.slice(0, anchor.startCol) + marker + line.slice(anchor.endCol);
+		} else {
+			const first = this.state.lines[anchor.startLine] ?? "";
+			const last = this.state.lines[anchor.endLine] ?? "";
+			this.state.lines = [
+				...this.state.lines.slice(0, anchor.startLine),
+				first.slice(0, anchor.startCol) + marker + last.slice(anchor.endCol),
+				...this.state.lines.slice(anchor.endLine + 1),
+			];
+		}
+
+		this.state.cursorLine = anchor.startLine;
+		this.setCursorCol(anchor.startCol + marker.length);
+
+		this.lastExpandedPaste = null;
+		this.lastCollapsedPaste = {
+			id: pasteId,
+			marker,
+			line: anchor.startLine,
+			col: anchor.startCol + marker.length,
+			undoLength: this.undoStack.length,
+			inputSequence: this.inputSequence,
+			at: pasteGestureClock(),
+		};
+
+		if (this.onChange) this.onChange(this.getText());
+	}
+
+	/**
+	 * Remove a paste registry entry and renumber the remaining entries and
+	 * markers in ascending id order (markers may be out of order in the text).
+	 * Shared by marker deletion and paste expansion.
+	 */
+	private removePasteRegistryEntry(targetId: number): void {
+		this.pastes.delete(targetId);
+		this.pasteCounter--;
+
+		const higherIds = [...this.pastes.keys()].filter((id) => id > targetId).sort((a, b) => a - b);
+		for (const id of higherIds) {
+			this.pastes.set(id - 1, this.pastes.get(id)!);
+			this.pastes.delete(id);
+		}
+
+		// Renumber markers with ids greater than the removed one.
+		this.state.lines = this.state.lines.map((line) =>
+			line.replace(PASTE_MARKER_REGEX, (fullMatch, idGroup, suffixGroup) => {
+				const x = Number(idGroup);
+				if (x <= targetId) return fullMatch;
+				return `[paste #${x - 1}${suffixGroup}]`;
+			}),
+		);
+	}
+
+	private handlePaste(pastedText: string): void {
+		this.cancelAutocomplete();
+		this.exitHistoryBrowsing();
+		this.lastAction = null;
+
+		const filteredText = this.cleanPasteText(pastedText);
 
 		// If pasting a file path (starts with /, ~, or .) and the character before
 		// the cursor is a word character, prepend a space for better readability
+		let pasteText = filteredText;
 		if (/^[/~.]/.test(filteredText)) {
 			const currentLine = this.state.lines[this.state.cursorLine] || "";
 			const charBeforeCursor = this.state.cursorCol > 0 ? currentLine[this.state.cursorCol - 1] : "";
 			if (charBeforeCursor && /\w/.test(charBeforeCursor)) {
-				filteredText = ` ${filteredText}`;
+				pasteText = ` ${filteredText}`;
 			}
 		}
 
+		// A second paste with the same content, arriving inside the gesture
+		// window with the cursor still resting on the previous collapsed
+		// marker, expands that paste in place instead of inserting another
+		// copy. This covers terminal-level paste shortcuts (bracketed paste)
+		// whose content cannot be intercepted before arrival. The check runs
+		// before the undo snapshot below so it does not invalidate the
+		// gesture's edit fingerprint.
+		const nowAtArrival = pasteGestureClock();
+		if (
+			this.lastCollapsedPaste &&
+			this.isCollapsedPasteEligible(this.lastCollapsedPaste, nowAtArrival) &&
+			pasteText === this.pastes.get(this.lastCollapsedPaste.id)
+		) {
+			this.expandCollapsedPaste(this.lastCollapsedPaste);
+			return;
+		}
+
+		// Same for the expanded form: a same-content paste inside the window
+		// toggles back to the collapsed marker.
+		if (
+			this.lastExpandedPaste &&
+			this.isExpandedPasteEligible(this.lastExpandedPaste, nowAtArrival) &&
+			pasteText === this.lastExpandedPaste.text
+		) {
+			this.recollapseExpandedPaste();
+			return;
+		}
+
+		this.pushUndoSnapshot();
+
 		// Split into lines to check for large paste
-		const pastedLines = filteredText.split("\n");
+		const pastedLines = pasteText.split("\n");
 
 		// Check if this is a large paste (> 10 lines or > 1000 characters)
-		const totalChars = filteredText.length;
+		const totalChars = pasteText.length;
 		if (pastedLines.length > 10 || totalChars > 1000) {
 			// Store the paste and insert a marker
 			this.pasteCounter++;
 			const pasteId = this.pasteCounter;
-			this.pastes.set(pasteId, filteredText);
+			this.pastes.set(pasteId, pasteText);
 
 			// Insert marker like "[paste #1 +123 lines]" or "[paste #1 1234 chars]"
 			const marker =
@@ -1230,17 +1604,50 @@ export class Editor implements Component, Focusable {
 					? `[paste #${pasteId} +${pastedLines.length} lines]`
 					: `[paste #${pasteId} ${totalChars} chars]`;
 			this.insertTextAtCursorInternal(marker);
+
+			const now = pasteGestureClock();
+			const anchor: CollapsedPasteAnchor = {
+				id: pasteId,
+				marker,
+				line: this.state.cursorLine,
+				col: this.state.cursorCol,
+				undoLength: this.undoStack.length,
+				inputSequence: this.inputSequence,
+				at: now,
+			};
+			if (
+				this.expandQueued &&
+				this.pasteKeypressAt !== null &&
+				now - this.pasteKeypressAt <= PASTE_EXPAND_WINDOW_MS
+			) {
+				// The second Ctrl+V arrived while the first clipboard read was
+				// still in flight; the queued expansion fires as soon as the
+				// collapsed paste lands.
+				this.expandCollapsedPaste(anchor);
+			} else {
+				this.lastCollapsedPaste = anchor;
+				this.lastExpandedPaste = null;
+			}
+			this.expandQueued = false;
+			this.pasteInFlight = false;
 			return;
 		}
 
+		// An ordinary (non-collapsing) paste is an unrelated paste: the previous
+		// collapse is no longer the active/recent paste.
+		this.lastCollapsedPaste = null;
+		this.lastExpandedPaste = null;
+		this.expandQueued = false;
+		this.pasteInFlight = false;
+
 		if (pastedLines.length === 1) {
 			// Single line - insert atomically (do not trigger autocomplete during paste)
-			this.insertTextAtCursorInternal(filteredText);
+			this.insertTextAtCursorInternal(pasteText);
 			return;
 		}
 
 		// Multi-line paste - use direct state manipulation
-		this.insertTextAtCursorInternal(filteredText);
+		this.insertTextAtCursorInternal(pasteText);
 	}
 
 	private addNewLine(): void {
@@ -1286,6 +1693,7 @@ export class Editor implements Component, Focusable {
 		this.state = { lines: [""], cursorLine: 0, cursorCol: 0 };
 		this.pastes.clear();
 		this.pasteCounter = 0;
+		this.resetPasteGesture();
 		this.exitHistoryBrowsing();
 		this.scrollOffset = 0;
 		this.undoStack.clear();
@@ -1315,26 +1723,7 @@ export class Editor implements Component, Focusable {
 			if (isPastedSegmented) {
 				// This contains the id part e.g 4 from [paste #4 +123 lines]
 				const targetId = Number(isPastedSegmented[1]);
-				this.pastes.delete(targetId);
-				this.pasteCounter--;
-
-				// Shift registry entries down in ascending id order, independent
-				// of marker order in the text ([paste #3] becomes [paste #2] when
-				// [paste #1] is removed).
-				const higherIds = [...this.pastes.keys()].filter((id) => id > targetId).sort((a, b) => a - b);
-				for (const id of higherIds) {
-					this.pastes.set(id - 1, this.pastes.get(id)!);
-					this.pastes.delete(id);
-				}
-
-				// Renumber markers with ids greater than the removed one.
-				this.state.lines = this.state.lines.map((line) =>
-					line.replace(PASTE_MARKER_REGEX, (fullMatch, idGroup, suffixGroup) => {
-						const x = Number(idGroup);
-						if (x <= targetId) return fullMatch;
-						return `[paste #${x - 1}${suffixGroup}]`;
-					}),
-				);
+				this.removePasteRegistryEntry(targetId);
 			}
 
 			line = this.state.lines[this.state.cursorLine] || "";

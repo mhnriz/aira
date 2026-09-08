@@ -111,6 +111,12 @@ export class CustomEditor extends Editor {
 
 		// Check for clipboard paste keybinding
 		if (this.keybindings.matches(data, "app.clipboard.pasteImage")) {
+			// A second Ctrl+V inside the gesture window expands (or re-collapses)
+			// the previous paste in place. The press is consumed synchronously so
+			// the clipboard is never read a second time for the gesture.
+			if (this.tryPasteGesture()) {
+				return;
+			}
 			this.onPasteImage?.();
 			return;
 		}

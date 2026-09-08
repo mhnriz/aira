@@ -1,8 +1,8 @@
 import assert from "node:assert";
-import { describe, it } from "node:test";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { stripVTControlCharacters } from "node:util";
 import { type AutocompleteProvider, CombinedAutocompleteProvider } from "../src/autocomplete.ts";
-import { Editor, wordWrapLine } from "../src/components/editor.ts";
+import { Editor, setPasteGestureClock, wordWrapLine } from "../src/components/editor.ts";
 import type { TUI } from "../src/tui.ts";
 import { TuiMainScreen } from "../src/tui-main-screen.ts";
 import { visibleWidth } from "../src/utils.ts";
@@ -4147,6 +4147,295 @@ describe("Editor component", () => {
 			editor.handleInput("\r");
 
 			assert.strictEqual(submitted, pastedText);
+		});
+	});
+
+	describe("Paste expansion gesture (double Ctrl+V)", () => {
+		// Deterministic fake clock: the gesture window is time-based, but tests
+		// advance a fake clock instead of sleeping.
+		let clock = 0;
+		beforeEach(() => {
+			clock = 0;
+			setPasteGestureClock(() => clock);
+		});
+		afterEach(() => {
+			setPasteGestureClock(() => Date.now());
+		});
+
+		function bracketed(content: string): string {
+			return `\x1b[200~${content}\x1b[201~`;
+		}
+
+		/** 12-line content with a distinguishing tag (large enough to collapse). */
+		function bigPaste(tag: string): string {
+			return Array.from({ length: 12 }, (_, i) => `${tag}${i}`).join("\n");
+		}
+
+		function pasteAndCollapse(editor: Editor, tag: string): string {
+			const content = bigPaste(tag);
+			editor.handleInput(bracketed(content));
+			assert.match(editor.getText(), /^\[paste #\d+ \+\d+ lines\]$/);
+			return content;
+		}
+
+		it("keeps short pastes unchanged", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			editor.handleInput(bracketed("hello world"));
+			assert.strictEqual(editor.getText(), "hello world");
+
+			// No collapsed paste exists, so a paste press is not consumed by the
+			// gesture and the host performs an ordinary paste.
+			assert.strictEqual(editor.tryPasteGesture(), false);
+			editor.handleInput(bracketed("hello world"));
+			assert.strictEqual(editor.getText(), "hello worldhello world");
+		});
+
+		it("collapses large pastes normally", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			const text = pasteAndCollapse(editor, "alpha");
+			assert.strictEqual(text.length, editor.getExpandedText().length);
+		});
+
+		it("expands the preceding collapsed paste on a second Ctrl+V inside the window", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			const content = pasteAndCollapse(editor, "alpha");
+
+			// Second Ctrl+V within ~1s: consumed by the gesture and the full
+			// text appears once (no duplication).
+			assert.strictEqual(editor.tryPasteGesture(), true);
+			assert.strictEqual(editor.getText(), content);
+			assert.strictEqual(editor.getText().split("alpha").length - 1, 12);
+		});
+
+		it("expands via a second bracketed paste with the same content", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			const content = bigPaste("alpha");
+			editor.handleInput(bracketed(content));
+			assert.match(editor.getText(), /\[paste #\d+/);
+
+			// Terminal-level paste shortcut pressed twice: same content inside
+			// the window expands instead of inserting a second copy.
+			editor.handleInput(bracketed(content));
+			assert.strictEqual(editor.getText(), content);
+		});
+
+		it("expired window performs an ordinary subsequent paste", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			const first = pasteAndCollapse(editor, "alpha");
+
+			clock += 1001;
+			assert.strictEqual(editor.tryPasteGesture(), false);
+
+			const second = bigPaste("beta");
+			editor.handleInput(bracketed(second));
+			const text = editor.getText();
+			assert.ok(text.includes("[paste #1"));
+			assert.ok(text.includes("[paste #2"));
+
+			let submitted = "";
+			editor.onSubmit = (t) => {
+				submitted = t;
+			};
+			editor.handleInput("\r");
+			assert.strictEqual(submitted, first + second);
+		});
+
+		it("cancels the gesture on an intervening edit", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			pasteAndCollapse(editor, "alpha");
+
+			editor.handleInput("X");
+			assert.strictEqual(editor.tryPasteGesture(), false);
+
+			// Typing also pushes an undo snapshot, so undo alone cannot revive
+			// the gesture.
+			editor.handleInput("\x1b[45;5u"); // undo
+			assert.strictEqual(editor.tryPasteGesture(), false);
+		});
+
+		it("cancels the gesture on cursor movement", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			pasteAndCollapse(editor, "alpha");
+
+			// Any input since the paste - including pure cursor movement -
+			// invalidates the gesture.
+			editor.handleInput("\x1b[D"); // left
+			editor.handleInput("\x1b[C"); // right (back at the marker end)
+			assert.strictEqual(editor.tryPasteGesture(), false);
+		});
+
+		it("cancels the gesture on an unrelated paste", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			pasteAndCollapse(editor, "alpha");
+
+			const other = bigPaste("beta");
+			editor.handleInput(bracketed(other));
+			const text = editor.getText();
+			assert.ok(text.includes("[paste #1"));
+			assert.ok(text.includes("[paste #2"));
+
+			// The unrelated paste supersedes the previous gesture: a further
+			// press expands the NEW paste (beta), not the stale alpha one.
+			assert.strictEqual(editor.tryPasteGesture(), true);
+			const after = editor.getText();
+			assert.ok(after.includes("[paste #1")); // alpha still collapsed
+			assert.strictEqual(after.split("beta").length - 1, 12); // beta expanded once
+		});
+
+		it("preserves multiline content, indentation, and Unicode exactly", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			const content = [
+				"def f():\n",
+				"    return 'héllo wörld 你好 🎉'\n",
+				"\n",
+				"# 註釋 with     irregular   spacing",
+			].join("");
+			const lines = content.split("\n");
+			assert.ok(lines.length < 12 && content.length < 1000, "fixture must not self-collapse");
+			// Force collapse via many lines instead.
+			const long = content + Array.from({ length: 12 }, (_, i) => `line ${i}`).join("\n");
+
+			editor.handleInput(bracketed(long));
+			assert.match(editor.getText(), /\[paste #\d+ \+\d+ lines\]/);
+			editor.tryPasteGesture();
+			assert.strictEqual(editor.getText(), long);
+		});
+
+		it("leaves the cursor at the end of the expanded content for editing", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			const content = bigPaste("alpha");
+			editor.handleInput(bracketed(content));
+			editor.tryPasteGesture();
+
+			// Cursor is at the very end of the expanded content ("alpha11" = 7
+			// chars).
+			assert.deepStrictEqual(editor.getCursor(), { line: content.split("\n").length - 1, col: 7 });
+
+			// The expanded text is ordinary editable content: typing appends and
+			// backspace removes a single character, not the whole paste.
+			editor.handleInput("Z");
+			assert.strictEqual(editor.getText(), `${content}Z`);
+			editor.handleInput("\x7f");
+			assert.strictEqual(editor.getText(), content);
+
+			// Editing after expansion behaves like any other text: the marker is
+			// gone, so deletion is per-character. Ctrl+A from the end moves to the
+			// start of the current (last) line.
+			editor.handleInput("\x01"); // Ctrl+A (line start)
+			editor.handleInput("\x1b[C"); // right
+			editor.handleInput("\x7f"); // deletes 'a' of alpha11, one char
+			assert.strictEqual(editor.getText(), content.replace("alpha11", "lpha11"));
+		});
+
+		it("sends an identical payload whether the paste stayed collapsed or was expanded", () => {
+			const content = bigPaste("alpha");
+
+			const collapsed = new Editor(createTestTUI(), defaultEditorTheme);
+			let collapsedSubmit = "";
+			collapsed.onSubmit = (t) => {
+				collapsedSubmit = t;
+			};
+			collapsed.handleInput(bracketed(content));
+			assert.match(collapsed.getText(), /\[paste #\d+/);
+			collapsed.handleInput("\r");
+			assert.strictEqual(collapsedSubmit, content);
+
+			const expanded = new Editor(createTestTUI(), defaultEditorTheme);
+			let expandedSubmit = "";
+			expanded.onSubmit = (t) => {
+				expandedSubmit = t;
+			};
+			expanded.handleInput(bracketed(content));
+			expanded.tryPasteGesture();
+			assert.strictEqual(expanded.getText(), content);
+			expanded.handleInput("\r");
+			assert.strictEqual(expandedSubmit, content);
+
+			assert.strictEqual(collapsedSubmit, expandedSubmit);
+		});
+
+		it("keeps undo/redo sane across expansion", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			const content = bigPaste("alpha");
+			editor.handleInput(bracketed(content));
+			const markerText = editor.getText();
+
+			editor.tryPasteGesture();
+			assert.strictEqual(editor.getText(), content);
+
+			// Undo restores the collapsed marker (registry included).
+			editor.handleInput("\x1b[45;5u"); // undo (Ctrl+-)
+			assert.strictEqual(editor.getText(), markerText);
+
+			let submitted = "";
+			editor.onSubmit = (t) => {
+				submitted = t;
+			};
+			editor.handleInput("\r");
+			assert.strictEqual(submitted, content);
+
+			// Redo-like second undo back to the pre-paste state.
+			const before = new Editor(createTestTUI(), defaultEditorTheme);
+			before.handleInput(bracketed(content));
+			before.tryPasteGesture();
+			before.handleInput("\x1b[45;5u"); // undo: back to marker
+			before.handleInput("\x1b[45;5u"); // undo: back to empty
+			assert.strictEqual(before.getText(), "");
+		});
+
+		it("toggles back to collapsed form on a further Ctrl+V", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			const content = bigPaste("alpha");
+			editor.handleInput(bracketed(content));
+
+			// Expand.
+			assert.strictEqual(editor.tryPasteGesture(), true);
+			assert.strictEqual(editor.getText(), content);
+
+			// Re-collapse.
+			assert.strictEqual(editor.tryPasteGesture(), true);
+			assert.match(editor.getText(), /^\[paste #\d+ \+\d+ lines\]$/);
+
+			// Expand again.
+			assert.strictEqual(editor.tryPasteGesture(), true);
+			assert.strictEqual(editor.getText(), content);
+
+			// Payload is identical in all three forms.
+			let submitted = "";
+			editor.onSubmit = (t) => {
+				submitted = t;
+			};
+			editor.handleInput("\r");
+			assert.strictEqual(submitted, content);
+		});
+
+		it("expands a paste queued while the first clipboard read is in flight", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			const content = bigPaste("alpha");
+
+			// First Ctrl+V press: not consumed; the host starts reading the
+			// clipboard (async).
+			assert.strictEqual(editor.tryPasteGesture(), false);
+			// Second Ctrl+V press before the read resolves: consumed and queued.
+			assert.strictEqual(editor.tryPasteGesture(), true);
+			// The clipboard read resolves and the paste lands: it collapses and
+			// immediately expands, so the full text appears exactly once.
+			editor.handleInput(bracketed(content));
+			assert.strictEqual(editor.getText(), content);
+
+			// No further press is left queued: an ordinary paste stays collapsed.
+			clock += 1100;
+			const other = bigPaste("beta");
+			editor.handleInput(bracketed(other));
+			assert.ok(editor.getText().includes("[paste #"));
+		});
+
+		it("does not expand a stale paste after setText replaces the composer", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			pasteAndCollapse(editor, "alpha");
+
+			editor.setText("replacement");
+			assert.strictEqual(editor.tryPasteGesture(), false);
 		});
 	});
 });

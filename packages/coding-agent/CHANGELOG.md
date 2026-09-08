@@ -14,6 +14,13 @@
   payloads for changed or explicitly queried files, with truthful per-file
   states (clean publish, no publish within budget, server unavailable).
   Workbench/Engineering Context surfaces the diagnostic counts.
+- **Aira**: Composer paste expansion. Large pastes still collapse to a compact
+  `[paste #N ...]` marker; a second Ctrl+V (or same-content terminal paste)
+  within one second expands the preceding collapsed paste in place as ordinary
+  editable text without re-reading the clipboard, and a further press toggles
+  it back to collapsed form. The gesture expires on any intervening input,
+  cursor movement, unrelated paste, or the timer; the model payload is
+  identical whether a paste stays collapsed or is expanded for editing.
 
 ### Fixed
 
