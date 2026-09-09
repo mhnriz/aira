@@ -62,6 +62,19 @@
   model cycle-back is Alt+P, tree filter cycle-back is Ctrl+Alt+O, fullscreen
   search is Ctrl+Alt+F, search-previous is Shift+Enter). Users can still bind
   Ctrl+Shift combinations explicitly where their terminal transmits them.
+- **Aira**: Repaired C# language-server support. The C# registration now
+  launches `csharp-ls` — an external Roslyn-based language server installed
+  as a dotnet global tool (`dotnet tool install --global csharp-ls`, runs on
+  the .NET 10 SDK) and discovered on PATH like gopls/rust-analyzer — instead
+  of the previous `omnisharp -stdio` invocation, which never entered
+  OmniSharp's LSP mode and could not complete the initialize handshake.
+  Project-level live-code activation is fixed for human-facing language
+  labels ("C#", "C/C++") that previously did not resolve to registry ids,
+  and `*.slnx` solution files are now recognized as .NET project markers
+  alongside `*.csproj`/`*.sln`/`global.json`. Missing-server behavior stays
+  graceful: when csharp-ls is not installed, C# projects degrade to a
+  truthful unavailable state with plain-search navigation instead of
+  crashing or faking readiness.
 
 ### Changed
 
