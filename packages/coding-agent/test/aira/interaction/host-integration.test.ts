@@ -78,6 +78,9 @@ async function makeHarness(
 		settings: {
 			permissions: { enabled: options.permissionsEnabled ?? true, mode: options.permissionMode ?? "normal" },
 			goals: { enabled: true, auto: options.goalAuto ?? "off" },
+			// Verification defaults OFF; CASE G's question flow needs the
+			// verification boundary enabled (stubbed runner below).
+			verification: { enabled: true },
 		} as never,
 		airaGoalOptions: {
 			persistence: {

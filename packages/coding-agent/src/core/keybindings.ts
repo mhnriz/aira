@@ -118,17 +118,20 @@ export const KEYBINDINGS = {
 		description: "Cycle to next model",
 	},
 	"app.model.cycleBackward": {
-		defaultKeys: windowsKeybindings ? "alt+p" : "shift+ctrl+p",
+		// Plain Alt+P on every platform: the old non-Windows default
+		// shift+ctrl+p could collapse to Ctrl+P (model cycle forward) on
+		// terminals that fold Ctrl+Shift+letter into the Ctrl byte.
+		defaultKeys: "alt+p",
 		description: "Cycle to previous model",
 	},
 	"app.model.select": { defaultKeys: "ctrl+l", description: "Open model selector" },
 	"app.tools.expand": { defaultKeys: "ctrl+o", description: "Toggle tool output" },
 	"app.workbench.toggle": {
-		// The Workbench has its own semantic binding. Ctrl+O remains the
-		// established tool-output expansion action. Alt+Backslash is the
-		// cross-platform hide/show shortcut (no Ctrl+Shift combos: Windows
-		// Terminal collapses some Ctrl+Shift+letter pairs into Ctrl+letter).
-		defaultKeys: ["ctrl+shift+o", "alt+\\"],
+		// Alt+Backslash is the Session Context toggle. The historical
+		// secondary Ctrl+Shift+O default is gone: Windows Terminal can deliver
+		// Ctrl+Shift+letter indistinguishably from the plain Ctrl+letter byte,
+		// which would collide with Ctrl+O (tool output expansion).
+		defaultKeys: "alt+\\",
 		description: "Toggle Session Context sidebar",
 	},
 	"app.workbench.wider": {
@@ -270,7 +273,10 @@ export const KEYBINDINGS = {
 		description: "Tree filter: cycle forward",
 	},
 	"app.tree.filter.cycleBackward": {
-		defaultKeys: "shift+ctrl+o",
+		// ESC+Ctrl+O is a distinct byte from Ctrl+O (Ctrl+Shift+letter is not
+		// reliably distinct on Windows Terminal); the precedent is
+		// tui.editor.jumpBackward (ctrl+alt+]).
+		defaultKeys: "ctrl+alt+o",
 		description: "Tree filter: cycle backward",
 	},
 } as const satisfies KeybindingDefinitions;

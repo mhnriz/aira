@@ -137,11 +137,15 @@ export function arbitrateCurrentFinding(state: AiraSessionState | undefined): Wo
 				...(top.code !== undefined ? { code: String(top.code) } : {}),
 			});
 		} else if (top) {
+			// Separate SERVER state from diagnostic freshness: a healthy LSP
+			// can still carry stale findings, so the wording must not read as
+			// "the LSP itself is stale".
+			const server = state.intelligence?.liveCode.status ?? "unavailable";
 			candidates.push({
 				severity: "warning",
 				source: "lsp",
 				priority: 2,
-				label: `diagnostics are ${top.freshness}`,
+				label: `LSP ${server} · diagnostics ${top.freshness}`,
 				detail: `${top.path ?? "unknown path"}${top.line ? `:${top.line}` : ""}`,
 				code: "LSP",
 			});

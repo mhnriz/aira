@@ -9,6 +9,13 @@
 - Improve fullscreen transcript navigation with cached search, jump-to-latest,
   and accelerated Alt-wheel scrolling.
 - Add configurable save bindings for model and thinking selectors.
+- **Aira**: Code intelligence for the agent. `aira_symbol_search`, the
+  `aira_module_report` module orientation, and `aira_semantic_navigation`
+  (definitions/references/document symbols via the project language server)
+  are available to the model by default, with cold-start semantic navigation
+  over the session's working set and an agent-facing intelligence funnel that
+  guides discovery. Intelligence tool output renders with the polished
+  structured layout (symbol rows, module summaries, navigation results).
 - **Aira**: Expose live language-server diagnostics to the model through the new
   `aira_diagnostics` tool: bounded per-file severity/code/message/location
   payloads for changed or explicitly queried files, with truthful per-file
@@ -29,12 +36,12 @@
   stale findings are shown as a separate muted count that never inflates the
   current totals, and stale per-finding details render muted.
 - **Aira**: Session Context keyboard resizing and hide/show. Alt+] widens and
-  Alt+[ narrows the sidebar in fixed 4-column steps (clamped to a safe
-  range); Alt+\ toggles it. Resizing moves a persisted preferred width that
-  is authoritative at every terminal width with room for the pane; the
-  effective width still clamps to the terminal, and narrow-terminal auto-hide
-  is preserved (re-expanding the terminal restores the preferred width). No
-  mouse or Ctrl+Shift chords involved.
+  Alt+[ narrows the sidebar in fixed 4-column steps (34-80 columns); Alt+\
+  toggles it. Resizing moves a persisted preferred width that is authoritative
+  at every terminal width with room for the pane; the effective width still
+  clamps to the terminal, and narrow-terminal auto-hide is preserved
+  (re-expanding the terminal restores the preferred width). No mouse or
+  Ctrl+Shift chords involved.
 - **Aira**: Transient session-transition feedback via the existing status
   line: successful `/resume`, fork, and clone transitions report the new
   session's in-memory message count (e.g. "Resumed session · 18 messages");
@@ -50,6 +57,11 @@
   room for the pane.
 - Cancel active compaction cleanly during session abort.
 - Report signal-killed processes as failures with truthful exit semantics.
+- Replace default Ctrl+Shift+letter bindings that Windows Terminal can fold
+  into plain Ctrl+letter control bytes (Session Context toggle is Alt+\,
+  model cycle-back is Alt+P, tree filter cycle-back is Ctrl+Alt+O, fullscreen
+  search is Ctrl+Alt+F, search-previous is Shift+Enter). Users can still bind
+  Ctrl+Shift combinations explicitly where their terminal transmits them.
 
 ### Changed
 

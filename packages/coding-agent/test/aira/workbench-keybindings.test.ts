@@ -6,9 +6,15 @@ import { KeybindingsManager } from "../../src/core/keybindings.ts";
 import { CustomEditor } from "../../src/modes/interactive/components/custom-editor.ts";
 
 describe("Aira Workbench keybinding defaults (Phase 12)", () => {
-	it("binds Ctrl+Shift+O and Alt+Backslash to the Workbench toggle by default", () => {
+	it("binds Alt+Backslash to the Session Context toggle by default", () => {
 		const km = new KeybindingsManager();
-		expect(km.getKeys("app.workbench.toggle")).toEqual(["ctrl+shift+o", "alt+\\"]);
+		expect(km.getKeys("app.workbench.toggle")).toEqual(["alt+\\"]);
+	});
+
+	it("no longer ships the Ctrl+Shift+O secondary toggle (Windows Terminal folds it into Ctrl+O)", () => {
+		const km = new KeybindingsManager();
+		expect(km.getKeys("app.workbench.toggle")).not.toContain("ctrl+shift+o");
+		expect(km.getKeys("app.workbench.toggle")).not.toContain("shift+ctrl+o");
 	});
 
 	it("preserves Ctrl+O for tool-output expansion", () => {
@@ -19,7 +25,8 @@ describe("Aira Workbench keybinding defaults (Phase 12)", () => {
 	it("keeps the session-tree filter cycle on Ctrl+O (context-scoped, unchanged)", () => {
 		const km = new KeybindingsManager();
 		expect(km.getKeys("app.tree.filter.cycleForward")).toContain("ctrl+o");
-		expect(km.getKeys("app.tree.filter.cycleBackward")).toContain("shift+ctrl+o");
+		expect(km.getKeys("app.tree.filter.cycleBackward")).toContain("ctrl+alt+o");
+		expect(km.getKeys("app.tree.filter.cycleBackward")).not.toContain("shift+ctrl+o");
 	});
 
 	it("resolves all default bindings without conflicts", () => {
@@ -30,7 +37,7 @@ describe("Aira Workbench keybinding defaults (Phase 12)", () => {
 	it("preserves a user customization without changing the Workbench binding", () => {
 		const km = new KeybindingsManager({ "app.tools.expand": "alt+o" });
 		expect(km.getKeys("app.tools.expand")).toEqual(["alt+o"]);
-		expect(km.getKeys("app.workbench.toggle")).toEqual(["ctrl+shift+o", "alt+\\"]);
+		expect(km.getKeys("app.workbench.toggle")).toEqual(["alt+\\"]);
 	});
 
 	describe("Phase 12.1 viewport focus", () => {
@@ -50,7 +57,7 @@ describe("Aira Workbench keybinding defaults (Phase 12)", () => {
 		it("keeps the O-family bindings distinct (expand / toggle / focus)", () => {
 			const km = new KeybindingsManager();
 			expect(km.getKeys("app.tools.expand")).toEqual(["ctrl+o"]);
-			expect(km.getKeys("app.workbench.toggle")).toEqual(["ctrl+shift+o", "alt+\\"]);
+			expect(km.getKeys("app.workbench.toggle")).toEqual(["alt+\\"]);
 			expect(km.getKeys("app.viewport.focusCycle")).toEqual(["alt+o"]);
 		});
 
@@ -61,7 +68,7 @@ describe("Aira Workbench keybinding defaults (Phase 12)", () => {
 
 		it("keeps the Workbench toggle binding intact alongside focus cycle", () => {
 			const km = new KeybindingsManager();
-			expect(km.getKeys("app.workbench.toggle")).toEqual(["ctrl+shift+o", "alt+\\"]);
+			expect(km.getKeys("app.workbench.toggle")).toEqual(["alt+\\"]);
 			expect(km.getKeys("app.viewport.focusCycle")).toEqual(["alt+o"]);
 		});
 	});

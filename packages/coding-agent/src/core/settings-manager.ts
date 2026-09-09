@@ -40,7 +40,7 @@ export type FullscreenExitOutput = "transcript" | "resume-hint";
 /** Workbench sidebar width bounds (Phase 12; shared by settings + renderer). */
 export const MIN_WORKBENCH_WIDTH = 34;
 export const DEFAULT_WORKBENCH_WIDTH = 42;
-export const MAX_WORKBENCH_WIDTH = 60;
+export const MAX_WORKBENCH_WIDTH = 80;
 
 /** Safe conversation width: below this the sidebar auto-hides (narrow layout). */
 export const MIN_WORKBENCH_MAIN_WIDTH = 72;

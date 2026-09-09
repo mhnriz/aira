@@ -150,7 +150,9 @@ async function makeGoalHarness(
 	const harness = await createHarness({
 		cwd: root,
 		// Goal runtime tests explicitly opt in; production defaults are disabled.
-		settings: { goals: { enabled: true, ...options.goals } } as never,
+		// Verification is likewise OFF by default; these tests drive it through
+		// the stubbed runner.
+		settings: { goals: { enabled: true, ...options.goals }, verification: { enabled: true } } as never,
 		airaVerificationOptions: {
 			runner: async () => {
 				const outcomes = options.verdicts ?? [PASS_OUTCOME];
@@ -274,6 +276,8 @@ describe("Aira goal runtime through the host (Phase 10)", () => {
 			settings: {
 				goals: { enabled: true, auto: "always" },
 				orchestration: { enabled: true },
+				// Verification defaults OFF; this child-verification flow needs it.
+				verification: { enabled: true },
 			} as never,
 			airaVerificationOptions: {
 				runner: async () => {
@@ -343,7 +347,8 @@ describe("Aira goal runtime through the host (Phase 10)", () => {
 			settings: {
 				goals: { enabled: true, auto: "always" },
 				orchestration: { enabled: true },
-				verification: { auto: "always" },
+				// Verification defaults OFF; auto=always alone no longer enables it.
+				verification: { enabled: true, auto: "always" },
 			} as never,
 			airaOrchestrationOptions: {
 				runner: async (_runtime, options): Promise<AiraChildOutcome> => {

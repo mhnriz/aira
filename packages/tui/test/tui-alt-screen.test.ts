@@ -469,7 +469,7 @@ describe("TuiAltScreen", () => {
 		tui.start();
 		await terminal.waitForRender();
 
-		terminal.sendInput("\x1b[102;6u");
+		terminal.sendInput("\x1b[102;7u");
 		terminal.sendInput("needle");
 		await terminal.waitForRender();
 
@@ -482,7 +482,7 @@ describe("TuiAltScreen", () => {
 		tui.stop();
 	});
 
-	it("searches the transcript with Ctrl+Shift+F and restores editor focus on close", async () => {
+	it("searches the transcript with Ctrl+Alt+F and restores editor focus on close", async () => {
 		const terminal = new RecordingTerminal(60, 8);
 		const tui = new TuiAltScreen(terminal);
 		const transcriptText = new Text(
@@ -512,7 +512,7 @@ describe("TuiAltScreen", () => {
 		tui.start();
 		await terminal.waitForRender();
 
-		terminal.sendInput("\x1b[102;6u");
+		terminal.sendInput("\x1b[102;7u");
 		terminal.sendInput("needle");
 		await terminal.waitForRender();
 		assert.strictEqual(transcript.isFollowingEnd, false);
@@ -533,7 +533,7 @@ describe("TuiAltScreen", () => {
 		assert.ok(terminal.getViewport().some((line) => line.includes("Find transcript") && line.includes("1/2")));
 		assert.ok(terminal.getViewport().some((line) => line.includes("line 5 needle one")));
 
-		terminal.sendInput("\x1b[103;6u");
+		terminal.sendInput("\x1b[13;2u");
 		await terminal.waitForRender();
 		assert.ok(terminal.getViewport().some((line) => line.includes("Find transcript") && line.includes("2/2")));
 		assert.ok(terminal.getViewport().some((line) => line.includes("line 10 needle two")));
@@ -1540,7 +1540,7 @@ describe("TuiAltScreen", () => {
 		await terminal.waitForRender();
 		const topBefore = tui.viewportTop;
 
-		terminal.sendInput("\x1b[102;6u");
+		terminal.sendInput("\x1b[102;7u");
 		await terminal.waitForRender();
 		assert.ok(terminal.getViewport().some((line) => line.includes("Find transcript")));
 

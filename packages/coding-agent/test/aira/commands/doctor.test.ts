@@ -156,6 +156,7 @@ describe("Aira /doctor command (Phase 4 scope)", () => {
 		const modeCheck = report.checks.find((c) => c.name === "mode shortcut");
 		const thinkingCheck = report.checks.find((c) => c.name === "thinking shortcut");
 		const focusCheck = report.checks.find((c) => c.name === "viewport focus shortcut");
+		const workbenchCheck = report.checks.find((c) => c.name === "workbench shortcut");
 
 		expect(modeCheck?.pass).toBe(true);
 		expect(modeCheck?.detail).toContain("shift+tab");
@@ -163,6 +164,9 @@ describe("Aira /doctor command (Phase 4 scope)", () => {
 		expect(thinkingCheck?.detail).toContain("ctrl+shift+e");
 		expect(focusCheck?.pass).toBe(true);
 		expect(focusCheck?.detail).toContain("alt+o");
+		expect(workbenchCheck?.pass).toBe(true);
+		expect(workbenchCheck?.detail).toContain("alt+\\");
+		expect(workbenchCheck?.detail).not.toContain("ctrl+shift+o");
 		disposeAiraSessionState("doctor-3", state);
 	});
 

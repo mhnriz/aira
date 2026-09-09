@@ -190,7 +190,10 @@ export const TUI_KEYBINDINGS = {
 		description: "Jump to next semantic prompt",
 	},
 	"tui.altScreen.search": {
-		defaultKeys: "ctrl+shift+f",
+		// Ctrl+Alt+F (ESC+0x06) is a distinct byte that cannot be confused
+		// with Ctrl+F; Ctrl+Shift+F collapses into Ctrl+F on Windows Terminal,
+		// which would trigger the editor's cursor-right instead of search.
+		defaultKeys: "ctrl+alt+f",
 		description: "Search the primary scroll view",
 	},
 	"tui.altScreen.searchNext": {
@@ -198,7 +201,9 @@ export const TUI_KEYBINDINGS = {
 		description: "Select the next search match",
 	},
 	"tui.altScreen.searchPrevious": {
-		defaultKeys: ["shift+enter", "ctrl+shift+g"],
+		// Shift+Enter is unambiguous; the former Ctrl+Shift+G secondary could
+		// collapse into Ctrl+G (search-next) on Windows Terminal.
+		defaultKeys: ["shift+enter"],
 		description: "Select the previous search match",
 	},
 	"tui.altScreen.searchClose": {

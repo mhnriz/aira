@@ -175,7 +175,7 @@ describe("Workbench visibility policy", () => {
 		expect(responsiveWorkbenchWidth(230, 46)).toBe(46);
 		expect(responsiveWorkbenchWidth(165, 50)).toBe(50);
 		expect(responsiveWorkbenchWidth(10, 20)).toBe(34); // clamped min
-		expect(responsiveWorkbenchWidth(10, 80)).toBe(60); // clamped max
+		expect(responsiveWorkbenchWidth(10, 80)).toBe(80); // clamped max
 	});
 
 	it("respects workbench.enabled=false as a hard off", () => {

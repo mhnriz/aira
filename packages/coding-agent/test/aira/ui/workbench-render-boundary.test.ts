@@ -20,7 +20,7 @@ import { Text } from "@earendil-works/pi-tui";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { renderLayoutFrame } from "../../../../tui/src/layout.ts";
 import type { AgentSession } from "../../../src/core/agent-session.ts";
-import { DEFAULT_WORKBENCH_WIDTH } from "../../../src/core/settings-manager.ts";
+import { DEFAULT_WORKBENCH_WIDTH, MIN_WORKBENCH_WIDTH } from "../../../src/core/settings-manager.ts";
 import { initTheme } from "../../../src/modes/interactive/theme/theme.ts";
 import { WorkbenchController } from "../../../src/modes/interactive/workbench/controller.ts";
 
@@ -74,9 +74,9 @@ function createController(): {
 
 type Box = { rect: { x: number; width: number }; children: Box[] };
 
-/** The Session Context pane box: a laid-out child at x > 0 with width < 72. */
+/** The Session Context pane box: the laid-out split child at x > 0. */
 function findSidebarBox(box: Box): Box | undefined {
-	if (box.rect.x > 0 && box.rect.width < 72) return box;
+	if (box.rect.x > 0 && box.rect.width >= MIN_WORKBENCH_WIDTH) return box;
 	for (const child of box.children) {
 		const found = findSidebarBox(child);
 		if (found) return found;
@@ -144,15 +144,25 @@ describe("Session Context render boundary (fullscreen layout)", () => {
 		expect(measure(controller, terminal, 200).divider).toBe(200 - 46);
 	});
 
-	it("clamps the rendered pane at 34 and 60 columns", () => {
+	it("clamps the rendered pane at 34 and 80 columns", () => {
 		stored.width = DEFAULT_WORKBENCH_WIDTH;
 		const { controller, terminal } = createController();
 		while (measure(controller, terminal, 165).width > 34) controller.resizeBy(-4);
 		expect(measure(controller, terminal, 165).width).toBe(34);
 		expect(controller.resizeBy(-4)).toBe(34); // stays clamped
-		while (measure(controller, terminal, 165).width < 60) controller.resizeBy(4);
-		expect(measure(controller, terminal, 165).width).toBe(60);
-		expect(controller.resizeBy(4)).toBe(60); // stays clamped
+		while (measure(controller, terminal, 165).width < 80) controller.resizeBy(4);
+		expect(measure(controller, terminal, 165).width).toBe(80);
+		expect(controller.resizeBy(4)).toBe(80); // stays clamped
+	});
+
+	it("reaches the full 80-column width on a suitably wide terminal", () => {
+		stored.width = DEFAULT_WORKBENCH_WIDTH;
+		const { controller, terminal } = createController();
+		while (measure(controller, terminal, 200).width < 80) controller.resizeBy(4);
+		expect(measure(controller, terminal, 200)).toEqual({ divider: 200 - 80, width: 80 });
+		// The conversation pane keeps its safe minimum (200 - 80 = 120 >= 72).
+		controller.resizeBy(-4);
+		expect(measure(controller, terminal, 200).width).toBe(76);
 	});
 
 	it("a narrow terminal hides the pane; re-expanding restores the preferred width", () => {

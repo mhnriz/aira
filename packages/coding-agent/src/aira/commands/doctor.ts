@@ -96,13 +96,16 @@ export function buildAiraDoctorReport(state: AiraSessionState | undefined): Aira
 		detail: `${THINKING_CYCLE_KEY}: ${thinkingKeys.join(", ") || "unbound"}`,
 	});
 
-	// 4b. Phase 12 Workbench uses its own semantic shortcut; established
-	// Ctrl+O tool-output expansion remains intact.
+	// 4b. Session Context toggle is Alt+Backslash — a byte that cannot be
+	// confused with Ctrl+O — while established Ctrl+O tool-output expansion
+	// remains intact. The historical Ctrl+Shift+O secondary is gone (Windows
+	// Terminal folds it into plain Ctrl+O).
 	const workbenchKeys = defaultKeysOf(WORKBENCH_TOGGLE_KEY);
 	const expandKeys = defaultKeysOf("app.tools.expand");
 	checks.push({
 		name: "workbench shortcut",
-		pass: workbenchKeys.includes("ctrl+shift+o") && expandKeys.includes("ctrl+o"),
+		pass:
+			workbenchKeys.includes("alt+\\") && !workbenchKeys.includes("ctrl+shift+o") && expandKeys.includes("ctrl+o"),
 		detail: `${WORKBENCH_TOGGLE_KEY}: ${workbenchKeys.join(", ") || "unbound"} | app.tools.expand: ${expandKeys.join(", ") || "unbound"}`,
 	});
 

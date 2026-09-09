@@ -58,7 +58,16 @@ function gitRepo(): string {
 describe("Aira workspace ownership host integration", () => {
 	it("blocks a repair restore of pre-existing dirt at beforeToolCall", async () => {
 		const root = gitRepo();
-		const harness = await createHarness({ cwd: root, settings: { goals: { auto: "off" } } as never });
+		const harness = await createHarness({
+			cwd: root,
+			// Goals default OFF; this test uses a goal only as the workspace
+			// trigger and opts in explicitly (auto stays off). Verification is
+			// re-enabled so the explicit verify() reports its real skip state.
+			settings: {
+				goals: { enabled: true, auto: "off" },
+				verification: { enabled: true },
+			} as never,
+		});
 		sessions.push({ harness, root });
 		await harness.session.airaIntelligence?.waitUntilSettled();
 		expect(harness.session.airaGoal?.create("read the workspace and report").ok).toBe(true);
