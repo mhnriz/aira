@@ -292,10 +292,11 @@ function detectRust(env: DirEnv, out: PartialProfile): void {
 	});
 }
 
-/** .NET / C# via *.csproj, *.sln, global.json. */
+/** .NET / C# via *.csproj, *.sln, *.slnx, global.json. */
 function detectDotnet(env: DirEnv, out: PartialProfile): void {
 	const hasCsProj = [...env.names].some((n) => n.endsWith(".csproj"));
-	if (!hasCsProj && !env.names.has("global.json") && ![...env.names].some((n) => n.endsWith(".sln"))) return;
+	const hasSlnMarker = [...env.names].some((n) => n.endsWith(".sln") || n.endsWith(".slnx"));
+	if (!hasCsProj && !env.names.has("global.json") && !hasSlnMarker) return;
 	out.languages.add("C#");
 	out.managers.add("dotnet");
 	addCommands(out.commands, {

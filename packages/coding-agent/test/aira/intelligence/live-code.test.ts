@@ -49,6 +49,37 @@ describe("language-server registry and discovery", () => {
 		expect(lspLanguageIds("ruby")).toEqual([]);
 	});
 
+	it("registers C# with csharp-ls as the canonical launch command", () => {
+		const csharp = serverForLanguage("csharp");
+		expect(csharp?.id).toBe("csharp");
+		expect(csharp?.languageIds).toEqual(["csharp"]);
+		expect(csharp?.commands).toEqual([["csharp-ls"]]);
+		// The previously registered `omnisharp -stdio` invocation never enters
+		// OmniSharp's LSP mode and must not be a production launch candidate.
+		expect(JSON.stringify(csharp?.commands)).not.toContain("omnisharp");
+	});
+
+	it("resolves human-facing project language names to registry ids", () => {
+		// Project detection records display names (project/detect.ts); the
+		// registry ids are internal (`csharp`, `cpp`).
+		expect(lspLanguageIds("C#")).toEqual(["csharp"]);
+		expect(serverForLanguage("C#")?.id).toBe("csharp");
+		expect(lspLanguageIds("C/C++")).toEqual(["cpp"]);
+		expect(serverForLanguage("C/C++")?.id).toBe("cpp");
+		// Existing human-facing names keep resolving exactly as before.
+		expect(lspLanguageIds("TypeScript")).toEqual(["typescript", "typescriptreact"]);
+		expect(lspLanguageIds("JavaScript")).toEqual(["javascript", "javascriptreact"]);
+		expect(lspLanguageIds("Python")).toEqual(["python"]);
+		expect(lspLanguageIds("Go")).toEqual(["go"]);
+		expect(lspLanguageIds("Rust")).toEqual(["rust"]);
+		// Repository-level ids still resolve unchanged.
+		expect(serverForLanguage("csharp")?.id).toBe("csharp");
+		expect(serverForLanguage("cpp")?.id).toBe("cpp");
+		expect(serverForLanguage("c")?.id).toBe("cpp");
+		// Unrelated labels stay unmapped.
+		expect(lspLanguageIds("Ruby")).toEqual([]);
+	});
+
 	it("finds a definition for supported languages only", () => {
 		expect(serverForLanguage("typescript")?.id).toBe("typescript");
 		expect(serverForLanguage("go")?.id).toBe("go");
@@ -415,6 +446,102 @@ describe("live-code provider (mock language server)", () => {
 		} finally {
 			process.env.PATH = originalPath;
 		}
+		await provider.dispose();
+	});
+
+	it("maps .cs files to the csharp server", async () => {
+		const root = makeRoot("csharp-ext");
+		const { provider } = providerFor(root);
+		expect(provider.languageForFile(join(root, "src", "App.cs"))).toBe("csharp");
+		expect(provider.languageForFile(join(root, "src", "App.txt"))).toBeUndefined();
+		const unsupported = await provider.semanticQuery({ operation: "symbols", path: join(root, "App.txt") });
+		expect(unsupported.status).toBe("unsupported-language");
+		await provider.dispose();
+	});
+
+	it("degrades truthfully when csharp-ls is not installed", async () => {
+		const root = makeRoot("csharp-unavailable");
+		const src = join(root, "src");
+		mkdirSync(src, { recursive: true });
+		const file = join(src, "App.cs");
+		writeFileSync(file, "class App {}");
+
+		const findings = new AiraFindingsStore();
+		const provider = new LiveCodeProvider(root, findings, {
+			diagnosticWaitMs: 600,
+			idleTimeoutMs: 30_000,
+			crashCooldownMs: 0,
+		});
+
+		// Empty PATH: the registered `csharp-ls` command cannot resolve, so
+		// C# is detected but the server is unavailable — no crash, no fake
+		// ready state, no fabricated findings.
+		const emptyPath = join(root, "no-binaries");
+		mkdirSync(emptyPath, { recursive: true });
+		const originalPath = process.env.PATH;
+		process.env.PATH = emptyPath;
+		try {
+			const result = await provider.requestDiagnostics([file]);
+			expect(result.status).toBe("ready");
+			expect(result.files[0]?.status).toBe("server-unavailable");
+			expect(result.files[0]?.reason).toBe("language server is not installed");
+			expect(result.files[0]?.diagnostics).toEqual([]);
+			expect(result.totals).toEqual({ errors: 0, warnings: 0, other: 0 });
+			expect(findings.forPath(file)).toEqual([]);
+			expect(provider.isWarm(file)).toBe(false);
+			const semantic = await provider.semanticQuery({ operation: "symbols", path: file });
+			expect(semantic.status).toBe("server-unavailable");
+			// Health never reports ready for a server that cannot launch.
+			expect(provider.statusInfo().status).not.toBe("ready");
+			expect(provider.statusInfo().spawnCount).toBe(0);
+		} finally {
+			process.env.PATH = originalPath;
+		}
+		await provider.dispose();
+	});
+
+	it("runs a C# server through the generic LSP path (symbols, definition, diagnostics)", async () => {
+		const root = makeRoot("csharp-mock");
+		const file = join(root, "src", "App.cs");
+		mkdirSync(join(root, "src"), { recursive: true });
+		writeFileSync(file, "class App { void Main() { ERROR_MARKER } }");
+
+		const findings = new AiraFindingsStore();
+		const provider = new LiveCodeProvider(root, findings, {
+			diagnosticWaitMs: 600,
+			idleTimeoutMs: 30_000,
+			crashCooldownMs: 0,
+			launchOverrides: { csharp: launchSpec() },
+		});
+
+		// Document symbols cold-start the csharp-language-id server.
+		const symbols = await provider.semanticQuery({ operation: "symbols", path: file });
+		expect(symbols.status).toBe("ready");
+		if (symbols.status === "ready") {
+			expect(symbols.locations.map((l) => l.line)).toEqual([4, 9]);
+			expect(symbols.locations[0]?.path).toBe(file);
+		}
+
+		// Definition via symbol lookup travels the same generic path.
+		const definition = await provider.semanticQuery({
+			operation: "definition",
+			path: file,
+			symbol: "detectionState",
+		});
+		expect(definition.status).toBe("ready");
+		if (definition.status === "ready") {
+			expect(definition.locations[0]?.uri).toBe("file:///canned/definition.ts");
+		}
+
+		// Diagnostics publish through the generic publishDiagnostics path.
+		await provider.requestDiagnosticsForFile(file);
+		expect(findings.forPath(file)).toHaveLength(1);
+		expect(findings.forPath(file)[0]?.severity).toBe("error");
+		expect(findings.forPath(file)[0]?.message).toContain("ERROR_MARKER");
+
+		// Server reuse: one spawn serves every operation.
+		expect(provider.statusInfo().spawnCount).toBe(1);
+		expect(provider.statusInfo().status).toBe("ready");
 		await provider.dispose();
 	});
 

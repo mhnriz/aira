@@ -60,9 +60,31 @@ export const LIVE_CODE_SERVER_DEFINITIONS: readonly LspServerDefinition[] = [
 	{
 		id: "csharp",
 		languageIds: ["csharp"],
-		commands: [["omnisharp", "-stdio"]],
+		// csharp-ls (razzmatazz/csharp-language-server), Roslyn-based, installed
+		// as a dotnet global tool (`dotnet tool install --global csharp-ls`);
+		// the previously registered `omnisharp -stdio` never enters OmniSharp's
+		// LSP mode (`-lsp` would be required), so it is not a launch candidate.
+		commands: [["csharp-ls"]],
 	},
 ];
+
+/**
+ * Canonical language-label boundary: map any project or repository language
+ * label into the registry's internal id space. Project detection
+ * (project/detect.ts) records human-facing names ("C#", "C/C++") that plain
+ * lowercasing would not match the registry ids ("csharp", "cpp", "c").
+ */
+export function normalizeRepositoryLanguage(language: string): string {
+	const normalized = language.trim().toLowerCase();
+	switch (normalized) {
+		case "c#":
+			return "csharp";
+		case "c/c++":
+			return "cpp";
+		default:
+			return normalized;
+	}
+}
 
 /** Map a repository language to the LSP language id(s) its server serves. */
 export function lspLanguageIds(repositoryLanguage: string): string[] {
@@ -76,7 +98,8 @@ export function lspLanguageIds(repositoryLanguage: string): string[] {
 		cpp: ["cpp"],
 		csharp: ["csharp"],
 	} satisfies Record<string, string[]>;
-	const ids = byRepositoryLanguage[repositoryLanguage.toLowerCase() as keyof typeof byRepositoryLanguage];
+	const ids =
+		byRepositoryLanguage[normalizeRepositoryLanguage(repositoryLanguage) as keyof typeof byRepositoryLanguage];
 	return ids ?? [];
 }
 

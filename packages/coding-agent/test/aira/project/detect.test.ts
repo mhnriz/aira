@@ -79,6 +79,19 @@ describe("Aira project detection", () => {
 		expect(p.devCommands).toEqual(["dotnet run"]);
 	});
 
+	it("classifies a .NET / C# project from a .slnx solution file", () => {
+		const dir = makeDir();
+		mkdirSync(join(dir, ".git"));
+		file(dir, "App.slnx");
+
+		const p = detectAiraProject(dir, { home: makeHome() });
+
+		expect(p.languages).toEqual(["C#"]);
+		expect(p.packageManagers).toEqual(["dotnet"]);
+		expect(p.buildCommands).toEqual(["dotnet build"]);
+		expect(p.devCommands).toEqual(["dotnet run"]);
+	});
+
 	it("classifies a C/C++ project from CMake", () => {
 		const dir = makeDir();
 		mkdirSync(join(dir, ".git"));
