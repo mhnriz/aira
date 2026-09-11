@@ -597,6 +597,11 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 				return success(id, "get_session_stats", stats);
 			}
 
+			case "get_session_telemetry": {
+				const snapshot = session.getTelemetrySnapshot();
+				return success(id, "get_session_telemetry", snapshot);
+			}
+
 			case "export_html": {
 				const path = await session.exportToHtml(command.outputPath);
 				return success(id, "export_html", { path });

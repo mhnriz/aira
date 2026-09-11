@@ -47,6 +47,15 @@
   session's in-memory message count (e.g. "Resumed session · 18 messages");
   cancelled or failed transitions stay silent. Notices are presentation-only
   and never enter the conversation or the model payload.
+- **Aira**: Passive session telemetry. A session-local collector records
+  facts about engineering behavior — tool calls and failures, repository
+  reads with unchanged-repeated detection via stat identity, edit/write
+  attempts, conflicts, and retries, validation invocations from process-start
+  purpose metadata, ask_user/task-transition/child-agent/verification counts,
+  and monotonic timings — without adding a single token to model prompts or
+  triggering model calls. `/telemetry` renders a compact summary and
+  `/telemetry --json` (plus the RPC `get_session_telemetry` command) expose a
+  stable schema-versioned snapshot. Data is session-local and in-memory only.
 
 ### Fixed
 

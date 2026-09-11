@@ -121,6 +121,7 @@ import { DefaultPackageManager } from "../../core/package-manager.ts";
 import type { ResourceDiagnostic } from "../../core/resource-loader.ts";
 import { formatMissingSessionCwdPrompt, MissingSessionCwdError } from "../../core/session-cwd.ts";
 import { type SessionEntry, SessionManager, sessionEntryToContextMessages } from "../../core/session-manager.ts";
+import { renderSessionTelemetryJson, renderSessionTelemetryText } from "../../core/session-telemetry.ts";
 import type { FullscreenExitOutput, TuiMode } from "../../core/settings-manager.ts";
 import { BUILTIN_SLASH_COMMANDS } from "../../core/slash-commands.ts";
 import type { SourceInfo } from "../../core/source-info.ts";
@@ -3357,6 +3358,11 @@ export class InteractiveMode {
 			}
 			if (text === "/session") {
 				this.handleSessionCommand();
+				this.editor.setText("");
+				return;
+			}
+			if (text === "/telemetry" || text.startsWith("/telemetry ")) {
+				this.handleTelemetryCommand(text);
 				this.editor.setText("");
 				return;
 			}
@@ -7398,6 +7404,15 @@ export class InteractiveMode {
 
 		this.chatContainer.addChild(new Spacer(1));
 		this.chatContainer.addChild(new Text(info, 1, 0));
+		this.ui.requestRender();
+	}
+
+	private handleTelemetryCommand(text: string): void {
+		const args = text.slice("/telemetry".length).trim();
+		const snapshot = this.session.getTelemetrySnapshot();
+		const block = args === "--json" ? renderSessionTelemetryJson(snapshot) : renderSessionTelemetryText(snapshot);
+		this.chatContainer.addChild(new Spacer(1));
+		this.chatContainer.addChild(new Text(block, 1, 0));
 		this.ui.requestRender();
 	}
 

@@ -160,6 +160,7 @@ import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.t
 import { exportSessionToJsonl } from "./session-export.ts";
 import type { BranchSummaryEntry, CompactionEntry, SessionEntry, SessionManager } from "./session-manager.ts";
 import { getLatestCompactionEntry } from "./session-manager.ts";
+import { SessionTelemetry, type SessionTelemetryOptions, type SessionTelemetrySnapshot } from "./session-telemetry.ts";
 import type { SettingsManager } from "./settings-manager.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
@@ -315,6 +316,8 @@ export interface AgentSessionConfig {
 	airaPermissionOptions?: Omit<AiraPermissionControllerOptions, "cwd" | "settings" | "interaction">;
 	/** Task-runtime options (Aira phase 11; tests inject seams). */
 	airaTaskOptions?: Omit<AiraTaskManagerOptions, "settings" | "orchestration">;
+	/** SessionTelemetry options (tests inject a fake clock). */
+	telemetryOptions?: SessionTelemetryOptions;
 }
 
 export interface ExtensionBindings {
@@ -402,8 +405,13 @@ export class AgentSession {
 
 	private _scopedModels: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>;
 
+	/** Session-local telemetry collector (Step 0: instrumentation only). */
+	readonly telemetry: SessionTelemetry;
+
 	// Event subscription state
 	private _unsubscribeAgent?: () => void;
+	private _unsubscribeTelemetry?: () => void;
+	private readonly _telemetryUnsubscribers: Array<() => void> = [];
 	private _eventListeners: AgentSessionEventListener[] = [];
 	private _isAgentRunActive = false;
 	private _idleWaitPromise: Promise<void> | undefined;
@@ -666,6 +674,8 @@ export class AgentSession {
 		this._unsubscribeAgent = this.agent.subscribe(this._handleAgentEvent);
 		this._installAgentToolHooks();
 		this._installAgentNextTurnRefresh();
+		this.telemetry = new SessionTelemetry(config.telemetryOptions);
+		this._installSessionTelemetry();
 
 		this._buildRuntime({
 			activeToolNames: this._initialActiveToolNames,
@@ -909,6 +919,42 @@ export class AgentSession {
 				thinkingLevel: this.agent.state.thinkingLevel,
 			};
 		};
+	}
+
+	// =========================================================================
+	// Session Telemetry
+	// =========================================================================
+
+	/**
+	 * Wire the passive session telemetry collector.
+	 *
+	 * The collector observes agent tool events and the canonical Aira manager
+	 * snapshots (tasks, orchestration, verification). It never influences any
+	 * of them: no prompt contributions, no model calls, no manager mutations.
+	 * All subscriptions are released in dispose().
+	 */
+	private _installSessionTelemetry(): void {
+		this._unsubscribeTelemetry = this.agent.subscribe((event) => this.telemetry.onAgentEvent(event, this._cwd));
+
+		if (this._airaTasks) {
+			this._telemetryUnsubscribers.push(
+				this._airaTasks.subscribe((status) => this.telemetry.observeTaskStatuses(status.rows)),
+			);
+		}
+		if (this._airaOrchestration) {
+			this._telemetryUnsubscribers.push(
+				this._airaOrchestration.subscribe((status) => {
+					for (const child of status.children) {
+						this.telemetry.observeChildRunId(child.id);
+					}
+				}),
+			);
+		}
+		if (this._airaVerification) {
+			this._telemetryUnsubscribers.push(
+				this._airaVerification.subscribe((status) => this.telemetry.observeVerificationState(status.status)),
+			);
+		}
 	}
 
 	// =========================================================================
@@ -1221,6 +1267,13 @@ export class AgentSession {
 			"This extension ctx is stale after session replacement or reload. Do not use a captured pi or command ctx after ctx.newSession(), ctx.fork(), ctx.switchSession(), or ctx.reload(). For newSession, fork, and switchSession, move post-replacement work into withSession and use the ctx passed to withSession. For reload, do not use the old ctx after await ctx.reload().",
 		);
 		this._disconnectFromAgent();
+		this._unsubscribeTelemetry?.();
+		this._unsubscribeTelemetry = undefined;
+		for (const unsubscribe of this._telemetryUnsubscribers) {
+			unsubscribe();
+		}
+		this._telemetryUnsubscribers.length = 0;
+		this.telemetry.dispose();
 		this._eventListeners = [];
 		// Aira execution seam: clean up THIS session's managed processes
 		// (graceful → forced). Session-instance-scoped: a stale session being
@@ -4040,6 +4093,23 @@ export class AgentSession {
 			cost: usageTotals.cost,
 			contextUsage: this.getContextUsage(),
 		};
+	}
+
+	/**
+	 * Build the current session telemetry snapshot.
+	 *
+	 * Usage/token/cost values are merged from the session's authoritative
+	 * usage accounting (getSessionStats), never estimated by the collector.
+	 */
+	getTelemetrySnapshot(): SessionTelemetrySnapshot {
+		const stats = this.getSessionStats();
+		return this.telemetry.snapshot({
+			inputTokens: stats.tokens.input,
+			outputTokens: stats.tokens.output,
+			cacheReadTokens: stats.tokens.cacheRead,
+			cacheWriteTokens: stats.tokens.cacheWrite,
+			costUsd: stats.cost,
+		});
 	}
 
 	getContextUsage(): ContextUsage | undefined {

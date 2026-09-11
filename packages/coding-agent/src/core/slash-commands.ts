@@ -28,6 +28,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{ name: "copy", description: "Copy last agent message to clipboard" },
 	{ name: "name", description: "Set session display name" },
 	{ name: "session", description: "Show session info and stats" },
+	{ name: "telemetry", description: "Show session telemetry (add --json for machine-readable output)" },
 	{ name: "status", description: "Show Aira status" },
 	{
 		name: "mode",
