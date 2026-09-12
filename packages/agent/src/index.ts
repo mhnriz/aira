@@ -43,6 +43,8 @@ export {
 export * from "./agent.ts";
 // Loop functions
 export * from "./agent-loop.ts";
+// Model-request payload measurement (context telemetry)
+export * from "./context-payload.ts";
 export * from "./harness/agent-harness.ts";
 export {
 	type BranchPreparation,

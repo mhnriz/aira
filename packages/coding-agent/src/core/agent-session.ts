@@ -675,6 +675,13 @@ export class AgentSession {
 		this._installAgentToolHooks();
 		this._installAgentNextTurnRefresh();
 		this.telemetry = new SessionTelemetry(config.telemetryOptions);
+		// Context-payload seam (0.1.7 Step 2): observe the canonical model-request
+		// payload before every dispatch. The loop measures the request after
+		// conversion and hands the collector metadata only; the request itself is
+		// never modified, and the hook never triggers a model request.
+		this.agent.onContextPayload = (measurement) => {
+			this.telemetry.observeModelRequestContext(measurement);
+		};
 		this._installSessionTelemetry();
 
 		this._buildRuntime({

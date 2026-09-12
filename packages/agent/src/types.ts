@@ -14,6 +14,7 @@ import type {
 	Usage,
 } from "@earendil-works/pi-ai";
 import type { Static, TSchema } from "typebox";
+import type { ModelContextPayloadMeasurement } from "./context-payload.ts";
 
 /**
  * Stream function used by the agent loop. `Models.streamSimple` satisfies
@@ -176,6 +177,20 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	 * ```
 	 */
 	convertToLlm: (messages: AgentMessage[]) => Message[] | Promise<Message[]>;
+
+	/**
+	 * Optional observer for the model-request payload just before it is dispatched.
+	 *
+	 * Called exactly once per provider request, after `transformContext` and
+	 * `convertToLlm` have assembled the request (`systemPrompt`, `messages`,
+	 * `tools`) and before the stream function is invoked. Receives only a
+	 * deterministic serialized-size measurement (see `measureModelContextPayload`);
+	 * it must be pure observation — no mutation of the request, no payload retention.
+	 *
+	 * Contract: must not throw or reject. Errors are swallowed so observation
+	 * never breaks the request path.
+	 */
+	onContextPayload?: (measurement: ModelContextPayloadMeasurement) => void | Promise<void>;
 
 	/**
 	 * Optional transform applied to the context before `convertToLlm`.

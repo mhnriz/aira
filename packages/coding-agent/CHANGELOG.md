@@ -56,6 +56,18 @@
   triggering model calls. `/telemetry` renders a compact summary and
   `/telemetry --json` (plus the RPC `get_session_telemetry` command) expose a
   stable schema-versioned snapshot. Data is session-local and in-memory only.
+- **Aira**: Model-request context payload telemetry. Every request through the
+  canonical agent-loop boundary is measured before dispatch: deterministic
+  UTF-8 serialized bytes for the system prompt, for the conversation split by
+  provider role (user/assistant/toolResult), and for the tool-definition
+  schemas — without mutating the payload. The session collector aggregates
+  total/average/min/max/latest payload sizes, keeps a bounded 10-request
+  history ring of numeric summaries (conversation growth is directly
+  observable), and attributes custom-message contributors (for example the
+  ambient intelligence/browser context) by source type. `/telemetry`,
+  `/telemetry --json`, and the RPC `get_session_telemetry` snapshot gained
+  the backward-compatible `context` block (schema 1.1.0). No prompt text,
+  message bodies, or tool contents are ever retained.
 
 ### Fixed
 

@@ -10,6 +10,7 @@ import {
 	type ToolResultMessage,
 	validateToolArguments,
 } from "@earendil-works/pi-ai";
+import { measureModelContextPayload } from "./context-payload.ts";
 import { getDefaultStreamFn } from "./stream-fn.ts";
 import type {
 	AgentContext,
@@ -298,6 +299,19 @@ async function streamAssistantResponse(
 		messages: llmMessages,
 		tools: context.tools,
 	};
+
+	// Observe the deterministic serialized size of this request before it is
+	// dispatched. Pure observation: `measureModelContextPayload` only reads the
+	// assembled request and returns numbers; the payload handed to the stream
+	// function is byte-for-byte what it would have been without the hook.
+	if (config.onContextPayload) {
+		const measurement = measureModelContextPayload(messages, llmContext);
+		try {
+			await config.onContextPayload(measurement);
+		} catch {
+			// Observation must never break the request path.
+		}
+	}
 
 	// Resolve API key (important for expiring tokens)
 	const resolvedApiKey =

@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AgentEvent, AgentTool } from "@earendil-works/pi-agent-core";
+import type { AgentEvent, AgentTool, ModelContextPayloadMeasurement } from "@earendil-works/pi-agent-core";
 import { fauxAssistantMessage, fauxToolCall, registerFauxProvider, type Usage } from "@earendil-works/pi-ai/compat";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
@@ -14,6 +14,7 @@ import {
 import { AuthStorage } from "../src/core/auth-storage.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import {
+	CONTEXT_REQUEST_HISTORY_LIMIT,
 	renderSessionTelemetryJson,
 	renderSessionTelemetryText,
 	SessionTelemetry,
@@ -26,6 +27,13 @@ const EDIT_NOT_FOUND_ERROR =
 	"Could not find edits[0] in a.ts. The oldText must match exactly including all whitespace and newlines.";
 const EDIT_AMBIGUOUS_ERROR =
 	"Found 2 occurrences of edits[0] in a.ts. Each oldText must be unique. Please provide more context to make it unique.";
+
+const textEncoder = new TextEncoder();
+
+/** UTF-8 byte length of a string (same unit the telemetry uses). */
+function utf8ByteLength(text: string): number {
+	return textEncoder.encode(text).length;
+}
 
 function toolStart(toolCallId: string, toolName: string, args: unknown): AgentEvent {
 	return { type: "tool_execution_start", toolCallId, toolName, args };
@@ -546,9 +554,10 @@ describe("SessionTelemetry collector", () => {
 		});
 		const parsed = JSON.parse(renderSessionTelemetryJson(snapshot)) as Record<string, unknown>;
 
-		expect(parsed.schemaVersion).toBe("1.0.0");
+		expect(parsed.schemaVersion).toBe("1.1.0");
 		expect(Object.keys(parsed).sort()).toEqual([
 			"agent",
+			"context",
 			"editing",
 			"repository",
 			"schemaVersion",
@@ -557,6 +566,33 @@ describe("SessionTelemetry collector", () => {
 			"usage",
 			"validation",
 		]);
+		expect(parsed.context).toEqual({
+			requestCount: 0,
+			totalSerializedBytes: 0,
+			averageSerializedBytesPerRequest: null,
+			minSerializedBytes: null,
+			maxSerializedBytes: null,
+			latestSerializedBytes: null,
+			byTransport: {
+				systemMessages: { totalBytes: 0, latestBytes: null },
+				conversationMessages: {
+					totalBytes: 0,
+					latestBytes: null,
+					userBytes: 0,
+					assistantBytes: 0,
+					toolResultBytes: 0,
+				},
+				toolDefinitions: {
+					totalBytes: 0,
+					latestBytes: null,
+					averageBytesPerRequest: null,
+					toolCount: 0,
+					averageToolCountPerRequest: null,
+				},
+			},
+			byContributor: {},
+			recentRequests: [],
+		});
 		expect(parsed.usage).toEqual({
 			inputTokens: 40_200,
 			outputTokens: 18_400,
@@ -611,6 +647,217 @@ describe("SessionTelemetry collector", () => {
 });
 
 // ============================================================================
+// Context payload telemetry (0.1.7 Step 2)
+// ============================================================================
+
+describe("SessionTelemetry context payload", () => {
+	function measurement(
+		totalBytes: number,
+		systemBytes: number,
+		overrides?: Partial<ModelContextPayloadMeasurement>,
+	): ModelContextPayloadMeasurement {
+		return {
+			systemBytes,
+			conversationBytes: totalBytes - systemBytes - (overrides?.toolsBytes ?? 0),
+			toolsBytes: 0,
+			totalBytes,
+			messageCount: 1,
+			toolCount: 1,
+			conversation: { userBytes: totalBytes - systemBytes, assistantBytes: 0, toolResultBytes: 0 },
+			contributors: [],
+			...overrides,
+		};
+	}
+
+	it("aggregates total/average/min/max/latest sizes and role breakdowns", () => {
+		const telemetry = new SessionTelemetry();
+		telemetry.observeModelRequestContext(
+			measurement(1100, 100, {
+				toolsBytes: 200,
+				conversation: { userBytes: 700, assistantBytes: 100, toolResultBytes: 0 },
+			}),
+		);
+		telemetry.observeModelRequestContext(
+			measurement(1200, 100, {
+				toolsBytes: 200,
+				conversation: { userBytes: 800, assistantBytes: 100, toolResultBytes: 0 },
+			}),
+		);
+		telemetry.observeModelRequestContext(
+			measurement(1000, 100, {
+				toolsBytes: 200,
+				conversation: { userBytes: 600, assistantBytes: 100, toolResultBytes: 0 },
+			}),
+		);
+
+		const context = telemetry.snapshot({
+			inputTokens: 0,
+			outputTokens: 0,
+			cacheReadTokens: 0,
+			cacheWriteTokens: 0,
+			costUsd: 0,
+		}).context;
+		expect(context.requestCount).toBe(3);
+		expect(context.totalSerializedBytes).toBe(3300);
+		expect(context.averageSerializedBytesPerRequest).toBe(1100);
+		expect(context.minSerializedBytes).toBe(1000);
+		expect(context.maxSerializedBytes).toBe(1200);
+		expect(context.latestSerializedBytes).toBe(1000);
+		expect(context.byTransport.systemMessages).toEqual({ totalBytes: 300, latestBytes: 100 });
+		expect(context.byTransport.conversationMessages).toEqual({
+			totalBytes: 2400,
+			latestBytes: 700,
+			userBytes: 2100,
+			assistantBytes: 300,
+			toolResultBytes: 0,
+		});
+		expect(context.byTransport.toolDefinitions).toEqual({
+			totalBytes: 600,
+			latestBytes: 200,
+			averageBytesPerRequest: 200,
+			toolCount: 1,
+			averageToolCountPerRequest: 1,
+		});
+		expect(context.recentRequests).toHaveLength(3);
+		expect(context.recentRequests[0].requestIndex).toBe(2);
+	});
+
+	it("keeps recent request history bounded to the configured limit", () => {
+		expect(CONTEXT_REQUEST_HISTORY_LIMIT).toBe(10);
+		const telemetry = new SessionTelemetry();
+		for (let index = 0; index < 12; index++) {
+			telemetry.observeModelRequestContext(measurement(1000 + index, 100));
+		}
+		const context = telemetry.snapshot({
+			inputTokens: 0,
+			outputTokens: 0,
+			cacheReadTokens: 0,
+			cacheWriteTokens: 0,
+			costUsd: 0,
+		}).context;
+		expect(context.recentRequests).toHaveLength(CONTEXT_REQUEST_HISTORY_LIMIT);
+		expect(context.recentRequests[0].requestIndex).toBe(11);
+		expect(context.recentRequests[CONTEXT_REQUEST_HISTORY_LIMIT - 1].requestIndex).toBe(2);
+		expect(context.requestCount).toBe(12);
+		expect(context.latestSerializedBytes).toBe(1011);
+	});
+
+	it("aggregates contributor totals and latest sizes by identity", () => {
+		const telemetry = new SessionTelemetry();
+		telemetry.observeModelRequestContext(
+			measurement(1000, 100, { contributors: [{ key: "test.ctx", bytes: 300, messageCount: 1 }] }),
+		);
+		telemetry.observeModelRequestContext(
+			measurement(1400, 100, { contributors: [{ key: "test.ctx", bytes: 500, messageCount: 2 }] }),
+		);
+		telemetry.observeModelRequestContext(
+			measurement(1200, 100, { contributors: [{ key: "other.ctx", bytes: 200, messageCount: 1 }] }),
+		);
+		const context = telemetry.snapshot({
+			inputTokens: 0,
+			outputTokens: 0,
+			cacheReadTokens: 0,
+			cacheWriteTokens: 0,
+			costUsd: 0,
+		}).context;
+		expect(context.byContributor).toEqual({
+			"other.ctx": { totalBytes: 200, latestBytes: 200 },
+			"test.ctx": { totalBytes: 800, latestBytes: 500 },
+		});
+	});
+
+	it("ignores context observations after dispose", () => {
+		const telemetry = new SessionTelemetry();
+		telemetry.dispose();
+		telemetry.observeModelRequestContext(measurement(1000, 100));
+		const context = telemetry.snapshot({
+			inputTokens: 0,
+			outputTokens: 0,
+			cacheReadTokens: 0,
+			cacheWriteTokens: 0,
+			costUsd: 0,
+		}).context;
+		expect(context.requestCount).toBe(0);
+		expect(context.recentRequests).toEqual([]);
+	});
+
+	it("starts empty and reports unavailable aggregates before any request", () => {
+		const telemetry = new SessionTelemetry();
+		const context = telemetry.snapshot({
+			inputTokens: 0,
+			outputTokens: 0,
+			cacheReadTokens: 0,
+			cacheWriteTokens: 0,
+			costUsd: 0,
+		}).context;
+		expect(context).toEqual({
+			requestCount: 0,
+			totalSerializedBytes: 0,
+			averageSerializedBytesPerRequest: null,
+			minSerializedBytes: null,
+			maxSerializedBytes: null,
+			latestSerializedBytes: null,
+			byTransport: {
+				systemMessages: { totalBytes: 0, latestBytes: null },
+				conversationMessages: {
+					totalBytes: 0,
+					latestBytes: null,
+					userBytes: 0,
+					assistantBytes: 0,
+					toolResultBytes: 0,
+				},
+				toolDefinitions: {
+					totalBytes: 0,
+					latestBytes: null,
+					averageBytesPerRequest: null,
+					toolCount: 0,
+					averageToolCountPerRequest: null,
+				},
+			},
+			byContributor: {},
+			recentRequests: [],
+		});
+	});
+
+	it("renders a compact Context payload section in human-readable output", () => {
+		const telemetry = new SessionTelemetry();
+		telemetry.observeModelRequestContext(measurement(150_000, 20_000, { toolsBytes: 30_000 }));
+		const snapshot = telemetry.snapshot({
+			inputTokens: 0,
+			outputTokens: 0,
+			cacheReadTokens: 0,
+			cacheWriteTokens: 0,
+			costUsd: 0,
+		});
+		const text = renderSessionTelemetryText(snapshot);
+		expect(text).toContain("Context payload");
+		expect(text).toContain("requests           1");
+		expect(text).toContain("latest             146 KB");
+		expect(text).toContain("avg                146 KB");
+		expect(text).toContain("peak               146 KB");
+		expect(text).toContain("system             20 KB latest");
+		expect(text).toContain("conversation       98 KB latest");
+		expect(text).toContain("tools              29 KB latest");
+	});
+
+	it("includes context data in the JSON rendering (/telemetry --json)", () => {
+		const telemetry = new SessionTelemetry();
+		telemetry.observeModelRequestContext(measurement(1000, 100));
+		const snapshot = telemetry.snapshot({
+			inputTokens: 0,
+			outputTokens: 0,
+			cacheReadTokens: 0,
+			cacheWriteTokens: 0,
+			costUsd: 0,
+		});
+		const parsed = JSON.parse(renderSessionTelemetryJson(snapshot)) as { context?: unknown };
+		expect(parsed.context).toBeDefined();
+		expect((parsed.context as { requestCount: number }).requestCount).toBe(1);
+		expect((parsed.context as { latestSerializedBytes: number }).latestSerializedBytes).toBe(1000);
+	});
+});
+
+// ============================================================================
 // Integration tests through the agent loop (faux provider)
 // ============================================================================
 
@@ -635,7 +882,7 @@ describe("SessionTelemetry integration", () => {
 		await harness.session.prompt("read the file");
 
 		const snapshot = harness.session.getTelemetrySnapshot();
-		expect(snapshot.schemaVersion).toBe("1.0.0");
+		expect(snapshot.schemaVersion).toBe("1.1.0");
 		expect(snapshot.tools.total).toBe(1);
 		expect(snapshot.tools.byName).toEqual({ read: 1 });
 		expect(snapshot.repository.reads).toBe(1);
@@ -837,6 +1084,7 @@ describe("SessionTelemetry integration", () => {
 		const firstSession = runtime.session;
 		await firstSession.prompt("hi");
 		expect(firstSession.getTelemetrySnapshot().usage.modelRequests).toBe(1);
+		expect(firstSession.getTelemetrySnapshot().context.requestCount).toBe(1);
 
 		const result = await runtime.newSession();
 		expect(result.cancelled).toBe(false);
@@ -848,5 +1096,219 @@ describe("SessionTelemetry integration", () => {
 		expect(fresh.tools.total).toBe(0);
 		expect(fresh.repository.reads).toBe(0);
 		expect(fresh.timing.timeToFirstToolMs).toBeNull();
+		expect(fresh.context.requestCount).toBe(0);
+		expect(fresh.context.recentRequests).toEqual([]);
+	});
+
+	it("records exactly one context measurement per model request", async () => {
+		const temp = createTempDir();
+		cleanups.push(temp.cleanup);
+		const a = temp.file("a.ts");
+		writeFileSync(a, "one", "utf-8");
+
+		const harness = await createHarness({ cwd: temp.dir, tools: [makeReadTool()] });
+		harnesses.push(harness);
+
+		harness.setResponses([
+			fauxAssistantMessage(fauxToolCall("read", { path: a }), { stopReason: "toolUse" }),
+			fauxAssistantMessage("done"),
+		]);
+		const providerCallsBefore = harness.faux.state.callCount;
+		await harness.session.prompt("read the file");
+		const providerCallsDuring = harness.faux.state.callCount - providerCallsBefore;
+
+		const snapshot = harness.session.getTelemetrySnapshot();
+		expect(providerCallsDuring).toBe(2);
+		expect(snapshot.context.requestCount).toBe(2);
+		expect(snapshot.context.requestCount).toBe(snapshot.usage.modelRequests);
+		expect(snapshot.context.recentRequests).toHaveLength(2);
+		expect(snapshot.context.recentRequests[0].requestIndex).toBe(1);
+		expect(snapshot.context.recentRequests[1].requestIndex).toBe(0);
+	});
+
+	it("observes conversation growth across requests", async () => {
+		const temp = createTempDir();
+		cleanups.push(temp.cleanup);
+
+		const harness = await createHarness({ cwd: temp.dir });
+		harnesses.push(harness);
+
+		harness.setResponses([fauxAssistantMessage("one")]);
+		await harness.session.prompt("short");
+		harness.setResponses([fauxAssistantMessage("two")]);
+		await harness.session.prompt("a deliberately much longer second prompt ".repeat(40));
+
+		const context = harness.session.getTelemetrySnapshot().context;
+		expect(context.requestCount).toBe(2);
+		const second = context.recentRequests[0];
+		const first = context.recentRequests[1];
+		expect(second.conversationBytes).toBeGreaterThan(first.conversationBytes);
+		expect(context.latestSerializedBytes).toBeGreaterThan(context.minSerializedBytes!);
+		expect(context.byTransport.conversationMessages.latestBytes).toBe(second.conversationBytes);
+	});
+
+	it("measures system and tool-definition bytes separately at the request boundary", async () => {
+		const temp = createTempDir();
+		cleanups.push(temp.cleanup);
+		const a = temp.file("a.ts");
+		writeFileSync(a, "one", "utf-8");
+
+		const captured: Array<{ systemPrompt?: string; messages: unknown[]; tools?: unknown[] }> = [];
+		const harness = await createHarness({ cwd: temp.dir, tools: [makeReadTool()] });
+		harnesses.push(harness);
+
+		harness.setResponses([
+			(_context) => {
+				captured.push(_context);
+				return fauxAssistantMessage("ok");
+			},
+		]);
+		await harness.session.prompt("single turn");
+		expect(captured).toHaveLength(1);
+
+		const expectedSystemBytes = utf8ByteLength(captured[0].systemPrompt ?? "");
+		let expectedToolsBytes = 0;
+		for (const tool of captured[0].tools ?? []) {
+			const projection = {
+				name: (tool as { name: string }).name,
+				description: (tool as { description: string }).description,
+				parameters: (tool as { parameters: unknown }).parameters,
+			};
+			expectedToolsBytes += utf8ByteLength(JSON.stringify(projection));
+		}
+		const expectedConversationBytes = utf8ByteLength(
+			JSON.stringify({ role: "user", content: (captured[0].messages[0] as { content: unknown }).content }),
+		);
+
+		const context = harness.session.getTelemetrySnapshot().context;
+		expect(context.byTransport.systemMessages.latestBytes).toBe(expectedSystemBytes);
+		expect(context.byTransport.toolDefinitions.latestBytes).toBe(expectedToolsBytes);
+		expect(context.byTransport.toolDefinitions.toolCount).toBe(captured[0].tools?.length ?? 0);
+		expect(context.byTransport.toolDefinitions.averageToolCountPerRequest).toBe(captured[0].tools?.length ?? 0);
+		expect(context.byTransport.conversationMessages.latestBytes).toBe(expectedConversationBytes);
+		expect(context.recentRequests[0].totalBytes).toBe(
+			expectedSystemBytes + expectedConversationBytes + expectedToolsBytes,
+		);
+	});
+
+	it("leaves the provider-bound request payload untouched by instrumentation", async () => {
+		const temp = createTempDir();
+		cleanups.push(temp.cleanup);
+		const a = temp.file("a.ts");
+		writeFileSync(a, "one", "utf-8");
+
+		const captured: Array<{ systemPrompt?: string; messages: unknown[]; tools?: unknown[] }> = [];
+		const harness = await createHarness({ cwd: temp.dir, tools: [makeReadTool()] });
+		harnesses.push(harness);
+
+		harness.setResponses([
+			(_context) => {
+				captured.push(_context);
+				return fauxAssistantMessage("ok");
+			},
+		]);
+		await harness.session.prompt("single turn");
+
+		const capturedRequest = captured[0];
+		// The request arriving at the provider layer is complete and unmodified:
+		// the full system prompt, the converted user message, and tool objects
+		// that still carry their executable implementations.
+		expect(capturedRequest.messages.map((message) => (message as { role: string }).role)).toEqual(["user"]);
+		expect((capturedRequest.messages[0] as { content: unknown }).content).toEqual([
+			{ type: "text", text: "single turn" },
+		]);
+		const readTool = (capturedRequest.tools ?? []).find((tool) => (tool as { name: string }).name === "read") as {
+			execute?: unknown;
+		};
+		expect(readTool).toBeDefined();
+		expect(readTool.execute).toBeTypeOf("function");
+	});
+
+	it("attributes custom message sizes to their contributor identity", async () => {
+		const temp = createTempDir();
+		cleanups.push(temp.cleanup);
+
+		const harness = await createHarness({ cwd: temp.dir });
+		harnesses.push(harness);
+
+		harness.setResponses([fauxAssistantMessage("ok")]);
+		await harness.session.sendCustomMessage(
+			{ customType: "test.ctx", content: "ctx-payload-text", display: false },
+			{ triggerTurn: true },
+		);
+
+		const context = harness.session.getTelemetrySnapshot().context;
+		expect(context.requestCount).toBe(1);
+		const expectedBytes = utf8ByteLength(
+			JSON.stringify({ role: "user", content: [{ type: "text", text: "ctx-payload-text" }] }),
+		);
+		expect(context.byContributor).toEqual({
+			"test.ctx": { totalBytes: expectedBytes, latestBytes: expectedBytes },
+		});
+		expect(context.recentRequests[0].contributors).toEqual([{ key: "test.ctx", bytes: expectedBytes }]);
+	});
+
+	it("never attributes plain conversation messages to a contributor bucket", async () => {
+		const temp = createTempDir();
+		cleanups.push(temp.cleanup);
+		const a = temp.file("a.ts");
+		writeFileSync(a, "one", "utf-8");
+
+		const harness = await createHarness({ cwd: temp.dir, tools: [makeReadTool()] });
+		harnesses.push(harness);
+
+		harness.setResponses([
+			fauxAssistantMessage(fauxToolCall("read", { path: a }), { stopReason: "toolUse" }),
+			fauxAssistantMessage("done"),
+		]);
+		await harness.session.prompt("read the file");
+
+		const context = harness.session.getTelemetrySnapshot().context;
+		expect(context.byContributor).toEqual({});
+		expect(context.byTransport.conversationMessages.userBytes).toBeGreaterThan(0);
+		expect(context.byTransport.conversationMessages.toolResultBytes).toBeGreaterThan(0);
+		expect(context.byTransport.conversationMessages.assistantBytes).toBeGreaterThan(0);
+	});
+
+	it("never stores raw prompts, message bodies, or tool contents in telemetry", async () => {
+		const temp = createTempDir();
+		cleanups.push(temp.cleanup);
+		const a = temp.file("a.ts");
+		writeFileSync(a, "one", "utf-8");
+
+		const harness = await createHarness({ cwd: temp.dir, tools: [makeReadTool()] });
+		harnesses.push(harness);
+
+		harness.setResponses([
+			fauxAssistantMessage(fauxToolCall("read", { path: a }), { stopReason: "toolUse" }),
+			fauxAssistantMessage("unique-assistant-reply-text-77"),
+		]);
+		await harness.session.prompt("unique-secret-prompt-text-42");
+
+		const serialized = JSON.stringify(harness.session.getTelemetrySnapshot());
+		expect(serialized).not.toContain("unique-secret-prompt-text-42");
+		expect(serialized).not.toContain("unique-assistant-reply-text-77");
+		expect(serialized).not.toContain('"content"');
+		expect(serialized).not.toContain("read a file");
+	});
+
+	it("telemetry inspection itself never triggers a model request or mutates counters", async () => {
+		const temp = createTempDir();
+		cleanups.push(temp.cleanup);
+
+		const harness = await createHarness({ cwd: temp.dir });
+		harnesses.push(harness);
+
+		harness.setResponses([fauxAssistantMessage("ok")]);
+		await harness.session.prompt("hello");
+		const providerCalls = harness.faux.state.callCount;
+		const requestCount = harness.session.getTelemetrySnapshot().context.requestCount;
+
+		harness.session.getTelemetrySnapshot();
+		harness.session.getTelemetrySnapshot();
+		const after = harness.session.getTelemetrySnapshot();
+		expect(harness.faux.state.callCount).toBe(providerCalls);
+		expect(after.context.requestCount).toBe(requestCount);
+		expect(after.usage.modelRequests).toBe(requestCount);
 	});
 });

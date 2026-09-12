@@ -1,5 +1,5 @@
 import { stat } from "node:fs/promises";
-import type { AgentEvent } from "@earendil-works/pi-agent-core";
+import type { AgentEvent, ModelContextPayloadMeasurement } from "@earendil-works/pi-agent-core";
 import { resolveReadPathAsync, resolveToCwd } from "./tools/path-utils.ts";
 
 /**
@@ -16,8 +16,17 @@ import { resolveReadPathAsync, resolveToCwd } from "./tools/path-utils.ts";
  * (tool names, resolved paths, file identity, durations).
  */
 
-/** Stable machine-readable schema identifier for `SessionTelemetrySnapshot`. */
-export const SESSION_TELEMETRY_SCHEMA_VERSION = "1.0.0";
+/**
+ * Stable machine-readable schema identifier for `SessionTelemetrySnapshot`.
+ *
+ * Versioning policy: additive, backward-compatible extensions to the snapshot
+ * bump the minor version (1.0.0 → 1.1.0); renames/removals/semantic changes
+ * bump the major version. The Step 2 context-payload block is additive.
+ */
+export const SESSION_TELEMETRY_SCHEMA_VERSION = "1.1.0";
+
+/** Cap on retained per-request context summaries (bounded ring, newest first). */
+export const CONTEXT_REQUEST_HISTORY_LIMIT = 10;
 
 /** Usage block reuses the session's authoritative usage accounting. */
 export interface SessionTelemetryUsage {
@@ -29,6 +38,83 @@ export interface SessionTelemetryUsage {
 }
 
 /**
+ * One bounded per-request summary in the context history ring.
+ * Numbers only: no prompt text, no message bodies, no tool contents.
+ */
+export interface ContextRequestSummary {
+	/** Zero-based index of the request within the telemetry session. */
+	requestIndex: number;
+	totalBytes: number;
+	systemBytes: number;
+	conversationBytes: number;
+	toolsBytes: number;
+	messageCount: number;
+	toolCount: number;
+	conversation: {
+		userBytes: number;
+		assistantBytes: number;
+		toolResultBytes: number;
+	};
+	/** Attributed contributor sizes for this request (custom message types only). */
+	contributors: Array<{ key: string; bytes: number }>;
+}
+
+/** Size aggregation for one contributor identity. */
+export interface SessionTelemetryContextContributor {
+	totalBytes: number;
+	latestBytes: number | null;
+}
+
+/**
+ * Model-request payload composition (0.1.7 Step 2).
+ *
+ * Measured at the canonical request boundary (after context transformation
+ * and provider-message conversion, immediately before dispatch). The size
+ * unit is UTF-8 bytes of the deterministic JSON serialization described in
+ * `measureModelContextPayload` (`packages/agent/src/context-payload.ts`):
+ * the system prompt string, per-message `{ role, content }` projections
+ * (plus tool-call identity for tool results), and per-tool
+ * `{ name, description, parameters }` projections. Metadata only; the
+ * payload text itself is never retained.
+ */
+export interface SessionTelemetryContext {
+	requestCount: number;
+	totalSerializedBytes: number;
+	averageSerializedBytesPerRequest: number | null;
+	minSerializedBytes: number | null;
+	maxSerializedBytes: number | null;
+	latestSerializedBytes: number | null;
+	byTransport: {
+		systemMessages: {
+			totalBytes: number;
+			latestBytes: number | null;
+		};
+		conversationMessages: {
+			totalBytes: number;
+			latestBytes: number | null;
+			userBytes: number;
+			assistantBytes: number;
+			toolResultBytes: number;
+		};
+		toolDefinitions: {
+			totalBytes: number;
+			latestBytes: number | null;
+			averageBytesPerRequest: number | null;
+			toolCount: number;
+			averageToolCountPerRequest: number | null;
+		};
+	};
+	/**
+	 * Attributed source buckets: custom message types only. Messages without a
+	 * surviving source identity stay in the transport role buckets; this never
+	 * fabricates a category.
+	 */
+	byContributor: Record<string, SessionTelemetryContextContributor>;
+	/** Bounded per-request history ring (newest first). */
+	recentRequests: ContextRequestSummary[];
+}
+
+/**
  * Machine-readable telemetry snapshot.
  *
  * Field names are stable within `schemaVersion`. Unavailable values are
@@ -37,6 +123,7 @@ export interface SessionTelemetryUsage {
 export interface SessionTelemetrySnapshot {
 	schemaVersion: string;
 	usage: SessionTelemetryUsage & { modelRequests: number };
+	context: SessionTelemetryContext;
 	tools: {
 		total: number;
 		failed: number;
@@ -184,7 +271,29 @@ export class SessionTelemetry {
 	private timeToFirstRepositoryReadMs: number | null = null;
 	private timeToFirstEditMs: number | null = null;
 
+	// Model requests
 	private modelRequests = 0;
+
+	// Context payload (Step 2) — bounded per-request history + aggregates.
+	// The size unit is UTF-8 bytes of the deterministic request serialization
+	// measured at the canonical request boundary; only metadata is retained.
+	private contextRequestCount = 0;
+	private contextTotalBytes = 0;
+	private contextSystemBytes = 0;
+	private contextConversationBytes = 0;
+	private contextUserBytes = 0;
+	private contextAssistantBytes = 0;
+	private contextToolResultBytes = 0;
+	private contextToolsBytes = 0;
+	private contextToolCountSum = 0;
+	private contextMinBytes: number | null = null;
+	private contextMaxBytes: number | null = null;
+	private contextLatestBytes: number | null = null;
+	private contextLatestSystemBytes: number | null = null;
+	private contextLatestConversationBytes: number | null = null;
+	private contextLatestToolsBytes: number | null = null;
+	private readonly contextContributorTotals = new Map<string, SessionTelemetryContextContributor>();
+	private readonly contextRecentRequests: ContextRequestSummary[] = [];
 
 	// In-flight tool calls (parallel batches: end events arrive per toolCallId).
 	private readonly pendingToolCalls = new Map<string, PendingToolCall>();
@@ -203,6 +312,45 @@ export class SessionTelemetry {
 	dispose(): void {
 		this.disposed = true;
 		this.pendingToolCalls.clear();
+		this.contextRecentRequests.length = 0;
+		this.contextContributorTotals.clear();
+	}
+
+	private snapshotContext(): SessionTelemetryContext {
+		const requestCount = this.contextRequestCount;
+		const toolCount = this.contextRecentRequests[0]?.toolCount ?? 0;
+		return {
+			requestCount,
+			totalSerializedBytes: this.contextTotalBytes,
+			averageSerializedBytesPerRequest: requestCount === 0 ? null : this.contextTotalBytes / requestCount,
+			minSerializedBytes: this.contextMinBytes,
+			maxSerializedBytes: this.contextMaxBytes,
+			latestSerializedBytes: this.contextLatestBytes,
+			byTransport: {
+				systemMessages: {
+					totalBytes: this.contextSystemBytes,
+					latestBytes: this.contextLatestSystemBytes,
+				},
+				conversationMessages: {
+					totalBytes: this.contextConversationBytes,
+					latestBytes: this.contextLatestConversationBytes,
+					userBytes: this.contextUserBytes,
+					assistantBytes: this.contextAssistantBytes,
+					toolResultBytes: this.contextToolResultBytes,
+				},
+				toolDefinitions: {
+					totalBytes: this.contextToolsBytes,
+					latestBytes: this.contextLatestToolsBytes,
+					averageBytesPerRequest: requestCount === 0 ? null : this.contextToolsBytes / requestCount,
+					toolCount,
+					averageToolCountPerRequest: requestCount === 0 ? null : this.contextToolCountSum / requestCount,
+				},
+			},
+			byContributor: Object.fromEntries(
+				[...this.contextContributorTotals.entries()].sort(([a], [b]) => a.localeCompare(b)),
+			),
+			recentRequests: [...this.contextRecentRequests],
+		};
 	}
 
 	private elapsedMs(): number {
@@ -428,6 +576,62 @@ export class SessionTelemetry {
 	}
 
 	/**
+	 * Record one model request's measured payload. Called exactly once per
+	 * provider request from the canonical request boundary; the summary
+	 * contains sizes and counts only. History is a bounded ring (newest
+	 * first), so telemetry memory stays constant regardless of session length.
+	 */
+	observeModelRequestContext(measurement: ModelContextPayloadMeasurement): void {
+		if (this.disposed) return;
+		const summary: ContextRequestSummary = {
+			requestIndex: this.contextRequestCount,
+			totalBytes: measurement.totalBytes,
+			systemBytes: measurement.systemBytes,
+			conversationBytes: measurement.conversationBytes,
+			toolsBytes: measurement.toolsBytes,
+			messageCount: measurement.messageCount,
+			toolCount: measurement.toolCount,
+			conversation: { ...measurement.conversation },
+			contributors: measurement.contributors.map((contributor) => ({
+				key: contributor.key,
+				bytes: contributor.bytes,
+			})),
+		};
+		this.contextRecentRequests.unshift(summary);
+		if (this.contextRecentRequests.length > CONTEXT_REQUEST_HISTORY_LIMIT) {
+			this.contextRecentRequests.pop();
+		}
+
+		this.contextRequestCount++;
+		this.contextTotalBytes += measurement.totalBytes;
+		this.contextSystemBytes += measurement.systemBytes;
+		this.contextConversationBytes += measurement.conversationBytes;
+		this.contextUserBytes += measurement.conversation.userBytes;
+		this.contextAssistantBytes += measurement.conversation.assistantBytes;
+		this.contextToolResultBytes += measurement.conversation.toolResultBytes;
+		this.contextToolsBytes += measurement.toolsBytes;
+		this.contextToolCountSum += measurement.toolCount;
+		this.contextMinBytes =
+			this.contextMinBytes === null
+				? measurement.totalBytes
+				: Math.min(this.contextMinBytes, measurement.totalBytes);
+		this.contextMaxBytes =
+			this.contextMaxBytes === null
+				? measurement.totalBytes
+				: Math.max(this.contextMaxBytes, measurement.totalBytes);
+		this.contextLatestBytes = measurement.totalBytes;
+		this.contextLatestSystemBytes = measurement.systemBytes;
+		this.contextLatestConversationBytes = measurement.conversationBytes;
+		this.contextLatestToolsBytes = measurement.toolsBytes;
+		for (const contributor of measurement.contributors) {
+			const entry = this.contextContributorTotals.get(contributor.key) ?? { totalBytes: 0, latestBytes: null };
+			entry.totalBytes += contributor.bytes;
+			entry.latestBytes = contributor.bytes;
+			this.contextContributorTotals.set(contributor.key, entry);
+		}
+	}
+
+	/**
 	 * Observe a verification snapshot state; a transition into "preparing" or
 	 * "running" from another state starts one verifier invocation.
 	 */
@@ -456,6 +660,7 @@ export class SessionTelemetry {
 				...usage,
 				modelRequests: this.modelRequests,
 			},
+			context: this.snapshotContext(),
 			tools: {
 				total: this.toolCalls,
 				failed: this.toolFailures,
@@ -505,7 +710,7 @@ function formatCount(value: number): string {
 
 /** Compact human-readable rendering for /telemetry (no theme dependency). */
 export function renderSessionTelemetryText(snapshot: SessionTelemetrySnapshot): string {
-	const { usage, tools, repository, editing, validation, agent, timing } = snapshot;
+	const { usage, context, tools, repository, editing, validation, agent, timing } = snapshot;
 	const lines: string[] = [];
 	lines.push("Session Telemetry");
 	lines.push("");
@@ -519,6 +724,17 @@ export function renderSessionTelemetryText(snapshot: SessionTelemetrySnapshot): 
 	}
 	lines.push(`  cost               $${usage.costUsd.toFixed(4)}`);
 	lines.push(`  model requests     ${formatCount(usage.modelRequests)}`);
+	lines.push("");
+	lines.push("Context payload");
+	lines.push(`  requests           ${formatCount(context.requestCount)}`);
+	lines.push(`  latest             ${formatPayloadBytes(context.latestSerializedBytes)}`);
+	lines.push(`  avg                ${formatPayloadBytes(context.averageSerializedBytesPerRequest)}`);
+	lines.push(`  peak               ${formatPayloadBytes(context.maxSerializedBytes)}`);
+	lines.push(`  system             ${formatPayloadBytes(context.byTransport.systemMessages.latestBytes)} latest`);
+	lines.push(
+		`  conversation       ${formatPayloadBytes(context.byTransport.conversationMessages.latestBytes)} latest`,
+	);
+	lines.push(`  tools              ${formatPayloadBytes(context.byTransport.toolDefinitions.latestBytes)} latest`);
 	lines.push("");
 	lines.push("Tools");
 	lines.push(`  calls              ${formatCount(tools.total)}`);
@@ -559,6 +775,14 @@ export function renderSessionTelemetryText(snapshot: SessionTelemetrySnapshot): 
 	lines.push(`  first edit         ${formatDuration(timing.timeToFirstEditMs)}`);
 	lines.push(`  elapsed            ${formatDuration(timing.elapsedMs)}`);
 	return lines.join("\n");
+}
+
+function formatPayloadBytes(bytes: number | null): string {
+	if (bytes === null) return "unavailable";
+	if (bytes < 1024) return `${bytes} B`;
+	const kb = bytes / 1024;
+	if (kb < 1024) return `${Math.round(kb)} KB`;
+	return `${(kb / 1024).toFixed(1)} MB`;
 }
 
 function formatDuration(ms: number | null): string {
