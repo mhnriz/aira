@@ -24,11 +24,20 @@
  * identical output for identical input. It is also idempotent — compacting an
  * already-compacted projection returns the same bytes.
  *
+ * Active-request protection is deliberately narrower than "protect everything
+ * the request produced". One user prompt can drive hundreds of model/tool
+ * turns; keeping all of that history verbatim until a second user message
+ * arrives would make the common workload ineligible for compaction entirely.
+ *
  * Structure, not deletion:
  *
  * - recent history stays verbatim (byte budget, not message count);
- * - the latest user message and everything after it always stay verbatim (the
- *   active request and its tool chain);
+ * - the latest user message always stays verbatim (the active request);
+ * - the execution history produced after that request is NOT permanently
+ *   protected: its newest bytes stay verbatim, older bytes become eligible,
+ *   so a single long-running user turn can still compact;
+ * - a tool call/result pair straddling the recent-byte boundary is pulled into
+ *   the verbatim window instead of being split;
  * - old assistant prose is reduced to a bounded head plus a truthful marker;
  * - old successful tool results are reduced to a bounded placeholder that
  *   keeps the call identity; errored tool results are never touched;
@@ -260,6 +269,45 @@ function compactToolResultMessage(
 }
 
 /**
+ * Keep each logical tool interaction on one side of the verbatim boundary.
+ *
+ * A tool result always follows its call in canonical history, so a pair can
+ * straddle the recent-byte boundary in only one direction: the call is
+ * eligible while its result is verbatim. Splitting the pair is structurally
+ * legal (tool calls are never removed), but the conservative rule here is to
+ * keep the whole interaction verbatim. Pulling the boundary down can expose
+ * further straddling pairs, so the scan runs to a fixpoint.
+ *
+ * Deterministic and linear: `toolCallsById` is built once.
+ */
+function extendVerbatimOverStraddlingToolPairs(messages: readonly AgentMessage[], verbatimStart: number): number {
+	const toolCallsById = new Map<string, number>();
+	for (let i = 0; i < messages.length; i++) {
+		const message = messages[i];
+		if (message.role !== "assistant") continue;
+		for (const block of message.content) {
+			if (block.type !== "toolCall") continue;
+			if (!toolCallsById.has(block.id)) toolCallsById.set(block.id, i);
+		}
+	}
+
+	let boundary = verbatimStart;
+	for (let i = messages.length - 1; i >= boundary; i--) {
+		const message = messages[i];
+		if (message.role !== "toolResult") continue;
+		const callIndex = toolCallsById.get(message.toolCallId);
+		if (callIndex === undefined || callIndex >= boundary) continue;
+		// The pair straddles: move the boundary up to the call. Lower indices
+		// are visited by later iterations, so the walk still converges.
+		if (callIndex < boundary) {
+			boundary = callIndex;
+			i = callIndex + 1;
+		}
+	}
+	return boundary;
+}
+
+/**
  * Reduce one message if it is safe to do so. Returns the original reference
  * when nothing was provably safe, so callers can keep identity for every
  * protected message.
@@ -309,28 +357,30 @@ export function compactAiraModelContext(
 		return { messages: messages.slice(), report: baseReport };
 	}
 
-	// The active request and everything it produced stay verbatim: nothing at
-	// or after the newest user message is ever eligible.
-	let activeStart = messages.length;
+	// The active request is the newest user message. It is protected on its
+	// own; the execution history produced after it is not.
+	let activeUserIndex = -1;
 	for (let i = messages.length - 1; i >= 0; i--) {
 		if (messages[i].role === "user") {
-			activeStart = i;
+			activeUserIndex = i;
 			break;
 		}
 	}
 
 	// The recent window is a byte budget measured from the newest message
-	// backwards, additionally clamped so it never reaches into the active
-	// request.
+	// backwards. The active user request never consumes budget: it is kept
+	// verbatim regardless, so charging its bytes would only shrink the
+	// protection of the work tail for no structural benefit.
 	let verbatimStart = messages.length;
 	let accumulated = 0;
 	for (let i = messages.length - 1; i >= 0; i--) {
-		if (i < activeStart) break;
+		if (i === activeUserIndex) continue;
 		accumulated += projectionBytes(messages[i]);
 		verbatimStart = i;
 		if (accumulated >= settings.recentBytes) break;
 	}
-	if (activeStart < verbatimStart) verbatimStart = activeStart;
+
+	verbatimStart = extendVerbatimOverStraddlingToolPairs(messages, verbatimStart);
 
 	if (verbatimStart === 0) {
 		return { messages: messages.slice(), report: baseReport };
@@ -343,6 +393,10 @@ export function compactAiraModelContext(
 	let compactedBytes = 0;
 
 	for (let i = 0; i < verbatimStart; i++) {
+		// The active user request is never compacted, whatever the byte
+		// budget says. Role dispatch already fails open for user content;
+		// this is the explicit invariant.
+		if (i === activeUserIndex) continue;
 		const before = projectionBytes(messages[i]);
 		const outcome = compactMessage(messages[i], settings);
 		if (!outcome.compacted) continue;
