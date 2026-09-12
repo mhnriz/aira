@@ -192,6 +192,14 @@ export interface Settings {
 	tasks?: {
 		enabled?: boolean;
 	};
+	/**
+	 * Native Aira progressive context-compaction controls (0.1.7 Step 4).
+	 * Enabled by default: the projection only reduces OLD history after a
+	 * deterministic byte threshold, so small sessions are untouched.
+	 */
+	contextCompaction?: {
+		enabled?: boolean;
+	};
 	/** Native Aira Workbench controls (Phase 12; canonical settings owner). */
 	workbench?: {
 		enabled?: boolean;
@@ -1412,6 +1420,24 @@ export class SettingsManager {
 	setTasksSettings(settings: { enabled: boolean }): void {
 		this.globalSettings.tasks = settings;
 		this.markModified("tasks");
+		this.save();
+	}
+
+	// Native Aira progressive context-compaction settings (0.1.7 Step 4). Same
+	// canonical store. Enabled by default: compaction only reduces OLD history
+	// after a deterministic byte threshold, so ordinary small tasks are
+	// unaffected. Disabling it returns the untouched projection.
+	getContextCompactionSettings(): { enabled: boolean } {
+		const contextCompaction = this.settings.contextCompaction;
+		if (!contextCompaction || typeof contextCompaction !== "object") {
+			return { enabled: true };
+		}
+		return { enabled: contextCompaction.enabled === undefined ? true : contextCompaction.enabled === true };
+	}
+
+	setContextCompactionSettings(settings: { enabled: boolean }): void {
+		this.globalSettings.contextCompaction = settings;
+		this.markModified("contextCompaction");
 		this.save();
 	}
 

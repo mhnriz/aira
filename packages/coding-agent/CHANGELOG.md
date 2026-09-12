@@ -82,6 +82,21 @@
   funnel, `ask_user`, and `tasks` are never gated. Governed by
   `src/aira/model-tool-surface.ts`; no prompt inspection or model call is
   involved.
+- **Aira**: Progressive context compaction. Long sessions no longer grow the
+  model-visible conversation without bound: the projection handed to the
+  provider deterministically reduces OLD history once it exceeds a byte
+  threshold (48 KB), keeping the newest ~32 KB plus the latest user request
+  and its active tool chain verbatim. Old assistant narration is replaced with
+  a truthful marker, old assistant conclusions keep a bounded head, old
+  successful tool results become small call-identity placeholders, and errored
+  tool results are never touched; messages are never deleted, so assistant
+  tool calls stay structurally paired with their results. Canonical session
+  history is untouched (UI, persistence, resume, fork, clone, export keep
+  reading the original transcript), no summarizer model call or prompt
+  classifier is involved, and unknown/custom messages fail open. Enabled by
+  the `contextCompaction` setting (default on); `/telemetry` gained an additive
+  `context.compaction` block with per-request pre/post/saved bytes (schema
+  1.2.0). Governed by `src/aira/context-compaction.ts`.
 
 ### Fixed
 

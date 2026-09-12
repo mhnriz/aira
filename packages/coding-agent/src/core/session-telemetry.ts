@@ -1,5 +1,6 @@
 import { stat } from "node:fs/promises";
 import type { AgentEvent, ModelContextPayloadMeasurement } from "@earendil-works/pi-agent-core";
+import type { AiraContextCompactionReport } from "../aira/context-compaction.ts";
 import { resolveReadPathAsync, resolveToCwd } from "./tools/path-utils.ts";
 
 /**
@@ -20,10 +21,11 @@ import { resolveReadPathAsync, resolveToCwd } from "./tools/path-utils.ts";
  * Stable machine-readable schema identifier for `SessionTelemetrySnapshot`.
  *
  * Versioning policy: additive, backward-compatible extensions to the snapshot
- * bump the minor version (1.0.0 → 1.1.0); renames/removals/semantic changes
- * bump the major version. The Step 2 context-payload block is additive.
+ * bump the minor version (1.0.0 → 1.1.0 → 1.2.0); renames/removals/semantic
+ * changes bump the major version. The Step 2 context-payload block and the
+ * Step 4 compaction block are additive.
  */
-export const SESSION_TELEMETRY_SCHEMA_VERSION = "1.1.0";
+export const SESSION_TELEMETRY_SCHEMA_VERSION = "1.2.0";
 
 /** Cap on retained per-request context summaries (bounded ring, newest first). */
 export const CONTEXT_REQUEST_HISTORY_LIMIT = 10;
@@ -57,6 +59,51 @@ export interface ContextRequestSummary {
 	};
 	/** Attributed contributor sizes for this request (custom message types only). */
 	contributors: Array<{ key: string; bytes: number }>;
+	/**
+	 * Deterministic compaction accounting for this request, or null when the
+	 * projection did not change. `preConversationBytes` is the compaction
+	 * input projection size and `postConversationBytes` the returned
+	 * projection size; both are measured on the model-visible message
+	 * projection (role/content, plus tool identity for tool results).
+	 */
+	compaction: {
+		preConversationBytes: number;
+		postConversationBytes: number;
+		savedBytes: number;
+	} | null;
+}
+
+/**
+ * Progressive context-compaction accounting (0.1.7 Step 4).
+ *
+ * Session-wide totals of the deterministic model-visible projection passes.
+ * `originalConversationBytes` and `compactedConversationBytes` are summed over
+ * PASSES THAT COMPACTED; non-triggering passes only move `passes`. Sizes are
+ * the deterministic conversation projection described by
+ * `packages/coding-agent/src/aira/context-compaction.ts`. No message content is
+ * retained.
+ */
+export interface SessionTelemetryContextCompaction {
+	/** Whether the compaction policy was enabled when the last pass ran. */
+	enabled: boolean;
+	/** Whether any pass has reduced old history in this session. */
+	triggered: boolean;
+	/** Number of projection passes observed (one per provider request). */
+	passes: number;
+	/** Number of passes that actually reduced old history. */
+	events: number;
+	/** Zero-based request index of the first compacting pass, or null. */
+	firstTriggerRequestIndex: number | null;
+	/** Summed pre-compaction conversation bytes over compacting passes. */
+	originalConversationBytes: number;
+	/** Summed post-compaction conversation bytes over compacting passes. */
+	compactedConversationBytes: number;
+	/** `originalConversationBytes - compactedConversationBytes`. */
+	savedBytes: number;
+	/** Total assistant messages whose prose/reasoning was reduced. */
+	messagesCompacted: number;
+	/** Total successful tool results whose payload was reduced. */
+	toolResultsCompacted: number;
 }
 
 /** Size aggregation for one contributor identity. */
@@ -112,6 +159,8 @@ export interface SessionTelemetryContext {
 	byContributor: Record<string, SessionTelemetryContextContributor>;
 	/** Bounded per-request history ring (newest first). */
 	recentRequests: ContextRequestSummary[];
+	/** Progressive compaction accounting (0.1.7 Step 4). */
+	compaction: SessionTelemetryContextCompaction;
 }
 
 /**
@@ -295,6 +344,24 @@ export class SessionTelemetry {
 	private readonly contextContributorTotals = new Map<string, SessionTelemetryContextContributor>();
 	private readonly contextRecentRequests: ContextRequestSummary[] = [];
 
+	// Progressive context compaction (Step 4) — metadata only, no content.
+	private compactionEnabled = false;
+	private compactionTriggered = false;
+	private compactionPasses = 0;
+	private compactionEvents = 0;
+	private compactionFirstTriggerRequestIndex: number | null = null;
+	private compactionOriginalBytes = 0;
+	private compactionCompactedBytes = 0;
+	private compactionSavedBytes = 0;
+	private compactionMessages = 0;
+	private compactionToolResults = 0;
+	/**
+	 * Compaction accounting for the NEXT request. The transform projection runs
+	 * immediately before the request it feeds, so the report is consumed by the
+	 * following `observeModelRequestContext` and then cleared.
+	 */
+	private pendingCompaction: AiraContextCompactionReport | null = null;
+
 	// In-flight tool calls (parallel batches: end events arrive per toolCallId).
 	private readonly pendingToolCalls = new Map<string, PendingToolCall>();
 
@@ -350,6 +417,18 @@ export class SessionTelemetry {
 				[...this.contextContributorTotals.entries()].sort(([a], [b]) => a.localeCompare(b)),
 			),
 			recentRequests: [...this.contextRecentRequests],
+			compaction: {
+				enabled: this.compactionEnabled,
+				triggered: this.compactionTriggered,
+				passes: this.compactionPasses,
+				events: this.compactionEvents,
+				firstTriggerRequestIndex: this.compactionFirstTriggerRequestIndex,
+				originalConversationBytes: this.compactionOriginalBytes,
+				compactedConversationBytes: this.compactionCompactedBytes,
+				savedBytes: this.compactionSavedBytes,
+				messagesCompacted: this.compactionMessages,
+				toolResultsCompacted: this.compactionToolResults,
+			},
 		};
 	}
 
@@ -576,6 +655,32 @@ export class SessionTelemetry {
 	}
 
 	/**
+	 * Record one deterministic compaction projection pass (0.1.7 Step 4).
+	 *
+	 * Called once per provider request, immediately before the request the
+	 * projection feeds. Stores counters only: byte totals and message counts.
+	 * No discarded content, no placeholder text, no message bodies.
+	 */
+	observeContextCompaction(report: AiraContextCompactionReport): void {
+		if (this.disposed) return;
+		this.compactionEnabled = report.enabled;
+		this.compactionPasses++;
+		this.pendingCompaction = report;
+		if (!report.triggered) return;
+		this.compactionTriggered = true;
+		this.compactionEvents++;
+		if (this.compactionFirstTriggerRequestIndex === null) {
+			// The pass belongs to the request that is about to be counted.
+			this.compactionFirstTriggerRequestIndex = this.contextRequestCount;
+		}
+		this.compactionOriginalBytes += report.originalBytes;
+		this.compactionCompactedBytes += report.compactedBytes;
+		this.compactionSavedBytes += report.savedBytes;
+		this.compactionMessages += report.messagesCompacted;
+		this.compactionToolResults += report.toolResultsCompacted;
+	}
+
+	/**
 	 * Record one model request's measured payload. Called exactly once per
 	 * provider request from the canonical request boundary; the summary
 	 * contains sizes and counts only. History is a bounded ring (newest
@@ -583,6 +688,8 @@ export class SessionTelemetry {
 	 */
 	observeModelRequestContext(measurement: ModelContextPayloadMeasurement): void {
 		if (this.disposed) return;
+		const pending = this.pendingCompaction;
+		this.pendingCompaction = null;
 		const summary: ContextRequestSummary = {
 			requestIndex: this.contextRequestCount,
 			totalBytes: measurement.totalBytes,
@@ -596,6 +703,13 @@ export class SessionTelemetry {
 				key: contributor.key,
 				bytes: contributor.bytes,
 			})),
+			compaction: pending?.triggered
+				? {
+						preConversationBytes: pending.originalBytes,
+						postConversationBytes: pending.compactedBytes,
+						savedBytes: pending.savedBytes,
+					}
+				: null,
 		};
 		this.contextRecentRequests.unshift(summary);
 		if (this.contextRecentRequests.length > CONTEXT_REQUEST_HISTORY_LIMIT) {
@@ -735,6 +849,15 @@ export function renderSessionTelemetryText(snapshot: SessionTelemetrySnapshot): 
 		`  conversation       ${formatPayloadBytes(context.byTransport.conversationMessages.latestBytes)} latest`,
 	);
 	lines.push(`  tools              ${formatPayloadBytes(context.byTransport.toolDefinitions.latestBytes)} latest`);
+	lines.push("");
+	lines.push("Context compaction");
+	lines.push(`  enabled            ${context.compaction.enabled ? "yes" : "no"}`);
+	lines.push(`  triggered          ${context.compaction.triggered ? "yes" : "no"}`);
+	lines.push(`  passes             ${formatCount(context.compaction.passes)}`);
+	lines.push(`  events             ${formatCount(context.compaction.events)}`);
+	lines.push(`  saved              ${formatPayloadBytes(context.compaction.savedBytes)}`);
+	lines.push(`  messages           ${formatCount(context.compaction.messagesCompacted)}`);
+	lines.push(`  tool results       ${formatCount(context.compaction.toolResultsCompacted)}`);
 	lines.push("");
 	lines.push("Tools");
 	lines.push(`  calls              ${formatCount(tools.total)}`);

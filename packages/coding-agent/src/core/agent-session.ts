@@ -54,6 +54,11 @@ import {
 	createAiraBrowserManager,
 } from "../aira/browser/manager.ts";
 import { createAiraBrowserToolDefinitions } from "../aira/browser/tools.ts";
+import {
+	type AiraContextCompactionSettings,
+	compactAiraModelContext,
+	DEFAULT_AIRA_CONTEXT_COMPACTION_SETTINGS,
+} from "../aira/context-compaction.ts";
 import { type AiraExecutionManagerOptions, createAiraExecutionManager } from "../aira/execution/manager.ts";
 import { createAiraProcessToolDefinitions } from "../aira/execution/tools.ts";
 import type { AiraExecutionHandle } from "../aira/execution/types.ts";
@@ -696,6 +701,10 @@ export class AgentSession {
 			this.telemetry.observeModelRequestContext(measurement);
 		};
 		this._installSessionTelemetry();
+		// Aira progressive context compaction (0.1.7 Step 4): reduce OLD history
+		// in the model-visible projection only. Canonical session history is never
+		// touched, and no model call is involved.
+		this._installAiraContextCompaction();
 
 		this._buildRuntime({
 			activeToolNames: this._initialActiveToolNames,
@@ -905,6 +914,51 @@ export class AgentSession {
 				isError: hookResult?.isError ?? isError,
 				usage: hookResult?.usage,
 			};
+		};
+	}
+
+	// =========================================================================
+	// Progressive context compaction (0.1.7 Step 4)
+	// =========================================================================
+
+	/**
+	 * Deterministic compaction policy from canonical settings. The byte and
+	 * character thresholds are constants; only the master switch is
+	 * user-configurable, and it defaults on.
+	 */
+	private _airaContextCompactionSettings(): AiraContextCompactionSettings {
+		return {
+			...DEFAULT_AIRA_CONTEXT_COMPACTION_SETTINGS,
+			enabled: this.settingsManager.getContextCompactionSettings().enabled,
+		};
+	}
+
+	/**
+	 * Install the Aira model-context projection seam.
+	 *
+	 * ```text
+	 * agent.state.messages (canonical, never mutated)
+	 *     ↓  extension context hooks (existing behavior)
+	 *     ↓  deterministic old-history compaction
+	 *     ↓
+	 * convertToLlm → provider request
+	 * ```
+	 *
+	 * The compaction runs on the array the agent loop is about to convert, so
+	 * persistence, UI rendering, resume, fork, clone, and export keep reading
+	 * the canonical history. It is pure and idempotent, makes no model call, and
+	 * fails open (protected/unknown messages pass through by reference).
+	 */
+	private _installAiraContextCompaction(): void {
+		const previousTransformContext = this.agent.transformContext;
+		this.agent.transformContext = async (messages, signal) => {
+			const transformed = previousTransformContext ? await previousTransformContext(messages, signal) : messages;
+			const { messages: projected, report } = compactAiraModelContext(
+				transformed,
+				this._airaContextCompactionSettings(),
+			);
+			this.telemetry.observeContextCompaction(report);
+			return projected;
 		};
 	}
 

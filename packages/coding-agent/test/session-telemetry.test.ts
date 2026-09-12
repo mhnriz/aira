@@ -554,7 +554,7 @@ describe("SessionTelemetry collector", () => {
 		});
 		const parsed = JSON.parse(renderSessionTelemetryJson(snapshot)) as Record<string, unknown>;
 
-		expect(parsed.schemaVersion).toBe("1.1.0");
+		expect(parsed.schemaVersion).toBe("1.2.0");
 		expect(Object.keys(parsed).sort()).toEqual([
 			"agent",
 			"context",
@@ -592,6 +592,18 @@ describe("SessionTelemetry collector", () => {
 			},
 			byContributor: {},
 			recentRequests: [],
+			compaction: {
+				enabled: false,
+				triggered: false,
+				passes: 0,
+				events: 0,
+				firstTriggerRequestIndex: null,
+				originalConversationBytes: 0,
+				compactedConversationBytes: 0,
+				savedBytes: 0,
+				messagesCompacted: 0,
+				toolResultsCompacted: 0,
+			},
 		});
 		expect(parsed.usage).toEqual({
 			inputTokens: 40_200,
@@ -816,6 +828,18 @@ describe("SessionTelemetry context payload", () => {
 			},
 			byContributor: {},
 			recentRequests: [],
+			compaction: {
+				enabled: false,
+				triggered: false,
+				passes: 0,
+				events: 0,
+				firstTriggerRequestIndex: null,
+				originalConversationBytes: 0,
+				compactedConversationBytes: 0,
+				savedBytes: 0,
+				messagesCompacted: 0,
+				toolResultsCompacted: 0,
+			},
 		});
 	});
 
@@ -882,7 +906,7 @@ describe("SessionTelemetry integration", () => {
 		await harness.session.prompt("read the file");
 
 		const snapshot = harness.session.getTelemetrySnapshot();
-		expect(snapshot.schemaVersion).toBe("1.1.0");
+		expect(snapshot.schemaVersion).toBe("1.2.0");
 		expect(snapshot.tools.total).toBe(1);
 		expect(snapshot.tools.byName).toEqual({ read: 1 });
 		expect(snapshot.repository.reads).toBe(1);
