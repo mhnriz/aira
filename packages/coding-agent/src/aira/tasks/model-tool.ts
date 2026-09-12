@@ -5,8 +5,10 @@
  * at a time (never full-list replacement), list with bounded projection,
  * get a single task, remove a manual task. Orchestration-derived rows are
  * immutable through this surface (owned by the Phase 9 manager). The
- * prompt guidance keeps usage bounded: tasks appear when work has 3+
- * distinct steps; the tool never injects the full graph into context.
+ * prompt guidance keeps usage selective: direct execution is the default
+ * for one coherent deliverable; tasks appear when the user asked for a
+ * plan or durable task state materially helps. The tool never injects the
+ * full graph into context.
  */
 import { type Static, Type } from "typebox";
 import type { ToolDefinition } from "../../core/extensions/types.ts";
@@ -15,7 +17,8 @@ import type { AiraTaskManagerHandle } from "./manager.ts";
 const TASKS_PROMPT_SNIPPET = "Manage a compact task list for tracked multi-step work";
 
 const TASKS_PROMPT_GUIDELINES = [
-	"Use tasks when work has 3+ distinct steps, the user gives a task list, or progress must be tracked; skip single trivial steps.",
+	"Use tasks selectively. Work directly by default: one coherent engineering deliverable should not create a task graph even if it has several acceptance criteria or an obvious step sequence (scaffold, implement, test, document). Do not convert every numbered requirement into a task.",
+	"Create tasks when durable task state materially helps execution, recovery, coordination, or visibility: the user explicitly asked for a plan, checklist, or tracked progress; the work has multiple independent workstreams; work is long-running or may be paused and resumed; or child-agent coordination is involved. Make each task a meaningful unit of work.",
 	"Patch ONE task at a time (create/patch by id); never rewrite the whole list. Mark a task active before starting it (one at a time) and completed only when actually done.",
 	"A task with unfinished dependencies is blocked and cannot be activated; children delegated with agents_delegate appear automatically and are orchestration-owned (never patch them).",
 ] as const;
@@ -30,8 +33,11 @@ Statuses: pending -> active -> completed; blocked (derived from unfinished
 dependencies, never settable); cancelled; failed (child rows).
 
 Agent-delegated tasks (agents_delegate children) appear automatically as
-read-only rows and cannot be patched or removed. Use one task per distinct
-work item; skip trivial steps or chat.`;
+read-only rows and cannot be patched or removed. Tasks are selective
+state: prefer direct execution for one coherent deliverable, and create
+tasks only when the user requested a plan/checklist or durable task state
+materially aids execution, recovery, coordination, or visibility. Use one
+task per meaningful work unit; skip trivial steps or chat.`;
 
 const tasksSchema = Type.Object({
 	action: Type.Union(
