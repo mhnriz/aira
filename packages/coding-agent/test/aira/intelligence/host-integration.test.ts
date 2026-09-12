@@ -179,22 +179,13 @@ describe("Aira ambient intelligence through the host (Phase 5)", () => {
 		harness.session.setAiraMode("plan");
 		try {
 			expect(harness.session.getActiveToolNames().sort()).toEqual([
-				"agents_cancel",
 				"agents_delegate",
-				"agents_status",
 				"aira_diagnostics",
 				"aira_module_report",
 				"aira_semantic_navigation",
 				"aira_symbol_search",
 				"ask_user",
-				"browser_console",
-				"browser_navigate",
-				"browser_network",
-				"browser_observe",
-				"browser_screenshot",
-				"browser_scroll",
 				"browser_status",
-				"browser_wait",
 				"find",
 				"grep",
 				"ls",

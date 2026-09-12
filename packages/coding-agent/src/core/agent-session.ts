@@ -74,6 +74,11 @@ import {
 import { createAiraInteractionToolDefinitions } from "../aira/interaction/model-tool.ts";
 import { onAiraSessionCreated, onAiraSessionDisposed } from "../aira/lifecycle.ts";
 import {
+	type AiraModelToolCapabilityState,
+	hasAiraOrchestrationRuns,
+	isAiraModelToolAvailable,
+} from "../aira/model-tool-surface.ts";
+import {
 	AIRA_INTELLIGENCE_TOOLS,
 	AIRA_READ_ONLY_TOOLS,
 	buildAiraRuntimeControlEnvelope,
@@ -481,6 +486,14 @@ export class AgentSession {
 	// Tool registry for extension getTools/setTools
 	private _toolRegistry: Map<string, AgentTool> = new Map();
 	private _airaModeToolBackup: string[] | undefined;
+	/**
+	 * Tools removed from the model-facing surface by capability gating
+	 * (0.1.7 Step 3). Remembered so the capability's tools can be restored when
+	 * its runtime state returns; explicit host/extension selections are never
+	 * touched by the selection boundary.
+	 */
+	private _airaModelToolHiddenNames: string[] = [];
+	private _airaModelToolSurfaceUnsubscribers: Array<() => void> = [];
 	private _toolDefinitions: Map<string, ToolDefinitionEntry> = new Map();
 	private _toolPromptSnippets: Map<string, string> = new Map();
 	private _toolPromptGuidelines: Map<string, string[]> = new Map();
@@ -688,6 +701,16 @@ export class AgentSession {
 			activeToolNames: this._initialActiveToolNames,
 			includeAllExtensionTools: true,
 		});
+
+		// Aira model-tool surface seam (0.1.7 Step 3): the runtime above is built
+		// with the full candidate set; the canonical selection boundary narrows it
+		// to the capabilities this session can use right now. Later-stage tools
+		// return when their subsystem publishes the state that makes them usable
+		// (an open browser session, an existing child run).
+		this._airaModelToolSurfaceUnsubscribers = [
+			this._airaBrowser?.subscribe(() => this._applyAiraModelToolSurface()),
+			this._airaOrchestration?.subscribe(() => this._applyAiraModelToolSurface()),
+		].filter((unsubscribe): unsubscribe is () => void => unsubscribe !== undefined);
 	}
 
 	get modelRuntime(): ModelRuntime {
@@ -1280,6 +1303,12 @@ export class AgentSession {
 			unsubscribe();
 		}
 		this._telemetryUnsubscribers.length = 0;
+		// Release the model-tool surface subscriptions before the managers are
+		// disposed (a disposing manager must never re-enter tool selection).
+		for (const unsubscribe of this._airaModelToolSurfaceUnsubscribers) {
+			unsubscribe();
+		}
+		this._airaModelToolSurfaceUnsubscribers.length = 0;
 		this.telemetry.dispose();
 		this._eventListeners = [];
 		// Aira execution seam: clean up THIS session's managed processes
@@ -1518,6 +1547,9 @@ export class AgentSession {
 			this._airaModeToolBackup = undefined;
 			this.setActiveToolsByName(restore);
 		}
+		// The mode's candidate set is still the full policy set; the model-facing
+		// surface is re-derived from the current capability state on top of it.
+		this._applyAiraModelToolSurface();
 		// A mode command can arrive while the agent is still running. Refresh the
 		// host-owned envelope immediately so a continuation turn cannot reuse the
 		// previous mode. The current provider request cannot be rewritten in place,
@@ -1528,6 +1560,73 @@ export class AgentSession {
 	/** Current retry attempt (0 if not retrying) */
 	get retryAttempt(): number {
 		return this._retryAttempt;
+	}
+
+	/**
+	 * Deterministic capability state the model-facing tool surface is selected
+	 * from (0.1.7 Step 3). Every field is already-published session truth: the
+	 * settings gates plus the CANONICAL snapshots each subsystem publishes into
+	 * `AiraSessionState` (reading them never re-enters a manager). No prompt
+	 * inspection, no scoring, no hidden model calls — identical state selects an
+	 * identical set.
+	 */
+	private _airaModelToolCapabilityState(): AiraModelToolCapabilityState {
+		const browser = this._airaSessionState.browser;
+		const orchestration = this._airaSessionState.orchestration;
+		return {
+			browserEnabled: this.settingsManager.getBrowserSettings().enabled,
+			browserSessionOpen: browser?.status === "active",
+			orchestrationEnabled: this.settingsManager.getOrchestrationSettings().enabled,
+			orchestrationEstablished: orchestration !== undefined && hasAiraOrchestrationRuns(orchestration),
+		};
+	}
+
+	/**
+	 * Canonical model-tool selection boundary (0.1.7 Step 3).
+	 *
+	 * The registry keeps every tool; this narrows the ACTIVE set to the tools the
+	 * current runtime state can meaningfully use:
+	 *
+	 * ```text
+	 * active tools (mode/extension/default selection)
+	 *     ↓  current capability state
+	 * model-facing subset (sent to the provider + listed in the system prompt)
+	 * ```
+	 *
+	 * Gating is reversible: a tool removed here is remembered, and re-enters the
+	 * active set as soon as its capability state says it is usable again (for
+	 * example after browser_open creates a session). Tools the host or an
+	 * extension selected explicitly are only ever removed while their capability
+	 * is inactive — the boundary never adds a tool nobody selected.
+	 */
+	private _applyAiraModelToolSurface(): void {
+		const state = this._airaModelToolCapabilityState();
+		const active = this.getActiveToolNames();
+		const next: string[] = [];
+		const hidden: string[] = [];
+		const kept = new Set<string>();
+		const hiddenAgain = new Set<string>();
+		const evaluate = (name: string): void => {
+			if (!isAiraModelToolAvailable(name, state)) {
+				if (!hiddenAgain.has(name)) {
+					hiddenAgain.add(name);
+					hidden.push(name);
+				}
+				return;
+			}
+			if (kept.has(name)) return;
+			kept.add(name);
+			next.push(name);
+		};
+		// Restore first: tools an earlier capability state removed, in the order
+		// they were removed (deterministic), then the currently active set.
+		for (const name of this._airaModelToolHiddenNames) evaluate(name);
+		for (const name of active) evaluate(name);
+		this._airaModelToolHiddenNames = hidden;
+		if (next.length === active.length && next.every((name, index) => name === active[index])) {
+			return;
+		}
+		this.setActiveToolsByName(next);
 	}
 
 	/**
@@ -3385,6 +3484,9 @@ export class AgentSession {
 		}
 
 		this.setActiveToolsByName([...new Set(nextActiveToolNames)]);
+		// The registry is the candidate superset; the model-facing surface is
+		// re-derived from the current capability state on top of it.
+		this._applyAiraModelToolSurface();
 	}
 
 	private _buildRuntime(options: {

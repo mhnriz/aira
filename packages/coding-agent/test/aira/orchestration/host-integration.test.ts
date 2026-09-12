@@ -3,7 +3,9 @@
  *
  * - every session arms its own orchestration manager and publishes the
  *   canonical snapshot;
- * - the delegation tools are registered and active by default;
+ * - the delegation entry point is active by default; the later-stage tools
+ *   (agents_status/agents_cancel) are capability-gated until a child run
+ *   exists (0.1.7 Step 3);
  * - the model can delegate a child through agents_delegate; the child runs
  *   through the NATIVE fresh-context path (real streamFn + scripted child
  *   responses) and returns a structured result;
@@ -147,9 +149,29 @@ describe("Aira orchestration through the host (Phase 9)", () => {
 		expect(harness.session.airaSessionState.orchestration).toBeDefined();
 		expect(harness.session.airaSessionState.orchestration!.status).toBe("idle");
 		expect(harness.session.airaSessionState.orchestration!.maxConcurrency).toBe(2);
-		// The delegation tools are registered and active by default.
+		// The delegation entry point is registered and active by default.
 		const activeTools = harness.session.getActiveToolNames();
 		expect(activeTools).toContain("agents_delegate");
+		// 0.1.7 Step 3: the later-stage tools only make sense once a child run
+		// exists, so they are not model-facing on an idle, never-used runtime.
+		expect(activeTools).not.toContain("agents_status");
+		expect(activeTools).not.toContain("agents_cancel");
+	});
+
+	it("restores agents_status/agents_cancel once a child run exists", async () => {
+		const harness = await makeHarness();
+		expect(harness.session.getActiveToolNames()).not.toContain("agents_status");
+		harness.setResponses([
+			fauxAssistantMessage([delegateCall("t1", [{ role: "explore", task: "map the player module" }])]),
+			fauxAssistantMessage(fauxText(COMPLETED_RESULT_JSON)),
+			fauxAssistantMessage(fauxText("done")),
+		]);
+		await harness.session.prompt("delegate exploration of the player module");
+		await waitForOrchestration(
+			harness,
+			(status) => status.children.length === 1 && status.children[0]!.status === "completed",
+		);
+		const activeTools = harness.session.getActiveToolNames();
 		expect(activeTools).toContain("agents_status");
 		expect(activeTools).toContain("agents_cancel");
 	});

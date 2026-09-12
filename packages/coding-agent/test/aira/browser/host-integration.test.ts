@@ -1,13 +1,14 @@
 /**
  * Phase 7 — host integration through the real AgentSession path.
  *
- * - every session arms its own browser runtime and gets the browser tools,
- *   active by default;
+ * - every session arms its own browser runtime and gets the browser
+ *   activation/status surface; later-stage observation/interaction tools are
+ *   capability-gated until an Aira-owned session is open (0.1.7 Step 3);
  * - a real model tool call opens the browser and observes the page through
  *   the native tool surface (fake provider — browser mechanics are not the
  *   subject here);
  * - PLAN hides the interact/lifecycle tools AND blocks them at the boundary,
- *   while observation/navigation stay available;
+ *   while observation/navigation stay available once a session is open;
  * - ambient context honors off/auto/on through the actual prompt path
  *   (zero-token and relevant cases, dedupe);
  * - browser absence degrades truthfully (availability/status, never breaks
@@ -150,7 +151,7 @@ function customMessages(harness: Harness): Array<{ customType?: string; content?
 }
 
 describe("Aira browser runtime through the host (Phase 7)", () => {
-	it("arms the per-session browser runtime and registers the browser tools by default", async () => {
+	it("arms the per-session browser runtime: activation surfaces by default, later-stage tools gated", async () => {
 		const harness = await createHarness({
 			cwd: makeProjectDir(),
 			airaBrowserOptions: { provider: fakeProviderFactory() },
@@ -158,9 +159,14 @@ describe("Aira browser runtime through the host (Phase 7)", () => {
 		try {
 			expect(harness.session.airaBrowser).toBeDefined();
 			const names = harness.session.getActiveToolNames();
+			// Activation, read-only discovery, and the self-opening bounded check
+			// stay model-facing without a session.
+			for (const tool of ["browser_open", "browser_status", "browser_verify"]) {
+				expect(names).toContain(tool);
+			}
+			// 0.1.7 Step 3: operations that need an open Aira-owned session are not
+			// exposed while the runtime is idle (every one of them would fail).
 			for (const tool of [
-				"browser_open",
-				"browser_status",
 				"browser_observe",
 				"browser_navigate",
 				"browser_click",
@@ -172,14 +178,34 @@ describe("Aira browser runtime through the host (Phase 7)", () => {
 				"browser_console",
 				"browser_network",
 				"browser_screenshot",
-				"browser_verify",
 				"browser_close",
 			]) {
-				expect(names).toContain(tool);
+				expect(names, tool).not.toContain(tool);
 			}
 			// Canonical state carries the browser snapshot.
 			expect(harness.session.airaSessionState.browser).toBeDefined();
 			expect(harness.session.airaSessionState.browser!.status).toBe("idle");
+		} finally {
+			harness.session.dispose();
+		}
+	});
+
+	it("restores the later-stage browser tools as soon as an Aira-owned session is open", async () => {
+		const harness = await createHarness({
+			cwd: makeProjectDir(),
+			airaBrowserOptions: { provider: fakeProviderFactory() },
+		});
+		try {
+			expect(harness.session.getActiveToolNames()).not.toContain("browser_observe");
+			await harness.session.airaBrowser!.activate();
+			await harness.session.airaBrowser!.open();
+			const names = harness.session.getActiveToolNames();
+			for (const tool of ["browser_observe", "browser_navigate", "browser_click", "browser_close"]) {
+				expect(names, tool).toContain(tool);
+			}
+			// Closing the session hides them again (the capability is inactive).
+			await harness.session.airaBrowser!.close();
+			expect(harness.session.getActiveToolNames()).not.toContain("browser_observe");
 		} finally {
 			harness.session.dispose();
 		}
@@ -196,13 +222,19 @@ describe("Aira browser runtime through the host (Phase 7)", () => {
 		});
 		try {
 			harness.setResponses([
-				fauxAssistantMessage([
-					fauxToolCall("browser_open", { url: "http://localhost:5173" }),
-					fauxToolCall("browser_observe", {}),
-				]),
+				fauxAssistantMessage(fauxToolCall("browser_open", { url: "http://localhost:5173" })),
+				fauxAssistantMessage(fauxText("opened")),
+			]);
+			await harness.session.prompt("open the app");
+			// The open session restores the observation/interaction surface for the
+			// next request (0.1.7 Step 3: gated tools return with their capability).
+			expect(harness.session.getActiveToolNames()).toContain("browser_observe");
+
+			harness.setResponses([
+				fauxAssistantMessage(fauxToolCall("browser_observe", {})),
 				fauxAssistantMessage(fauxText("final")),
 			]);
-			await harness.session.prompt("open the app and look at the page");
+			await harness.session.prompt("look at the page");
 			const texts = messageTexts(harness);
 			const joined = texts.join("\n");
 			expect(joined).toContain("fixture page");
@@ -215,17 +247,20 @@ describe("Aira browser runtime through the host (Phase 7)", () => {
 		}
 	});
 
-	it("PLAN blocks browser interaction at the boundary and keeps observation available", async () => {
+	it("PLAN blocks browser interaction at the boundary and keeps observation allowed", async () => {
 		const harness = await createHarness({
 			cwd: makeProjectDir(),
 			airaBrowserOptions: { provider: fakeProviderFactory() },
 		});
 		try {
 			harness.session.setAiraMode("plan");
-			// Interact/lifecycle tools hidden from the model.
+			// Interact/lifecycle tools hidden from the model; with no open session the
+			// observation tools are capability-gated too, and browser_status remains
+			// the read-only discovery surface.
 			const names = harness.session.getActiveToolNames();
-			expect(names).toContain("browser_observe");
-			expect(names).toContain("browser_navigate");
+			expect(names).toContain("browser_status");
+			expect(names).not.toContain("browser_observe");
+			expect(names).not.toContain("browser_navigate");
 			expect(names).not.toContain("browser_click");
 			expect(names).not.toContain("browser_open");
 			// Boundary blocks them anyway.

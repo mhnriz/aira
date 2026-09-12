@@ -34,34 +34,24 @@ afterAll(() => {
 });
 
 describe("Aira PLAN read-only enforcement (host/tool-policy level)", () => {
-	it("starts in BUILD with the full default tool set", () => {
+	it("starts in BUILD with the general engineering tools and the activation/discovery surfaces", () => {
 		const harness = harnesses[0]!;
 		expect(harness.session.airaMode).toBe("build");
+		// 0.1.7 Step 3: later-stage browser/orchestration tools are capability-gated
+		// (see test/aira/model-tool-surface.test.ts). The default model-facing set
+		// keeps every general engineering tool plus the browser activation/status
+		// surface and the delegation entry point.
 		expect(harness.session.getActiveToolNames().sort()).toEqual([
-			"agents_cancel",
 			"agents_delegate",
-			"agents_status",
 			"aira_diagnostics",
 			"aira_module_report",
 			"aira_semantic_navigation",
 			"aira_symbol_search",
 			"ask_user",
 			"bash",
-			"browser_click",
-			"browser_close",
-			"browser_console",
-			"browser_evaluate",
-			"browser_fill",
-			"browser_navigate",
-			"browser_network",
-			"browser_observe",
 			"browser_open",
-			"browser_press",
-			"browser_screenshot",
-			"browser_scroll",
 			"browser_status",
 			"browser_verify",
-			"browser_wait",
 			"edit",
 			"process_logs",
 			"process_start",
@@ -79,22 +69,13 @@ describe("Aira PLAN read-only enforcement (host/tool-policy level)", () => {
 
 		expect(harness.session.airaMode).toBe("plan");
 		expect(harness.session.getActiveToolNames().sort()).toEqual([
-			"agents_cancel",
 			"agents_delegate",
-			"agents_status",
 			"aira_diagnostics",
 			"aira_module_report",
 			"aira_semantic_navigation",
 			"aira_symbol_search",
 			"ask_user",
-			"browser_console",
-			"browser_navigate",
-			"browser_network",
-			"browser_observe",
-			"browser_screenshot",
-			"browser_scroll",
 			"browser_status",
-			"browser_wait",
 			"find",
 			"grep",
 			"ls",
@@ -125,30 +106,16 @@ describe("Aira PLAN read-only enforcement (host/tool-policy level)", () => {
 		harness.session.setAiraMode("review");
 		expect(harness.session.airaMode).toBe("review");
 		expect(harness.session.getActiveToolNames().sort()).toEqual([
-			"agents_cancel",
 			"agents_delegate",
-			"agents_status",
 			"aira_diagnostics",
 			"aira_module_report",
 			"aira_semantic_navigation",
 			"aira_symbol_search",
 			"ask_user",
 			"bash",
-			"browser_click",
-			"browser_close",
-			"browser_console",
-			"browser_evaluate",
-			"browser_fill",
-			"browser_navigate",
-			"browser_network",
-			"browser_observe",
 			"browser_open",
-			"browser_press",
-			"browser_screenshot",
-			"browser_scroll",
 			"browser_status",
 			"browser_verify",
-			"browser_wait",
 			"edit",
 			"process_logs",
 			"process_start",
@@ -162,30 +129,16 @@ describe("Aira PLAN read-only enforcement (host/tool-policy level)", () => {
 		harness.session.setAiraMode("build");
 		expect(harness.session.airaMode).toBe("build");
 		expect(harness.session.getActiveToolNames().sort()).toEqual([
-			"agents_cancel",
 			"agents_delegate",
-			"agents_status",
 			"aira_diagnostics",
 			"aira_module_report",
 			"aira_semantic_navigation",
 			"aira_symbol_search",
 			"ask_user",
 			"bash",
-			"browser_click",
-			"browser_close",
-			"browser_console",
-			"browser_evaluate",
-			"browser_fill",
-			"browser_navigate",
-			"browser_network",
-			"browser_observe",
 			"browser_open",
-			"browser_press",
-			"browser_screenshot",
-			"browser_scroll",
 			"browser_status",
 			"browser_verify",
-			"browser_wait",
 			"edit",
 			"process_logs",
 			"process_start",

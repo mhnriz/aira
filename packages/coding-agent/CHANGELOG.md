@@ -68,6 +68,20 @@
   `/telemetry --json`, and the RPC `get_session_telemetry` snapshot gained
   the backward-compatible `context` block (schema 1.1.0). No prompt text,
   message bodies, or tool contents are ever retained.
+- **Aira**: Adaptive model tool surface. The model-facing tool set is now
+  derived from deterministic runtime capability state instead of exposing every
+  registered tool: browser observation/interaction tools require an open
+  Aira-owned browser session, and the later-stage orchestration tools
+  (`agents_status`/`agents_cancel`) require an existing child run. Activation
+  and discovery surfaces always stay visible (`browser_open`, `browser_verify`,
+  `browser_status`, `agents_delegate`), the full registry and every tool
+  execution API are unchanged, and the gated tools return — announced on the
+  activation tool result — as soon as their capability becomes usable. A
+  default session carries 18 instead of 32 tool definitions (~8.3 KB less fixed
+  schema context per request); general engineering tools, the code-intelligence
+  funnel, `ask_user`, and `tasks` are never gated. Governed by
+  `src/aira/model-tool-surface.ts`; no prompt inspection or model call is
+  involved.
 
 ### Fixed
 
