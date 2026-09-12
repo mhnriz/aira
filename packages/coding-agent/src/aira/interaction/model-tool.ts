@@ -7,13 +7,26 @@
  * permission controller uses (kind "semantic" vs "permission" — distinct in
  * canonical state, same infrastructure).
  *
- * Guardrails baked into the tool definition:
- * - the prompt guidance tells the model to continue autonomously when the
- *   answer is inferable, and to ask only for genuine user intent,
- *   authorization, missing requirements, or unsafe assumptions;
- * - one focused question per call;
+ * Guardrails baked into the tool definition (0.1.7 step 5): the guidance is
+ * a decision-boundary policy, not an uncertainty escape hatch.
+ *
+ * - repository-resolvable uncertainty (which file, which convention, which
+ *   framework, whether a dependency exists) is investigated, not asked;
+ * - routine reversible implementation choices proceed without asking;
+ * - ask only when materially different outcomes remain and the user owns the
+ *   decision: product/UX direction, architecture trade-offs, destructive or
+ *   irreversible actions, authorization, or facts only the user can know;
+ * - an explicit user decision is never re-asked, even against repo
+ *   convention;
+ * - investigation stops when it no longer improves confidence: with two or
+ *   more materially different options left, ask instead of searching again;
+ * - one focused question per call, concise options with consequences, and a
+ *   recommended default when evidence supports one;
  * - cancellations are truthful: "User cancelled the question" never invents
  *   an answer; the owning operation decides how to proceed.
+ *
+ * The policy stays guidance-level on purpose: the model weighs the evidence
+ * locally, with no hidden classifier call and no numeric confidence scoring.
  *
  * Headless sessions (no interactive UI bridge) resolve as "unavailable":
  * the question was NOT shown, the model is told so, and the run continues.
@@ -30,25 +43,33 @@ export interface AiraInteractionToolRuntime {
 const ASK_USER_PROMPT_SNIPPET = "Ask the user one focused question and wait for the answer";
 
 const ASK_USER_PROMPT_GUIDELINES = [
-	"Use ask_user only when the decision genuinely requires the user: explicit choice, authorization, missing requirements, or an unsafe assumption. Continue autonomously when evidence makes the answer reasonably inferable.",
-	"Ask exactly one focused question per ask_user call; pass a short context summary and up to 12 structured choices with brief descriptions.",
+	"Use ask_user only at a genuine decision boundary, not as an uncertainty escape: before asking, check whether the repository or environment already answers the question, whether one option follows an established local convention, and whether the choice is reversible and low-risk. If any of those resolve it, proceed instead.",
+	"Proceed on routine reversible implementation choices (naming, helper placement, internal data structures, an established test framework, formatting) and validate the result instead of asking.",
+	"Ask when materially different outcomes remain: user-owned product/UX direction, architecture trade-offs, destructive or irreversible actions (deleting data, destructive migrations, replacing public APIs, breaking backwards compatibility), or facts only the user can supply.",
+	"Never re-ask a decision the user already made explicitly; follow the explicit instruction even when repository convention differs, and surface the conflict only when it materially changes product behavior.",
+	"Stop investigating when further inspection no longer improves confidence: if two or more materially different options remain after the useful evidence is in, ask instead of searching again.",
+	"Ask exactly one concrete question per ask_user call, with concise options and the consequence of each, and recommend a default when evidence supports one; keep context to a short summary and leave internal investigation detail out.",
 	"A cancelled or unavailable question is NOT an answer: do not invent one; state the blocker or re-ask when the decision is truly required.",
 ] as const;
 
 const ASK_USER_DESCRIPTION = `Ask the user a structured question and wait for the answer.
 
-Use ONLY when the decision genuinely requires user intent, authorization,
-missing requirements, or an unsafe assumption. Continue autonomously when
-the answer is reasonably inferable from evidence.
+Decision boundary, not an uncertainty escape: ask only when the decision
+genuinely needs the user — product/UX direction, architecture trade-offs,
+destructive or irreversible actions, authorization, missing requirements, or
+facts only the user can know. Investigate first when the repository or
+environment can answer the question, and proceed on reversible choices;
+never re-ask what the user already decided.
 
-Ask exactly one focused question per call. Provide up to 12 choices with
-optional descriptions (single-select by default; allowMultiple for
-multi-select, allowFreeform to accept a typed answer).
+Ask exactly one concrete question per call. Provide up to 12 choices with
+brief consequences (single-select by default; allowMultiple for
+multi-select, allowFreeform to accept a typed answer), and recommend a
+default when evidence supports one. Do not dump internal investigation
+detail into the question.
 
 The tool waits until the user answers, cancels, or the question times out.
 A cancelled/unavailable question returns truthfully and is NOT an answer:
-never invent one. Cases where the answer can be inferred or delayed should
-not call this tool at all.`;
+never invent one.`;
 
 const askUserSchema = Type.Object({
 	question: Type.String({ description: "The focused question to ask the user" }),
@@ -59,7 +80,7 @@ const askUserSchema = Type.Object({
 		Type.Array(
 			Type.Object({
 				title: Type.String({ description: "Short title for this option" }),
-				description: Type.Optional(Type.String({ description: "Longer description explaining this option" })),
+				description: Type.Optional(Type.String({ description: "Brief consequence of choosing this option" })),
 			}),
 			{ description: "Up to 12 structured choices" },
 		),

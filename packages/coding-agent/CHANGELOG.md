@@ -97,6 +97,19 @@
   the `contextCompaction` setting (default on); `/telemetry` gained an additive
   `context.compaction` block with per-request pre/post/saved bytes (schema
   1.2.0). Governed by `src/aira/context-compaction.ts`.
+- **Aira**: Decision-aware `ask_user`. The user-question tool now carries a
+  decision-boundary policy instead of acting as an uncertainty escape hatch:
+  repository-resolvable questions (which file, which convention, whether a
+  dependency exists) are investigated first, routine reversible implementation
+  choices proceed without interrupting the user, and an explicit user decision
+  is never re-asked. The model is asked to stop investigating when further
+  inspection no longer improves confidence and to ask exactly one concrete
+  question with concise option consequences plus a recommended default when
+  evidence supports one; product/UX direction, architecture trade-offs, and
+  destructive or irreversible actions still ask. Guidance-only (tool
+  description and system-prompt guidelines), no classifier, no extra model
+  call, and the `ask_user` tool surface, runtime behavior, and
+  `agent.askUser` telemetry are unchanged.
 
 ### Fixed
 
