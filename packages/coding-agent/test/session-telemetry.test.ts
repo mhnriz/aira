@@ -281,6 +281,42 @@ describe("SessionTelemetry collector", () => {
 		expect(snapshot.editing.successful).toBe(1);
 	});
 
+	it("reports repository observation counters and derives misses from reads", async () => {
+		const temp = createTempDir();
+		cleanups.push(temp.cleanup);
+		const a = temp.file("a.ts");
+		writeFileSync(a, "hello world", "utf-8");
+		const telemetry = new SessionTelemetry();
+
+		for (const id of ["t1", "t2", "t3"]) {
+			await telemetry.onAgentEvent(toolStart(id, "read", { path: a }), temp.dir);
+			await telemetry.onAgentEvent(toolEnd(id, "read", false, emptyResult()), temp.dir);
+		}
+
+		const snapshot = telemetry.snapshot(
+			{ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0 },
+			{ observationHits: 1, observationInvalidations: 2 },
+		);
+		expect(snapshot.repository.reads).toBe(3);
+		expect(snapshot.repository.observationHits).toBe(1);
+		expect(snapshot.repository.observationMisses).toBe(2);
+		expect(snapshot.repository.observationInvalidations).toBe(2);
+	});
+
+	it("defaults repository observation counters to zero", () => {
+		const telemetry = new SessionTelemetry();
+		const snapshot = telemetry.snapshot({
+			inputTokens: 0,
+			outputTokens: 0,
+			cacheReadTokens: 0,
+			cacheWriteTokens: 0,
+			costUsd: 0,
+		});
+		expect(snapshot.repository.observationHits).toBe(0);
+		expect(snapshot.repository.observationMisses).toBe(0);
+		expect(snapshot.repository.observationInvalidations).toBe(0);
+	});
+
 	it("counts edit attempts, successes, failures, conflicts, and retries", async () => {
 		const temp = createTempDir();
 		cleanups.push(temp.cleanup);
@@ -554,7 +590,7 @@ describe("SessionTelemetry collector", () => {
 		});
 		const parsed = JSON.parse(renderSessionTelemetryJson(snapshot)) as Record<string, unknown>;
 
-		expect(parsed.schemaVersion).toBe("1.2.0");
+		expect(parsed.schemaVersion).toBe("1.3.0");
 		expect(Object.keys(parsed).sort()).toEqual([
 			"agent",
 			"context",
@@ -906,7 +942,7 @@ describe("SessionTelemetry integration", () => {
 		await harness.session.prompt("read the file");
 
 		const snapshot = harness.session.getTelemetrySnapshot();
-		expect(snapshot.schemaVersion).toBe("1.2.0");
+		expect(snapshot.schemaVersion).toBe("1.3.0");
 		expect(snapshot.tools.total).toBe(1);
 		expect(snapshot.tools.byName).toEqual({ read: 1 });
 		expect(snapshot.repository.reads).toBe(1);
@@ -939,6 +975,60 @@ describe("SessionTelemetry integration", () => {
 		expect(snapshot.repository.reads).toBe(2);
 		expect(snapshot.repository.uniqueFilesRead).toBe(1);
 		expect(snapshot.repository.repeatedUnchangedReads).toBe(1);
+	});
+
+	it("reuses a fresh observation through the real read tool without changing read semantics", async () => {
+		const temp = createTempDir();
+		cleanups.push(temp.cleanup);
+		const a = temp.file("a.ts");
+		writeFileSync(a, "unique-marker-content-42\nsecond line\n", "utf-8");
+
+		const harness = await createHarness({ cwd: temp.dir });
+		harnesses.push(harness);
+
+		harness.setResponses([
+			fauxAssistantMessage(fauxToolCall("read", { path: a }), { stopReason: "toolUse" }),
+			fauxAssistantMessage(fauxToolCall("read", { path: a }), { stopReason: "toolUse" }),
+			fauxAssistantMessage("done"),
+		]);
+		await harness.session.prompt("read twice");
+
+		const snapshot = harness.session.getTelemetrySnapshot();
+		expect(snapshot.repository.reads).toBe(2);
+		expect(snapshot.repository.uniqueFilesRead).toBe(1);
+		// A logical reuse is not a physical repeated read.
+		expect(snapshot.repository.repeatedUnchangedReads).toBe(1);
+		expect(snapshot.repository.observationHits).toBe(1);
+		expect(snapshot.repository.observationMisses).toBe(1);
+		expect(snapshot.repository.observationInvalidations).toBe(0);
+		// No raw source content leaks into telemetry.
+		expect(JSON.stringify(snapshot)).not.toContain("unique-marker-content-42");
+	});
+
+	it("invalidates a real observation after a real edit", async () => {
+		const temp = createTempDir();
+		cleanups.push(temp.cleanup);
+		const a = temp.file("a.ts");
+		writeFileSync(a, "before-value\n", "utf-8");
+
+		const harness = await createHarness({ cwd: temp.dir });
+		harnesses.push(harness);
+
+		harness.setResponses([
+			fauxAssistantMessage(fauxToolCall("read", { path: a }), { stopReason: "toolUse" }),
+			fauxAssistantMessage(fauxToolCall("edit", { path: a, oldText: "before-value", newText: "after-value" }), {
+				stopReason: "toolUse",
+			}),
+			fauxAssistantMessage(fauxToolCall("read", { path: a }), { stopReason: "toolUse" }),
+			fauxAssistantMessage("done"),
+		]);
+		await harness.session.prompt("read, edit, read");
+
+		const snapshot = harness.session.getTelemetrySnapshot();
+		expect(snapshot.repository.reads).toBe(2);
+		expect(snapshot.repository.observationHits).toBe(0);
+		expect(snapshot.repository.observationInvalidations).toBe(1);
+		expect(readFileSync(a, "utf-8")).toBe("after-value\n");
 	});
 
 	it("counts edit attempts and conflicts through the real edit flow", async () => {

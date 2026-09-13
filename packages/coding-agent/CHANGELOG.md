@@ -126,6 +126,23 @@
   additive `details.recovery` metadata; telemetry schema stays 1.2.0 and
   `ask_user` is never invoked for edit conflicts. Governed by
   `src/core/tools/edit-recovery.ts`.
+- **Aira**: Session-local repository observations. The `read` tool now records
+  a small observation for each text file region it reads (fingerprint, line
+  coverage, and the session's mutation sequence) and reuses it when the file is
+  provably unchanged: same `mtime`/size, no successful `edit`/`write` for that
+  path, and no intervening uncertainty. A reuse returns the exact read the
+  filesystem would have produced (same offset/limit semantics, line numbering,
+  truncation and continuation notices) and performs no content read; anything
+  uncertain misses and falls back to the normal physical read. Path-scoped
+  invalidation keeps unrelated files reusable, while shell commands, child
+  agents, browser interaction, and unknown extension tools conservatively
+  invalidate every observation. Reads that hit the truncation cap never satisfy
+  an unbounded request, and range/search/binary reads never stand in for full
+  file content. Bounded LRU (128 observations), session-local, no persistence,
+  no watcher, no model/classifier/embedding. `/telemetry` `repository` counters
+  gain `observationHits`/`observationMisses`/`observationInvalidations` (schema
+  1.3.0) while `reads` and `repeatedUnchangedReads` keep their prior meaning.
+  Governed by `src/core/repository-observations.ts`.
 
 ### Fixed
 

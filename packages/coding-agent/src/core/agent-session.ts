@@ -166,6 +166,7 @@ import type { BashExecutionMessage, CustomMessage } from "./messages.ts";
 import { ModelRegistry } from "./model-registry.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
+import { RepositoryObservationStore } from "./repository-observations.ts";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.ts";
 import { exportSessionToJsonl } from "./session-export.ts";
 import type { BranchSummaryEntry, CompactionEntry, SessionEntry, SessionManager } from "./session-manager.ts";
@@ -418,9 +419,18 @@ export class AgentSession {
 	/** Session-local telemetry collector (Step 0: instrumentation only). */
 	readonly telemetry: SessionTelemetry;
 
+	/**
+	 * Session-local repository observations (0.1.7 Step 7). The read tool consults
+	 * this to avoid a physical read when it already observed the same file region
+	 * at the same, provably unchanged repository version. It never changes what a
+	 * read returns; it only removes redundant filesystem work.
+	 */
+	private readonly _repositoryObservations = new RepositoryObservationStore();
+
 	// Event subscription state
 	private _unsubscribeAgent?: () => void;
 	private _unsubscribeTelemetry?: () => void;
+	private _unsubscribeRepositoryObservations?: () => void;
 	private readonly _telemetryUnsubscribers: Array<() => void> = [];
 	private _eventListeners: AgentSessionEventListener[] = [];
 	private _isAgentRunActive = false;
@@ -701,6 +711,7 @@ export class AgentSession {
 			this.telemetry.observeModelRequestContext(measurement);
 		};
 		this._installSessionTelemetry();
+		this._installRepositoryObservations();
 		// Aira progressive context compaction (0.1.7 Step 4): reduce OLD history
 		// in the model-visible projection only. Canonical session history is never
 		// touched, and no model call is involved.
@@ -1008,6 +1019,21 @@ export class AgentSession {
 	// =========================================================================
 	// Session Telemetry
 	// =========================================================================
+
+	/**
+	 * Wire repository observation freshness (0.1.7 Step 7).
+	 *
+	 * Successful `edit`/`write` calls invalidate that path only; operations that
+	 * could mutate the workspace without a provable path (shell, child agents,
+	 * browser interaction, unknown extension tools) invalidate every observation.
+	 * Failed calls change nothing and do not invalidate. This is what makes a
+	 * cached read safe: it can never outlive a known mutation.
+	 */
+	private _installRepositoryObservations(): void {
+		this._unsubscribeRepositoryObservations = this.agent.subscribe((event) =>
+			this._repositoryObservations.onAgentEvent(event, this._cwd),
+		);
+	}
 
 	/**
 	 * Wire the passive session telemetry collector.
@@ -1353,6 +1379,8 @@ export class AgentSession {
 		this._disconnectFromAgent();
 		this._unsubscribeTelemetry?.();
 		this._unsubscribeTelemetry = undefined;
+		this._unsubscribeRepositoryObservations?.();
+		this._unsubscribeRepositoryObservations = undefined;
 		for (const unsubscribe of this._telemetryUnsubscribers) {
 			unsubscribe();
 		}
@@ -3559,7 +3587,7 @@ export class AgentSession {
 					]),
 				)
 			: createAllToolDefinitions(this._cwd, {
-					read: { autoResizeImages },
+					read: { autoResizeImages, observations: this._repositoryObservations },
 					bash: { commandPrefix: shellCommandPrefix, shellPath },
 				});
 
@@ -4266,13 +4294,16 @@ export class AgentSession {
 	 */
 	getTelemetrySnapshot(): SessionTelemetrySnapshot {
 		const stats = this.getSessionStats();
-		return this.telemetry.snapshot({
-			inputTokens: stats.tokens.input,
-			outputTokens: stats.tokens.output,
-			cacheReadTokens: stats.tokens.cacheRead,
-			cacheWriteTokens: stats.tokens.cacheWrite,
-			costUsd: stats.cost,
-		});
+		return this.telemetry.snapshot(
+			{
+				inputTokens: stats.tokens.input,
+				outputTokens: stats.tokens.output,
+				cacheReadTokens: stats.tokens.cacheRead,
+				cacheWriteTokens: stats.tokens.cacheWrite,
+				costUsd: stats.cost,
+			},
+			this._repositoryObservations.stats(),
+		);
 	}
 
 	getContextUsage(): ContextUsage | undefined {

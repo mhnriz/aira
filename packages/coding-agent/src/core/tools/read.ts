@@ -3,7 +3,7 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { Api, ImageContent, Model, TextContent } from "@earendil-works/pi-ai";
 import { Text } from "@earendil-works/pi-tui";
 import { constants } from "fs";
-import { access as fsAccess, readFile as fsReadFile } from "fs/promises";
+import { access as fsAccess, readFile as fsReadFile, stat as fsStat } from "fs/promises";
 import { type Static, Type } from "typebox";
 import { getReadmePath } from "../../config.ts";
 import { keyHint, keyText } from "../../modes/interactive/components/keybinding-hints.ts";
@@ -13,6 +13,11 @@ import { detectSupportedImageMimeTypeFromFile } from "../../utils/mime.ts";
 import { formatPathRelativeToCwdOrAbsolute } from "../../utils/paths.ts";
 import { getExperimentalToolSampling } from "../experimental.ts";
 import type { ExtensionContext, ToolDefinition, ToolRenderResultOptions } from "../extensions/types.ts";
+import {
+	fingerprintsMatch,
+	type RepositoryFileFingerprint,
+	type RepositoryObservationStore,
+} from "../repository-observations.ts";
 import { buildCompactRow, type CompactStatus, compactStatusGlyph } from "./compact.ts";
 import { resolveReadPathAsync, resolveToCwd } from "./path-utils.ts";
 import { getTextOutput, renderToolPath, replaceTabs, str } from "./render-utils.ts";
@@ -54,12 +59,18 @@ export interface ReadOperations {
 	access: (absolutePath: string) => Promise<void>;
 	/** Detect image MIME type, return null or undefined for non-images */
 	detectImageMimeType?: (absolutePath: string) => Promise<string | null | undefined>;
+	/** Stat the file for cheap freshness checks. Omit to disable observation reuse. */
+	stat?: (absolutePath: string) => Promise<RepositoryFileFingerprint>;
 }
 
 const defaultReadOperations: ReadOperations = {
 	readFile: (path) => fsReadFile(path),
 	access: (path) => fsAccess(path, constants.R_OK),
 	detectImageMimeType: detectSupportedImageMimeTypeFromFile,
+	stat: async (path) => {
+		const stats = await fsStat(path);
+		return { isFile: stats.isFile(), mtimeMs: stats.mtimeMs, size: stats.size };
+	},
 };
 
 export interface ReadToolOptions {
@@ -67,6 +78,8 @@ export interface ReadToolOptions {
 	autoResizeImages?: boolean;
 	/** Custom operations for file reading. Default: local filesystem */
 	operations?: ReadOperations;
+	/** Session-local repository observations, used to avoid provably redundant reads. */
+	observations?: RepositoryObservationStore;
 }
 
 type ReadRenderArgs = { path?: string; file_path?: string; offset?: number; limit?: number };
@@ -245,6 +258,117 @@ function formatReadResult(
 	return text;
 }
 
+interface TextReadRegion {
+	/** Available lines, starting at `regionStart`. */
+	lines: string[];
+	/** Absolute 0-based index of the first available line. */
+	regionStart: number;
+	/** Total line count of the whole file. */
+	totalFileLines: number;
+}
+
+interface TextReadRender {
+	outputText: string;
+	details: ReadToolDetails | undefined;
+	/** Absolute 0-based index of the first retained line. */
+	retainedStart: number;
+	/** Retained lines at `retainedStart`; 0 when nothing is safe to reuse. */
+	retainedCount: number;
+	/** Whether the retained region reaches the end of the file. */
+	reachesEof: boolean;
+}
+
+/**
+ * Render a text read from a contiguous line region.
+ *
+ * A physical read passes the whole file (`regionStart` 0); an observation reuse
+ * passes a retained sub-region. Both run the same offset, limit, truncation and
+ * continuation-notice logic, so a reused read is byte-for-byte the read the
+ * filesystem would have produced.
+ */
+function renderTextRead(
+	region: TextReadRegion,
+	offset: number | undefined,
+	limit: number | undefined,
+	path: string,
+): TextReadRender {
+	const { lines, regionStart, totalFileLines } = region;
+	const startLine = offset ? Math.max(0, offset - 1) : 0;
+	const startLineDisplay = startLine + 1;
+	if (startLine >= totalFileLines) {
+		throw new Error(`Offset ${offset} is beyond end of file (${totalFileLines} lines total)`);
+	}
+	const localStart = startLine - regionStart;
+	if (localStart < 0 || localStart >= lines.length) {
+		throw new Error(`Offset ${offset} is beyond end of file (${totalFileLines} lines total)`);
+	}
+	let selectedContent: string;
+	let userLimitedLines: number | undefined;
+	let selectedLines: number;
+	// If limit is specified by the user, honor it first. Otherwise truncateHead decides.
+	if (limit !== undefined) {
+		const endLine = Math.min(startLine + limit, totalFileLines);
+		const localEnd = Math.min(endLine - regionStart, lines.length);
+		selectedContent = lines.slice(localStart, localEnd).join("\n");
+		userLimitedLines = endLine - startLine;
+		selectedLines = localEnd - localStart;
+	} else {
+		selectedContent = lines.slice(localStart).join("\n");
+		selectedLines = lines.length - localStart;
+	}
+	// Apply truncation, respecting both line and byte limits.
+	const truncation = truncateHead(selectedContent);
+	let outputText: string;
+	let details: ReadToolDetails | undefined;
+	let retainedCount: number;
+	let reachesEof: boolean;
+	if (truncation.firstLineExceedsLimit) {
+		// First line alone exceeds the byte limit. Point the model at a bash fallback.
+		const firstLineSize = formatSize(Buffer.byteLength(lines[localStart], "utf-8"));
+		outputText = `[Line ${startLineDisplay} is ${firstLineSize}, exceeds ${formatSize(DEFAULT_MAX_BYTES)} limit. Use bash: sed -n '${startLineDisplay}p' ${path} | head -c ${DEFAULT_MAX_BYTES}]`;
+		details = { truncation };
+		retainedCount = 0;
+		reachesEof = false;
+	} else if (truncation.truncated) {
+		// Truncation occurred. Build an actionable continuation notice.
+		const endLineDisplay = startLineDisplay + truncation.outputLines - 1;
+		const nextOffset = endLineDisplay + 1;
+		outputText = truncation.content;
+		if (truncation.truncatedBy === "lines") {
+			outputText += `\n\n[Showing lines ${startLineDisplay}-${endLineDisplay} of ${totalFileLines}. Use offset=${nextOffset} to continue.]`;
+		} else {
+			outputText += `\n\n[Showing lines ${startLineDisplay}-${endLineDisplay} of ${totalFileLines} (${formatSize(DEFAULT_MAX_BYTES)} limit). Use offset=${nextOffset} to continue.]`;
+		}
+		details = { truncation };
+		retainedCount = truncation.outputLines;
+		reachesEof = false;
+	} else if (userLimitedLines !== undefined && startLine + userLimitedLines < totalFileLines) {
+		// User-specified limit stopped early, but the file still has more content.
+		const remaining = totalFileLines - (startLine + userLimitedLines);
+		const nextOffset = startLine + userLimitedLines + 1;
+		outputText = `${truncation.content}\n\n[${remaining} more lines in file. Use offset=${nextOffset} to continue.]`;
+		retainedCount = selectedLines;
+		reachesEof = false;
+	} else {
+		// No truncation and no remaining user-limited content.
+		outputText = truncation.content;
+		retainedCount = selectedLines;
+		reachesEof = startLine + selectedLines >= totalFileLines;
+	}
+	return { outputText, details, retainedStart: startLine, retainedCount, reachesEof };
+}
+
+async function statFingerprint(
+	stat: (absolutePath: string) => Promise<RepositoryFileFingerprint>,
+	absolutePath: string,
+): Promise<RepositoryFileFingerprint | undefined> {
+	try {
+		return await stat(absolutePath);
+	} catch {
+		return undefined;
+	}
+}
+
 export function createReadToolDefinition(
 	cwd: string,
 	options?: ReadToolOptions,
@@ -308,57 +432,66 @@ export function createReadToolDefinition(
 									];
 								}
 							} else {
-								// Read text content.
-								const buffer = await ops.readFile(absolutePath);
-								const textContent = buffer.toString("utf-8");
-								const allLines = textContent.split("\n");
-								const totalFileLines = allLines.length;
-								// Apply offset if specified. Convert from 1-indexed input to 0-indexed array access.
-								const startLine = offset ? Math.max(0, offset - 1) : 0;
-								const startLineDisplay = startLine + 1;
-								// Check if offset is out of bounds.
-								if (startLine >= allLines.length) {
-									throw new Error(`Offset ${offset} is beyond end of file (${allLines.length} lines total)`);
-								}
-								let selectedContent: string;
-								let userLimitedLines: number | undefined;
-								// If limit is specified by the user, honor it first. Otherwise truncateHead decides.
-								if (limit !== undefined) {
-									const endLine = Math.min(startLine + limit, allLines.length);
-									selectedContent = allLines.slice(startLine, endLine).join("\n");
-									userLimitedLines = endLine - startLine;
+								// Read text content. Reuse a fresh observation when it provably
+								// still describes the current file version; otherwise read.
+								const observations = options?.observations;
+								const observationKey = observations?.observationKey(path, ctx?.cwd || cwd);
+								const beforeFingerprint =
+									observations && ops.stat ? await statFingerprint(ops.stat, absolutePath) : undefined;
+								if (aborted) return;
+								const observation = observationKey
+									? observations?.lookup(observationKey, beforeFingerprint, { offset, limit })
+									: undefined;
+								if (observation) {
+									const rendered = renderTextRead(
+										{
+											lines: observation.lines,
+											regionStart: observation.startLine,
+											totalFileLines: observation.totalFileLines,
+										},
+										offset,
+										limit,
+										path,
+									);
+									content = [{ type: "text", text: rendered.outputText }];
+									details = rendered.details;
 								} else {
-									selectedContent = allLines.slice(startLine).join("\n");
-								}
-								// Apply truncation, respecting both line and byte limits.
-								const truncation = truncateHead(selectedContent);
-								let outputText: string;
-								if (truncation.firstLineExceedsLimit) {
-									// First line alone exceeds the byte limit. Point the model at a bash fallback.
-									const firstLineSize = formatSize(Buffer.byteLength(allLines[startLine], "utf-8"));
-									outputText = `[Line ${startLineDisplay} is ${firstLineSize}, exceeds ${formatSize(DEFAULT_MAX_BYTES)} limit. Use bash: sed -n '${startLineDisplay}p' ${path} | head -c ${DEFAULT_MAX_BYTES}]`;
-									details = { truncation };
-								} else if (truncation.truncated) {
-									// Truncation occurred. Build an actionable continuation notice.
-									const endLineDisplay = startLineDisplay + truncation.outputLines - 1;
-									const nextOffset = endLineDisplay + 1;
-									outputText = truncation.content;
-									if (truncation.truncatedBy === "lines") {
-										outputText += `\n\n[Showing lines ${startLineDisplay}-${endLineDisplay} of ${totalFileLines}. Use offset=${nextOffset} to continue.]`;
-									} else {
-										outputText += `\n\n[Showing lines ${startLineDisplay}-${endLineDisplay} of ${totalFileLines} (${formatSize(DEFAULT_MAX_BYTES)} limit). Use offset=${nextOffset} to continue.]`;
+									const buffer = await ops.readFile(absolutePath);
+									if (aborted) return;
+									const textContent = buffer.toString("utf-8");
+									const allLines = textContent.split("\n");
+									const rendered = renderTextRead(
+										{ lines: allLines, regionStart: 0, totalFileLines: allLines.length },
+										offset,
+										limit,
+										path,
+									);
+									content = [{ type: "text", text: rendered.outputText }];
+									details = rendered.details;
+									if (observations && observationKey && ops.stat && rendered.retainedCount > 0) {
+										const afterFingerprint = await statFingerprint(ops.stat, absolutePath);
+										if (
+											beforeFingerprint &&
+											afterFingerprint &&
+											fingerprintsMatch(beforeFingerprint, afterFingerprint)
+										) {
+											observations.record(
+												observationKey,
+												{
+													path: absolutePath,
+													startLine: rendered.retainedStart,
+													lines: allLines.slice(
+														rendered.retainedStart,
+														rendered.retainedStart + rendered.retainedCount,
+													),
+													totalFileLines: allLines.length,
+													reachesEof: rendered.reachesEof,
+												},
+												afterFingerprint,
+											);
+										}
 									}
-									details = { truncation };
-								} else if (userLimitedLines !== undefined && startLine + userLimitedLines < allLines.length) {
-									// User-specified limit stopped early, but the file still has more content.
-									const remaining = allLines.length - (startLine + userLimitedLines);
-									const nextOffset = startLine + userLimitedLines + 1;
-									outputText = `${truncation.content}\n\n[${remaining} more lines in file. Use offset=${nextOffset} to continue.]`;
-								} else {
-									// No truncation and no remaining user-limited content.
-									outputText = truncation.content;
 								}
-								content = [{ type: "text", text: outputText }];
 							}
 
 							if (aborted) return;

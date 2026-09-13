@@ -1,6 +1,7 @@
 import { stat } from "node:fs/promises";
 import type { AgentEvent, ModelContextPayloadMeasurement } from "@earendil-works/pi-agent-core";
 import type { AiraContextCompactionReport } from "../aira/context-compaction.ts";
+import type { RepositoryObservationStats } from "./repository-observations.ts";
 import { resolveReadPathAsync, resolveToCwd } from "./tools/path-utils.ts";
 
 /**
@@ -21,11 +22,12 @@ import { resolveReadPathAsync, resolveToCwd } from "./tools/path-utils.ts";
  * Stable machine-readable schema identifier for `SessionTelemetrySnapshot`.
  *
  * Versioning policy: additive, backward-compatible extensions to the snapshot
- * bump the minor version (1.0.0 → 1.1.0 → 1.2.0); renames/removals/semantic
- * changes bump the major version. The Step 2 context-payload block and the
- * Step 4 compaction block are additive.
+ * bump the minor version (1.0.0 → 1.1.0 → 1.2.0 → 1.3.0); renames/removals/semantic
+ * changes bump the major version. The Step 2 context-payload block, the
+ * Step 4 compaction block and the Step 7 repository observation counters are
+ * additive.
  */
-export const SESSION_TELEMETRY_SCHEMA_VERSION = "1.2.0";
+export const SESSION_TELEMETRY_SCHEMA_VERSION = "1.3.0";
 
 /** Cap on retained per-request context summaries (bounded ring, newest first). */
 export const CONTEXT_REQUEST_HISTORY_LIMIT = 10;
@@ -184,6 +186,13 @@ export interface SessionTelemetrySnapshot {
 		uniqueFilesRead: number;
 		repeatedUnchangedReads: number;
 		searches: number;
+		/** Reads served from a fresh repository observation (no content read). */
+		observationHits: number;
+		/** Reads not served from an observation (`reads - observationHits`). */
+		observationMisses: number;
+		/** Stored observations discarded because a mutation or a detected
+		 * change in the file made them untrustworthy. */
+		observationInvalidations: number;
 	};
 	editing: {
 		/** One per edit/write tool invocation. */
@@ -792,7 +801,11 @@ export class SessionTelemetry {
 	 * authoritative usage accounting (AgentSession.getSessionStats), so the
 	 * collector never estimates tokens.
 	 */
-	snapshot(usage: SessionTelemetryUsage): SessionTelemetrySnapshot {
+	snapshot(
+		usage: SessionTelemetryUsage,
+		repositoryObservations?: RepositoryObservationStats,
+	): SessionTelemetrySnapshot {
+		const observationHits = repositoryObservations?.observationHits ?? 0;
 		return {
 			schemaVersion: SESSION_TELEMETRY_SCHEMA_VERSION,
 			usage: {
@@ -811,6 +824,9 @@ export class SessionTelemetry {
 				uniqueFilesRead: this.uniqueFilesRead.size,
 				repeatedUnchangedReads: this.repeatedUnchangedReads,
 				searches: this.searches,
+				observationHits,
+				observationMisses: Math.max(0, this.reads - observationHits),
+				observationInvalidations: repositoryObservations?.observationInvalidations ?? 0,
 			},
 			editing: {
 				attempts: this.editAttempts,
@@ -898,6 +914,9 @@ export function renderSessionTelemetryText(snapshot: SessionTelemetrySnapshot): 
 	lines.push(`  unique files       ${formatCount(repository.uniqueFilesRead)}`);
 	lines.push(`  repeated reads     ${formatCount(repository.repeatedUnchangedReads)}`);
 	lines.push(`  searches           ${formatCount(repository.searches)}`);
+	lines.push(`  observation hits   ${formatCount(repository.observationHits)}`);
+	lines.push(`  observation misses ${formatCount(repository.observationMisses)}`);
+	lines.push(`  invalidated        ${formatCount(repository.observationInvalidations)}`);
 	lines.push("");
 	lines.push("Editing");
 	lines.push(`  attempts           ${formatCount(editing.attempts)}`);
