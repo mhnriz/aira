@@ -6,6 +6,12 @@ import * as Diff from "diff";
 import { constants } from "fs";
 import { access, readFile } from "fs/promises";
 import { splitBom } from "../../utils/text.ts";
+import {
+	type EditConflict,
+	type EditRecoveryMetadata,
+	planStaleRegionRecovery,
+	renderEditConflict,
+} from "./edit-recovery.ts";
 import { resolveToCwd } from "./path-utils.ts";
 
 export function detectLineEnding(content: string): "\r\n" | "\n" {
@@ -198,6 +204,11 @@ export interface AppliedEditsResult {
 	newContent: string;
 }
 
+export interface AppliedEditsWithRecoveryResult extends AppliedEditsResult {
+	/** Set when the exact attempt failed once and the tool re-anchored the region. */
+	recovery?: EditRecoveryMetadata;
+}
+
 /**
  * Find oldText in content, trying exact match first, then fuzzy match.
  * When fuzzy matching is used, the returned contentForReplacement is the
@@ -250,25 +261,55 @@ function countOccurrences(content: string, oldText: string): number {
 	return fuzzyContent.split(fuzzyOldText).length - 1;
 }
 
+/**
+ * Content-match conflict raised while applying edits, as opposed to a
+ * filesystem/permission failure. Carries enough structure for the recovery
+ * path and for telemetry to distinguish the two.
+ */
+export class EditApplyConflictError extends Error {
+	readonly reason: "missing" | "ambiguous";
+	readonly editIndex: number;
+	/** Number of exact matches when `reason` is "ambiguous". */
+	readonly occurrences: number | undefined;
+
+	constructor(reason: "missing" | "ambiguous", message: string, editIndex: number, occurrences?: number) {
+		super(message);
+		this.name = "EditApplyConflictError";
+		this.reason = reason;
+		this.editIndex = editIndex;
+		this.occurrences = occurrences;
+	}
+}
+
 function getNotFoundError(path: string, editIndex: number, totalEdits: number): Error {
 	if (totalEdits === 1) {
-		return new Error(
+		return new EditApplyConflictError(
+			"missing",
 			`Could not find the exact text in ${path}. The old text must match exactly including all whitespace and newlines.`,
+			editIndex,
 		);
 	}
-	return new Error(
+	return new EditApplyConflictError(
+		"missing",
 		`Could not find edits[${editIndex}] in ${path}. The oldText must match exactly including all whitespace and newlines.`,
+		editIndex,
 	);
 }
 
 function getDuplicateError(path: string, editIndex: number, totalEdits: number, occurrences: number): Error {
 	if (totalEdits === 1) {
-		return new Error(
+		return new EditApplyConflictError(
+			"ambiguous",
 			`Found ${occurrences} occurrences of the text in ${path}. The text must be unique. Please provide more context to make it unique.`,
+			editIndex,
+			occurrences,
 		);
 	}
-	return new Error(
+	return new EditApplyConflictError(
+		"ambiguous",
 		`Found ${occurrences} occurrences of edits[${editIndex}] in ${path}. Each oldText must be unique. Please provide more context to make it unique.`,
+		editIndex,
+		occurrences,
 	);
 }
 
@@ -359,6 +400,94 @@ export function applyEditsToNormalizedContent(
 	}
 
 	return { baseContent, newContent };
+}
+
+/**
+ * Apply edits, allowing at most ONE bounded structural recovery.
+ *
+ * The exact attempt runs first. If it fails with a content-match conflict and a
+ * single safe stale region can be derived, the intended edit is re-anchored to
+ * the current file text and re-applied exactly once. Any other failure (missing
+ * file, permissions, overlap, no-op, multiple matches, no candidate, or a
+ * candidate that still does not apply cleanly) returns a structured
+ * EDIT_CONFLICT error, or passes the original error through unchanged.
+ *
+ * This never loops: one failed exact attempt, at most one recovery attempt.
+ */
+export function applyEditsWithRecovery(
+	normalizedContent: string,
+	edits: Edit[],
+	path: string,
+): AppliedEditsWithRecoveryResult {
+	try {
+		return applyEditsToNormalizedContent(normalizedContent, edits, path);
+	} catch (error) {
+		if (!(error instanceof EditApplyConflictError)) {
+			throw error;
+		}
+
+		// Multiple exact matches must not be resolved by guessing.
+		if (error.reason === "ambiguous") {
+			throw new Error(
+				renderEditConflict(
+					path,
+					{
+						reason: "multiple_candidates",
+						candidateCount: error.occurrences ?? 0,
+						fileChanged: "unknown",
+						intendedRegion: null,
+						closestRegion: null,
+						recommendation: "reread the file and retry with current exact text",
+					},
+					error.message,
+				),
+			);
+		}
+
+		const failingEdit = edits[error.editIndex];
+		if (!failingEdit) {
+			throw error;
+		}
+
+		const plan = planStaleRegionRecovery(normalizedContent, failingEdit);
+		if (plan.status === "conflict") {
+			throw new EditConflictError(plan.conflict, renderEditConflict(path, plan.conflict, error.message));
+		}
+
+		const recoveredEdits = edits.map((edit, index) =>
+			index === error.editIndex ? { oldText: plan.region.oldText, newText: plan.region.newText } : edit,
+		);
+
+		try {
+			const applied = applyEditsToNormalizedContent(normalizedContent, recoveredEdits, path);
+			return { ...applied, recovery: plan.region.metadata };
+		} catch {
+			// The single candidate did not survive exact application. Never retry.
+			const conflict: EditConflict = {
+				reason: "unsafe_recovery",
+				candidateCount: 1,
+				fileChanged: plan.region.metadata.fileChanged,
+				intendedRegion: null,
+				closestRegion: plan.region.regionHint,
+				recommendation: "reread the relevant region and retry with current exact text",
+			};
+			throw new EditConflictError(conflict, renderEditConflict(path, conflict, error.message));
+		}
+	}
+}
+
+/**
+ * Error carrying the structured conflict that produced it, for machine-readable
+ * consumers. The message is the human-readable EDIT_CONFLICT rendering.
+ */
+export class EditConflictError extends Error {
+	readonly editConflict: EditConflict;
+
+	constructor(editConflict: EditConflict, message: string) {
+		super(message);
+		this.name = "EditConflictError";
+		this.editConflict = editConflict;
+	}
 }
 
 /** Generate a standard unified patch. */
@@ -533,7 +662,7 @@ export async function computeEditsDiff(
 		// Strip BOM before matching (LLM won't include invisible BOM in oldText)
 		const { text: content } = splitBom(rawContent);
 		const normalizedContent = normalizeToLF(content);
-		const { baseContent, newContent } = applyEditsToNormalizedContent(normalizedContent, edits, path);
+		const { baseContent, newContent } = applyEditsWithRecovery(normalizedContent, edits, path);
 
 		// Generate the diff
 		return generateDiffString(baseContent, newContent);

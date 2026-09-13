@@ -274,7 +274,16 @@ export {
 	type SkillFrontmatter,
 } from "./core/skills.ts";
 export { createSyntheticSourceInfo } from "./core/source-info.ts";
-export { type EditDiffResult, generateDiffString, generateUnifiedPatch } from "./core/tools/edit-diff.ts";
+export {
+	type AppliedEditsWithRecoveryResult,
+	applyEditsWithRecovery,
+	EditApplyConflictError,
+	EditConflictError,
+	type EditDiffResult,
+	generateDiffString,
+	generateUnifiedPatch,
+} from "./core/tools/edit-diff.ts";
+export type { EditConflict, EditRecoveryMetadata, EditRegionHint } from "./core/tools/edit-recovery.ts";
 // Tools
 export {
 	type BashOperations,

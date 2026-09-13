@@ -186,10 +186,15 @@ export interface SessionTelemetrySnapshot {
 		searches: number;
 	};
 	editing: {
+		/** One per edit/write tool invocation. */
 		attempts: number;
+		/** Invocations that ended successfully (including recovered ones). */
 		successful: number;
+		/** Failed exact-match attempts, including the pre-recovery miss of a recovered edit. */
 		failed: number;
+		/** Content-match conflicts (missing/ambiguous/EDIT_CONFLICT results). */
 		conflicts: number;
+		/** Automatic recovery retry, or a model retry after a failed edit to the same file. */
 		retries: number;
 	};
 	validation: {
@@ -225,16 +230,30 @@ const REPOSITORY_TOOL_NAMES = new Set([...READ_TOOL_NAMES, ...SEARCH_TOOL_NAMES]
 
 /**
  * Error messages produced by the edit tool's exact-match machinery
- * (core/tools/edit-diff.ts). These are the two conflict classes: the
- * oldText did not match exactly anywhere, or matched more than once.
+ * (core/tools/edit-diff.ts). These are the conflict classes: the oldText did not
+ * match exactly anywhere, matched more than once, or failed a bounded recovery
+ * so the tool returned a structured EDIT_CONFLICT result.
  */
 const EDIT_CONFLICT_ERROR_PATTERNS = [
 	/The oldText must match exactly including all whitespace and newlines/,
 	/Each oldText must be unique/,
+	/^EDIT_CONFLICT$/m,
 ] as const;
 
 function isEditConflictError(message: string): boolean {
 	return EDIT_CONFLICT_ERROR_PATTERNS.some((pattern) => pattern.test(message));
+}
+
+/**
+ * Whether a successful edit result reports that the initial exact attempt
+ * missed and the tool re-anchored the region once (edit tool details.recovery).
+ */
+function toolResultRecoveredEdit(result: unknown): boolean {
+	if (!result || typeof result !== "object") return false;
+	const details = (result as { details?: unknown }).details;
+	if (!details || typeof details !== "object") return false;
+	const recovery = (details as { recovery?: unknown }).recovery;
+	return typeof recovery === "object" && recovery !== null;
 }
 
 /** Extract the plain text of a tool result content for error classification. */
@@ -516,7 +535,7 @@ export class SessionTelemetry {
 					}
 				}
 				if (EDIT_TOOL_NAMES.has(pending.name)) {
-					this.recordEditEnd(pending, event.isError);
+					this.recordEditEnd(pending, event.isError, !event.isError && toolResultRecoveredEdit(event.result));
 				}
 				return;
 			}
@@ -589,7 +608,7 @@ export class SessionTelemetry {
 		this.pendingToolCalls.set(toolCallId, { name, path: rawPath, resolvedPath, startedAtMs: nowMs });
 	}
 
-	private recordEditEnd(pending: PendingToolCall, isError: boolean): void {
+	private recordEditEnd(pending: PendingToolCall, isError: boolean, recovered: boolean): void {
 		if (!pending.resolvedPath) return;
 		const outcomeKey = `${pending.name}\u0000${pending.resolvedPath}`;
 		const previous = this.lastEditOutcome.get(outcomeKey);
@@ -602,7 +621,13 @@ export class SessionTelemetry {
 		} else {
 			this.editSuccesses++;
 			this.fileMutationSeqs.set(pending.resolvedPath, (this.fileMutationSeqs.get(pending.resolvedPath) ?? 0) + 1);
-			if (previous?.failed) {
+			if (recovered) {
+				// The initial exact attempt missed and the tool re-anchored once:
+				// record the conflict and the automatic retry, then the final success.
+				this.editFailures++;
+				this.editConflicts++;
+				this.editRetries++;
+			} else if (previous?.failed) {
 				this.editRetries++;
 			}
 			this.lastEditOutcome.set(outcomeKey, { tool: pending.name, failed: false });

@@ -110,6 +110,22 @@
   description and system-prompt guidelines), no classifier, no extra model
   call, and the `ask_user` tool surface, runtime behavior, and
   `agent.askUser` telemetry are unchanged.
+- **Aira**: Safe edit-conflict recovery. A failed exact `edit` now gets ONE
+  bounded recovery attempt: the tool derives the changed line block from the
+  line-wise common prefix/suffix of `oldText`/`newText`, locates it as exactly
+  one brace-balanced region in the current file, re-anchors the intended edit,
+  and applies it once. Anything ambiguous, missing, or unsafe (multiple
+  candidates, no candidate, pure insertion, region crossing a declaration
+  boundary, or multiple exact matches) performs no mutation and returns a
+  concise structured `EDIT_CONFLICT` result with `reason`, `file_changed`,
+  `candidate_count`, an optional bounded `closest_region` hint, and a
+  reread/re-anchor recommendation instead of guessing. Pure helper with no
+  parser, embedding, semantic search, or model call; normal exact edits keep
+  the existing fast path. Recovered edits are truthfully reflected in
+  `/telemetry` `editing` counters (failed/conflicts/retries increment once) via
+  additive `details.recovery` metadata; telemetry schema stays 1.2.0 and
+  `ask_user` is never invoked for edit conflicts. Governed by
+  `src/core/tools/edit-recovery.ts`.
 
 ### Fixed
 

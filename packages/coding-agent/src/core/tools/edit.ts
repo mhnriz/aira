@@ -11,7 +11,7 @@ import { getExperimentalToolSampling } from "../experimental.ts";
 import type { ExtensionContext, ToolDefinition } from "../extensions/types.ts";
 import { buildCompactRow, type CompactStatus, diffDelta, formatDiffDeltaParts } from "./compact.ts";
 import {
-	applyEditsToNormalizedContent,
+	applyEditsWithRecovery,
 	computeEditsDiff,
 	detectLineEnding,
 	type Edit,
@@ -22,6 +22,7 @@ import {
 	normalizeToLF,
 	restoreLineEndings,
 } from "./edit-diff.ts";
+import type { EditRecoveryMetadata } from "./edit-recovery.ts";
 import { withFileMutationQueue } from "./file-mutation-queue.ts";
 import { resolveToCwd } from "./path-utils.ts";
 import { renderToolPath, str } from "./render-utils.ts";
@@ -62,6 +63,7 @@ export const editToolSystemPromptContribution = {
 		"When changing multiple separate locations in one file, use one edit call with multiple entries in edits[] instead of multiple edit calls",
 		"Each edits[].oldText is matched against the original file, not after earlier edits are applied. Do not emit overlapping or nested edits. Merge nearby changes into one edit.",
 		"Keep edits[].oldText as small as possible while still being unique in the file. Do not pad with large unchanged regions.",
+		"If the file changed since you read it, the tool may re-anchor one stale old_text to the current file automatically. An EDIT_CONFLICT result means it could not: reread the region and retry with current exact text instead of resending or widening oldText.",
 	],
 } as const;
 
@@ -89,6 +91,11 @@ export interface EditToolDetails {
 	patch: string;
 	/** Line number of the first change in the new file (for editor navigation) */
 	firstChangedLine?: number;
+	/**
+	 * Present only when the initial exact attempt missed and the tool re-anchored
+	 * the region automatically. Contains no source text.
+	 */
+	recovery?: EditRecoveryMetadata;
 }
 
 /**
@@ -377,7 +384,7 @@ export function createEditToolDefinition(
 				const { bom, text: content } = splitBom(rawContent);
 				const originalEnding = detectLineEnding(content);
 				const normalizedContent = normalizeToLF(content);
-				const { baseContent, newContent } = applyEditsToNormalizedContent(normalizedContent, edits, path);
+				const { baseContent, newContent, recovery } = applyEditsWithRecovery(normalizedContent, edits, path);
 				throwIfAborted();
 
 				const finalContent = bom + restoreLineEndings(newContent, originalEnding);
@@ -393,7 +400,7 @@ export function createEditToolDefinition(
 							text: `Successfully replaced ${edits.length} block(s) in ${path}.`,
 						},
 					],
-					details: { diff: diffResult.diff, patch, firstChangedLine: diffResult.firstChangedLine },
+					details: { diff: diffResult.diff, patch, firstChangedLine: diffResult.firstChangedLine, recovery },
 				};
 			});
 		},
