@@ -348,6 +348,11 @@ export class AiraTaskManager implements AiraTaskManagerHandle {
 				existing.status = childTaskStatus(run.status, run.phase);
 				existing.detail = detail;
 				existing.dependsOn = mapDependencies(run.dependencies);
+				if (run.error) {
+					existing.failureKind = run.error.kind;
+				} else {
+					delete existing.failureKind;
+				}
 				if (existing.status === "completed") {
 					existing.completedAt ??= run.completedAt;
 				}
@@ -365,6 +370,7 @@ export class AiraTaskManager implements AiraTaskManagerHandle {
 				childRunId: run.id,
 				childRole: run.role,
 				...(detail ? { detail } : {}),
+				...(run.error ? { failureKind: run.error.kind } : {}),
 			};
 			this.tasks.set(task.id, task);
 		}
@@ -524,11 +530,17 @@ function childTaskStatus(
 	}
 }
 
+/**
+ * One bounded line for a child row. The failure KIND comes first so a
+ * capability/environment failure is not read as failed engineering work, and a
+ * pre-execution failure is marked as such (the delegated task never ran).
+ */
 function childTaskDetail(run: import("../orchestration/types.ts").AiraChildRun): string | undefined {
 	if (!run.error) {
 		return undefined;
 	}
-	return `${run.error.category}: ${run.error.message.slice(0, 120)}`;
+	const notAttempted = run.error.taskStatus === "not_attempted" ? " (task not attempted)" : "";
+	return `${run.error.kind} · ${run.error.category}: ${run.error.message.slice(0, 100)}${notAttempted}`;
 }
 
 function rowProjection(task: AiraTask): AiraTasksStatus["rows"][number] {
@@ -541,6 +553,7 @@ function rowProjection(task: AiraTask): AiraTasksStatus["rows"][number] {
 		...(task.childRunId ? { childRunId: task.childRunId } : {}),
 		...(task.childRole ? { childRole: task.childRole } : {}),
 		...(task.detail ? { detail: task.detail } : {}),
+		...(task.failureKind ? { failureKind: task.failureKind } : {}),
 	};
 }
 

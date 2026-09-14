@@ -143,6 +143,26 @@
   gain `observationHits`/`observationMisses`/`observationInvalidations` (schema
   1.3.0) while `reads` and `repeatedUnchangedReads` keep their prior meaning.
   Governed by `src/core/repository-observations.ts`.
+- **Aira**: Truthful task vs capability failure classification. A failed child
+  run is now classified once, deterministically, as `task_failure` (the child
+  ran and the delegated work did not meet its acceptance criteria),
+  `capability_failure` (a required Aira capability, provider, or child-session
+  mechanism could not run the work), `environment_failure` (missing executable,
+  permission, unsupported platform), `timeout`, `cancelled`, or
+  `unknown_failure`. Classification uses structured evidence only: typed Aira
+  capability/environment errors, Node error codes, provider status/codes, and
+  explicit timeout/cancel state; no LLM classifier, embeddings, or prose
+  heuristics, and unrecognized errors stay unknown. The original message and
+  structured code/component/operation are preserved with secret-bearing
+  provider material redacted, and `taskStatus` records whether the delegated
+  work was actually attempted. The parent receives a concise classified result
+  (`CHILD_CAPABILITY_FAILURE` and friends) instead of a bare `failed`, task rows
+  carry additive `failureKind` metadata without expanding the lifecycle state
+  machine, no automatic retry or primitive fallback is introduced, and
+  `ask_user` is never invoked for an ordinary capability failure. `/telemetry`
+  `agent` gains `childOutcomes` counters (completed/taskFailed/
+  capabilityFailed/environmentFailed/timedOut/cancelled/unknownFailed, schema
+  1.4.0). Governed by `src/aira/orchestration/failures.ts`.
 
 ### Fixed
 

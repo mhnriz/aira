@@ -81,6 +81,58 @@ export interface AiraOrchestrationToolRuntime {
 	cancel(runId?: string, reason?: string): ReturnType<AiraOrchestrationHandle["cancel"]>;
 }
 
+/**
+ * One bounded line for a settled child failure. The category comes first so the
+ * parent cannot read a capability/environment failure as failed engineering
+ * work; the concrete component/operation/code and whether the task was actually
+ * attempted follow. No stack traces, no provider payloads.
+ */
+function renderFailureLine(
+	taskId: string,
+	role: string,
+	failure: {
+		kind: string;
+		category: string;
+		message: string;
+		component?: string;
+		operation?: string;
+		code?: string;
+		taskStatus?: string;
+		retryableHint?: string;
+	},
+): string {
+	const evidence = [
+		failure.component ? `component ${failure.component}` : undefined,
+		failure.operation ? `operation ${failure.operation}` : undefined,
+		failure.code ? `code ${failure.code}` : undefined,
+		failure.taskStatus ? `task_status ${failure.taskStatus}` : undefined,
+		failure.retryableHint && failure.retryableHint !== "unknown" ? `retryable ${failure.retryableHint}` : undefined,
+	]
+		.filter((part): part is string => part !== undefined)
+		.join(" · ");
+	const recommendation = childFailureRecommendation(failure.kind);
+	const head = `- ${taskId} (${role}): CHILD_${failure.kind.toUpperCase()} [${failure.category}] — ${failure.message}`;
+	return `${head}\n  ${evidence}${evidence.length > 0 ? " · " : ""}recommendation: ${recommendation}`;
+}
+
+/** Concise parent reaction for each failure kind (no automatic retries). */
+function childFailureRecommendation(kind: string): string {
+	switch (kind) {
+		case "task_failure":
+			return "use the returned evidence to revise the work";
+		case "capability_failure":
+			return "diagnose the capability or continue directly; do not rebuild it from primitives";
+		case "environment_failure":
+			return "inspect or fix the environment where appropriate";
+		case "timeout":
+			return "retry with a narrower scope or continue directly";
+		case "cancelled":
+			return "respect the cancellation";
+		default:
+			return "inspect the evidence before deciding";
+	}
+}
+
 function renderRunLine(task: {
 	taskId: string;
 	role: string;
@@ -88,12 +140,25 @@ function renderRunLine(task: {
 	accepted: boolean;
 	reason?: string;
 	result?: unknown;
+	failure?: {
+		kind: string;
+		category: string;
+		message: string;
+		component?: string;
+		operation?: string;
+		code?: string;
+		taskStatus?: string;
+		retryableHint?: string;
+	};
 }): string {
 	if (!task.accepted) {
 		return `- ${task.taskId} (${task.role}): REFUSED — ${task.reason ?? "rejected"}`;
 	}
 	if (task.runId === undefined) {
 		return `- ${task.taskId} (${task.role}): accepted`;
+	}
+	if (task.failure) {
+		return renderFailureLine(task.taskId, task.role, task.failure);
 	}
 	if (task.result === undefined) {
 		return `- ${task.taskId} (${task.role}): run ${task.runId}`;
@@ -129,7 +194,17 @@ function renderStatus(status: AiraOrchestrationStatusSnapshot): string {
 	if (status.failures.length > 0) {
 		lines.push(`failures:`);
 		for (const failure of status.failures) {
-			lines.push(`- ${failure.taskId}: ${failure.category} — ${failure.message}`);
+			const evidence = [failure.component, failure.operation, failure.code]
+				.filter((part): part is string => part !== undefined)
+				.join("/");
+			const suffix = evidence.length > 0 ? ` (${evidence})` : "";
+			const attempted =
+				failure.taskStatus === "not_attempted"
+					? " · task not attempted"
+					: failure.taskStatus === "attempted"
+						? " · task attempted"
+						: "";
+			lines.push(`- ${failure.taskId}: ${failure.kind}${suffix} — ${failure.message}${attempted}`);
 		}
 	}
 	return lines.join("\n");
@@ -157,6 +232,7 @@ export function createAiraOrchestrationToolDefinitions(options: {
 			"Prefer await=false for long work, then poll agents_status; await=true blocks until settlement (bounded by per-child timeouts).",
 			"Do not delegate trivial tasks; children consume model tokens.",
 			"Declare requiredCapabilities for obvious execution or mutation work so the host can reject incompatible roles before invoking a child.",
+			"Read settled child results by failure kind: task_failure means the child ran and the evidence should revise the work; capability_failure/environment_failure mean the child mechanism could not run, so diagnose or continue directly instead of rewriting the failed capability with ad-hoc primitives.",
 		],
 		parameters: delegateSchema,
 		async execute(_toolCallId, params) {
@@ -239,5 +315,15 @@ type AiraOrchestrationStatusSnapshot = {
 		toolBudgetLimit?: number;
 		toolBudgetExtensions?: number;
 	}>;
-	failures: Array<{ taskId: string; category: string; message: string }>;
+	failures: Array<{
+		taskId: string;
+		kind: string;
+		category: string;
+		message: string;
+		component?: string;
+		operation?: string;
+		code?: string;
+		taskStatus?: string;
+		retryableHint?: string;
+	}>;
 };

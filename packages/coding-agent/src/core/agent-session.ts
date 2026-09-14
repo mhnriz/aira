@@ -1055,7 +1055,11 @@ export class AgentSession {
 			this._telemetryUnsubscribers.push(
 				this._airaOrchestration.subscribe((status) => {
 					for (const child of status.children) {
-						this.telemetry.observeChildRunId(child.id);
+						this.telemetry.observeChildRun({
+							id: child.id,
+							status: child.status,
+							...(child.error ? { failureKind: child.error.kind } : {}),
+						});
 					}
 				}),
 			);

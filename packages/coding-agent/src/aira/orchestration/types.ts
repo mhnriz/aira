@@ -47,6 +47,52 @@ export type AiraChildFailureCategory =
 	| "cancelled"
 	| "dependency-failed";
 
+/**
+ * Truthful failure classification: did the delegated work fail, or could a
+ * required Aira capability / provider / environment / child-session mechanism
+ * not run the work at all? Deterministic classification lives in ./failures.ts.
+ */
+export type AiraChildFailureKind =
+	| "task_failure"
+	| "capability_failure"
+	| "environment_failure"
+	| "timeout"
+	| "cancelled"
+	| "unknown_failure";
+
+/** Whether the delegated work was actually attempted before the failure. */
+export type AiraChildTaskExecutionStatus = "not_attempted" | "attempted" | "unknown";
+
+/** Advisory retryability metadata. Never triggers a retry by itself. */
+export type AiraRetryableHint = "yes" | "no" | "unknown";
+
+/** A required child capability that the runtime could not grant. */
+export interface AiraChildCapabilityGap {
+	capability: string;
+	component: string;
+	operation: string;
+	message: string;
+}
+
+/**
+ * Bounded, secret-sanitized failure envelope. Preserves the original error
+ * evidence (message, code, component, operation) while exposing the truthful
+ * failure kind, so the parent can decide the next action.
+ */
+export interface AiraChildFailureInfo {
+	kind: AiraChildFailureKind;
+	category: AiraChildFailureCategory;
+	message: string;
+	retryable: boolean;
+	retryableHint: AiraRetryableHint;
+	code?: string;
+	component?: string;
+	operation?: string;
+	taskStatus: AiraChildTaskExecutionStatus;
+	/** Required capabilities that were unavailable when the run launched. */
+	capabilityGaps?: AiraChildCapabilityGap[];
+}
+
 /** One dispatchable child task (the parent-owned contract). */
 export interface AiraChildTaskSpec {
 	/**
@@ -127,8 +173,8 @@ export interface AiraChildRun {
 	durationMs?: number;
 	/** Structured result when the child settled with a parseable result. */
 	result?: AiraChildResult;
-	/** Bounded failure telemetry (category + concise message). */
-	error?: { category: AiraChildFailureCategory; message: string; retryable: boolean };
+	/** Bounded failure telemetry (kind + category + preserved evidence). */
+	error?: AiraChildFailureInfo;
 	/** Real provider token usage when available. */
 	tokenUsage?: AiraChildTokenUsage;
 	/**
@@ -142,6 +188,8 @@ export interface AiraChildRun {
 	/** Number of progress-gated budget extensions granted for this run. */
 	toolBudgetExtensions?: number;
 	lastActivityAt?: number;
+	/** Required capabilities the runtime could not grant (bounded metadata). */
+	capabilityGaps?: AiraChildCapabilityGap[];
 }
 
 /** UI-ready child row (bounded; derived from AiraChildRun). */
@@ -165,8 +213,10 @@ export interface AiraChildSnapshot {
 	/** One-line result summary when settled with a result. */
 	resultSummary?: string;
 	tokenUsage?: AiraChildTokenUsage;
-	/** Bounded failure info (category + message) when the child failed. */
-	error?: { category: AiraChildFailureCategory; message: string; retryable: boolean };
+	/** Bounded failure info (kind + category + preserved evidence) when the child failed. */
+	error?: AiraChildFailureInfo;
+	/** Required capabilities the runtime could not grant (bounded metadata). */
+	capabilityGaps?: AiraChildCapabilityGap[];
 }
 
 /** Bounded settled-result evidence row. */
@@ -186,10 +236,19 @@ export interface AiraChildFailure {
 	id: string;
 	taskId: string;
 	role: AiraChildRole;
+	/** Truthful failure classification (task vs capability vs environment...). */
+	kind: AiraChildFailureKind;
 	category: AiraChildFailureCategory;
 	message: string;
 	timestamp: number;
 	retryable: boolean;
+	retryableHint: AiraRetryableHint;
+	/** Whether the delegated work was attempted before the failure. */
+	taskStatus: AiraChildTaskExecutionStatus;
+	/** Preserved structured evidence when the failure exposed it. */
+	code?: string;
+	component?: string;
+	operation?: string;
 }
 
 /** Canonical orchestration snapshot published into AiraSessionState.orchestration. */
@@ -233,5 +292,11 @@ export interface AiraOrchestrationBatchResult {
 		reason?: string;
 		/** Settled result when the batch awaited completion. */
 		result?: AiraChildResult | AiraChildRunStatus;
+		/**
+		 * Settled failure classification when the run did not produce a usable
+		 * result (failed/rejected/cancelled/timed-out). Lets the parent tell a
+		 * capability failure apart from a real task failure.
+		 */
+		failure?: AiraChildFailure;
 	}>;
 }

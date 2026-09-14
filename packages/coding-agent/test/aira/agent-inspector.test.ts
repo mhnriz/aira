@@ -9,6 +9,7 @@
 import { Container, ScrollView, setKeybindings, Text } from "@earendil-works/pi-tui";
 import { afterEach, describe, expect, it } from "vitest";
 import type { AiraChildEvent } from "../../src/aira/orchestration/events.ts";
+import { buildAiraChildFailure } from "../../src/aira/orchestration/failures.ts";
 import type { AiraOrchestrationHandle } from "../../src/aira/orchestration/manager.ts";
 import type { AiraChildRun, AiraOrchestrationStatus } from "../../src/aira/orchestration/types.ts";
 import type { AiraSessionState } from "../../src/aira/state.ts";
@@ -51,10 +52,13 @@ function statusOf(runs: readonly AiraChildRun[]): AiraOrchestrationStatus {
 				id: run.id,
 				taskId: run.taskId ?? run.id,
 				role: run.role,
+				kind: run.error!.kind,
 				category: run.error!.category,
 				message: run.error!.message,
+				retryable: run.error!.retryable,
+				retryableHint: run.error!.retryableHint,
+				taskStatus: run.error!.taskStatus,
 				timestamp: run.completedAt ?? Date.now(),
-				retryable: false,
 			})),
 		summary: running + pending > 0 ? `${running} running · ${pending} queued` : "idle",
 		updatedAt: Date.now(),
@@ -256,7 +260,14 @@ describe("Agent Inspector browser (Phase 12.x)", () => {
 					durationMs: 12_000,
 					toolBudgetUsed: 48,
 					toolBudgetLimit: 48,
-					error: { category: "tool-budget-exceeded", message: "child exceeded its tool budget", retryable: false },
+					error: buildAiraChildFailure({
+						kind: "task_failure",
+						category: "tool-budget-exceeded",
+						message: "child exceeded its tool budget",
+						component: "child-run",
+						operation: "tool-budget",
+						taskStatus: "attempted",
+					}),
 				}),
 			],
 		});
@@ -425,11 +436,14 @@ describe("Agent Inspector transcript (Phase 12.x)", () => {
 		viewChild(harness);
 		harness.orch.runs[0]!.status = "failed";
 		harness.orch.runs[0]!.phase = "settled";
-		harness.orch.runs[0]!.error = {
+		harness.orch.runs[0]!.error = buildAiraChildFailure({
+			kind: "task_failure",
 			category: "tool-budget-exceeded",
 			message: "child exceeded its tool budget",
-			retryable: false,
-		};
+			component: "child-run",
+			operation: "tool-budget",
+			taskStatus: "attempted",
+		});
 		harness.orch.emit("r1", {
 			kind: "failure",
 			at: now,
@@ -713,7 +727,7 @@ describe("Agent Inspector integration (Phase 12.x)", () => {
 					phase: "settled",
 					completedAt: now,
 					durationMs: 1000,
-					error: { category: "driver", message: "boom", retryable: false },
+					error: buildAiraChildFailure({ category: "driver", message: "boom" }),
 				}),
 			],
 		});

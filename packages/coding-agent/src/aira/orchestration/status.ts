@@ -59,6 +59,7 @@ export function toAiraChildSnapshot(run: AiraChildRun): AiraChildSnapshot {
 		...(run.result ? { resultSummary: run.result.summary } : {}),
 		...(run.tokenUsage ? { tokenUsage: run.tokenUsage } : {}),
 		...(run.error ? { error: run.error } : {}),
+		...(run.capabilityGaps && run.capabilityGaps.length > 0 ? { capabilityGaps: run.capabilityGaps } : {}),
 	};
 }
 
@@ -82,10 +83,16 @@ export function toAiraChildFailure(run: AiraChildRun): AiraChildFailure {
 		id: run.id,
 		taskId: run.taskId,
 		role: run.role,
+		kind: run.error?.kind ?? "unknown_failure",
 		category: run.error?.category ?? "driver",
 		message: run.error?.message ?? run.status,
 		timestamp: run.completedAt ?? Date.now(),
 		retryable: run.error?.retryable ?? false,
+		retryableHint: run.error?.retryableHint ?? "unknown",
+		taskStatus: run.error?.taskStatus ?? "unknown",
+		...(run.error?.code !== undefined ? { code: run.error.code } : {}),
+		...(run.error?.component !== undefined ? { component: run.error.component } : {}),
+		...(run.error?.operation !== undefined ? { operation: run.error.operation } : {}),
 	};
 }
 

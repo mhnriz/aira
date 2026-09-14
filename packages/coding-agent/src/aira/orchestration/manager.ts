@@ -30,6 +30,7 @@ import {
 	MAX_CHILD_TASK_CHARS,
 } from "./envelope.ts";
 import { type AiraChildEvent, AiraChildEventBuffer, childActivityOf } from "./events.ts";
+import { buildAiraChildFailure, classifyAiraChildFailure, toAiraFailureEvidence } from "./failures.ts";
 import { airaChildRoleOf, isAiraChildRoleReadOnly } from "./roles.ts";
 import { type AiraChildOutcome, type AiraChildRuntime, runAiraChild } from "./runner.ts";
 import {
@@ -52,6 +53,7 @@ import {
 import { type AiraChildToolSetOptions, buildAiraChildToolSet } from "./tools.ts";
 import type {
 	AiraChildFailureCategory,
+	AiraChildFailureInfo,
 	AiraChildResult,
 	AiraChildRun,
 	AiraChildRunStatus,
@@ -289,14 +291,32 @@ export class AiraOrchestrationManager implements AiraOrchestrationHandle {
 						run.phase = "settled";
 						run.completedAt = Date.now();
 						run.durationMs = (run.completedAt ?? 0) - (run.startedAt ?? run.completedAt ?? 0);
-						const category: AiraChildFailureCategory = batchAbort.signal.aborted
-							? "cancelled"
-							: "dependency-failed";
-						const message = batchAbort.signal.aborted
-							? "cancelled before launch"
-							: `upstream dependency failed: ${reason}`;
-						run.error = { category, message, retryable: false };
-						this.recordChildEvent(run.id, { kind: "failure", at: run.completedAt, category, message });
+						// Pre-execution outcomes: cancellation, or an upstream delegated task
+						// failing. Neither means this task itself ran and failed.
+						const cancelled = batchAbort.signal.aborted;
+						const message = cancelled ? "cancelled before launch" : `upstream dependency failed: ${reason}`;
+						const failure = cancelled
+							? classifyAiraChildFailure({
+									cancelled: true,
+									message,
+									component: "orchestration",
+									operation: "cancel",
+								})
+							: buildAiraChildFailure({
+									kind: "task_failure",
+									category: "dependency-failed",
+									message,
+									component: "orchestration",
+									operation: "dependency",
+									taskStatus: "not_attempted",
+								});
+						run.error = failure;
+						this.recordChildEvent(run.id, {
+							kind: "failure",
+							at: run.completedAt,
+							category: failure.category,
+							message: failure.message,
+						});
 						this.publish();
 					}
 				},
@@ -323,16 +343,15 @@ export class AiraOrchestrationManager implements AiraOrchestrationHandle {
 				if (!withResults || !run) {
 					return base;
 				}
+				const failure = run.status === "completed" ? undefined : toAiraChildFailure(run);
 				return {
 					...base,
-					result:
-						run.status === "completed" && run.result
-							? run.result
-							: run.status === "rejected"
-								? "rejected"
-								: run.status === "cancelled" || run.status === "timed-out"
-									? run.status
-									: run.status,
+					// A failed run that still produced a child report keeps that report as
+					// evidence (conclusion, files, tests); otherwise the settled status is
+					// all that remains. Either way the classification above tells the parent
+					// whether the work failed or the capability could not run.
+					result: run.result ?? run.status,
+					...(failure ? { failure } : {}),
 				};
 			}),
 		];
@@ -376,16 +395,29 @@ export class AiraOrchestrationManager implements AiraOrchestrationHandle {
 			// ---- model resolution (truthful degradation, never substitution) ----
 			const resolved = await this.options.resolveRuntime?.({ model: spec.model, settings });
 			if (!resolved || !("runtime" in resolved)) {
-				this.failRun(
-					run,
-					signal.aborted ? "cancelled" : "model-unavailable",
-					signal.aborted
-						? "cancelled"
-						: !resolved || !("unavailable" in resolved)
-							? "child model unavailable"
-							: resolved.unavailable,
-					false,
-				);
+				// Pre-execution capability seam: no usable child model was resolved.
+				// The delegated work was not attempted; never report task failure.
+				const message = signal.aborted
+					? "cancelled"
+					: !resolved || !("unavailable" in resolved)
+						? "child model unavailable"
+						: resolved.unavailable;
+				const failure = signal.aborted
+					? classifyAiraChildFailure({
+							cancelled: true,
+							message,
+							component: "child-model",
+							operation: "resolve",
+						})
+					: buildAiraChildFailure({
+							kind: "capability_failure",
+							category: "model-unavailable",
+							message,
+							component: "child-model",
+							operation: "resolve",
+							taskStatus: "not_attempted",
+						});
+				this.failRun(run, failure);
 				return "failed";
 			}
 			run.resolvedModel = resolved.resolvedModel;
@@ -399,6 +431,9 @@ export class AiraOrchestrationManager implements AiraOrchestrationHandle {
 				executionManager: this.options.executionManager,
 				intelligence: this.options.intelligence,
 			});
+			if (toolSet.capabilityGaps.length > 0) {
+				run.capabilityGaps = toolSet.capabilityGaps;
+			}
 			const envelope = buildAiraChildEnvelope({
 				role: spec.role,
 				task: spec.task,
@@ -433,28 +468,49 @@ export class AiraOrchestrationManager implements AiraOrchestrationHandle {
 			if (outcome.toolBudgetLimit !== undefined) run.toolBudgetLimit = outcome.toolBudgetLimit;
 			if (outcome.toolBudgetExtensions !== undefined) run.toolBudgetExtensions = outcome.toolBudgetExtensions;
 			if (!outcome.ok) {
-				this.failRun(
-					run,
-					signal.aborted ? "cancelled" : categorizeDriverError(outcome.driverError),
-					outcome.driverError,
-					false,
-				);
+				this.failRun(run, this.failureOf(run, outcome, signal));
 				return "failed";
 			}
 			run.tokenUsage = outcome.tokenUsage;
 			const completed = outcome.result.status === "completed";
+			// The child ran and returned a result: an unmet acceptance criterion is a
+			// real task failure, not an infrastructure problem.
+			const resultFailure = completed
+				? undefined
+				: buildAiraChildFailure({
+						kind: "task_failure",
+						category: "driver",
+						message: outcome.result.summary,
+						component: "child-run",
+						operation: "acceptance",
+						taskStatus: "attempted",
+					});
 			this.settleRun(
 				run,
 				completed ? "completed" : "failed",
-				completed ? undefined : "driver",
+				resultFailure,
 				completed ? undefined : outcome.result.summary,
-				false,
 				outcome.result,
 			);
 			return completed ? "completed" : "failed";
 		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
-			this.failRun(run, signal.aborted ? "cancelled" : "driver", message, false);
+			const evidence = toAiraFailureEvidence(error, "child run failed");
+			this.failRun(
+				run,
+				signal.aborted
+					? classifyAiraChildFailure({
+							cancelled: true,
+							message: "cancelled",
+							component: "orchestration",
+							operation: "cancel",
+						})
+					: classifyAiraChildFailure({
+							...evidence,
+							origin: evidence.origin ?? "capability",
+							component: evidence.component ?? "orchestration",
+							operation: evidence.operation ?? "execute",
+						}),
+			);
 			return "failed";
 		} finally {
 			this.runAborts.delete(run.id);
@@ -601,19 +657,91 @@ export class AiraOrchestrationManager implements AiraOrchestrationHandle {
 		this.publish();
 	}
 
-	private failRun(run: AiraChildRun, category: AiraChildFailureCategory, message: string, retryable: boolean): void {
+	/**
+	 * Settle a run as failed from a classified failure envelope. The failure kind
+	 * (task/capability/environment/timeout/cancelled/unknown) is preserved so the
+	 * parent can tell "the work failed" from "the work could not run".
+	 */
+	private failRun(run: AiraChildRun, failure: AiraChildFailureInfo): void {
 		const status: AiraChildRunStatus =
-			category === "cancelled" ? "cancelled" : category === "timeout" ? "timed-out" : "failed";
-		this.recordChildEvent(run.id, { kind: "failure", at: Date.now(), category, message });
-		this.settleRun(run, status, category, message, retryable, undefined);
+			failure.kind === "cancelled" ? "cancelled" : failure.kind === "timeout" ? "timed-out" : "failed";
+		run.error = failure;
+		this.recordChildEvent(run.id, {
+			kind: "failure",
+			at: Date.now(),
+			category: failure.category,
+			message: failure.message,
+		});
+		this.settleRun(run, status, failure, failure.message, undefined);
+	}
+
+	/**
+	 * Map a settled runner outcome to a classified failure. A runner-provided
+	 * structured failure is used as-is; a legacy driver string is classified as a
+	 * capability failure (the child execution seam), so pre-execution capability
+	 * errors are never reported as failed task work.
+	 */
+	private failureOf(run: AiraChildRun, outcome: AiraChildOutcome, signal: AbortSignal): AiraChildFailureInfo {
+		if (outcome.ok) {
+			return buildAiraChildFailure({ message: "child run failed", taskStatus: "unknown" });
+		}
+		if (outcome.error) {
+			return signal.aborted && outcome.error.kind !== "cancelled"
+				? { ...outcome.error, kind: "cancelled", category: "cancelled", retryableHint: "no" }
+				: outcome.error;
+		}
+		const legacy = outcome.driverError;
+		const gaps = run.capabilityGaps ?? [];
+		if (signal.aborted || categorizeDriverError(legacy) === "cancelled") {
+			return classifyAiraChildFailure({
+				cancelled: true,
+				message: legacy,
+				component: "child-run",
+				operation: "cancel",
+			});
+		}
+		const category = categorizeDriverError(legacy);
+		if (category === "timeout") {
+			return classifyAiraChildFailure({
+				timedOut: true,
+				message: legacy,
+				component: "child-run",
+				operation: "timeout",
+			});
+		}
+		if (category === "tool-budget-exceeded") {
+			return buildAiraChildFailure({
+				kind: "task_failure",
+				category,
+				message: legacy,
+				component: "child-run",
+				operation: "tool-budget",
+				taskStatus: "attempted",
+			});
+		}
+		// No structured classification from the runner: the seam is the child
+		// execution capability, and a required capability gap (when present) is the
+		// concrete unavailable component. The legacy driver category is preserved so
+		// existing consumers keep their bounded reason code.
+		const gap = gaps[0];
+		return buildAiraChildFailure({
+			kind: category === "permission-denied" ? "environment_failure" : "capability_failure",
+			category,
+			message: legacy,
+			component: gap?.component ?? "child-run",
+			operation: gap?.operation ?? "execute",
+			// A known capability gap proves the work never ran; otherwise the stage is
+			// unknown rather than assumed.
+			taskStatus: gap ? "not_attempted" : "unknown",
+			...(gaps.length > 0 ? { capabilityGaps: gaps } : {}),
+		});
 	}
 
 	private settleRun(
 		run: AiraChildRun,
 		status: AiraChildRunStatus,
-		category: AiraChildFailureCategory | undefined,
+		failure: AiraChildFailureInfo | undefined,
 		message: string | undefined,
-		retryable: boolean,
 		result: AiraChildResult | undefined,
 	): void {
 		run.status = status;
@@ -621,8 +749,8 @@ export class AiraOrchestrationManager implements AiraOrchestrationHandle {
 		run.completedAt = Date.now();
 		run.durationMs = run.completedAt - (run.startedAt ?? run.completedAt) || 0;
 		run.result = result ?? run.result;
-		if (category !== undefined) {
-			run.error = { category, message: message ?? status, retryable };
+		if (failure !== undefined) {
+			run.error = failure;
 		}
 		this.recordChildEvent(run.id, {
 			kind: "completion",

@@ -20,8 +20,18 @@
  * All snapshots are bounded, serializable, and token-free (UI-ready).
  */
 
+import type { AiraChildFailureKind } from "../orchestration/types.ts";
+
 /** Task lifecycle truth (smallest truthful set). */
 export type AiraTaskStatus = "pending" | "active" | "blocked" | "completed" | "cancelled" | "failed";
+
+/**
+ * Truthful child-failure classification for child-derived rows. Metadata only:
+ * it never expands the lifecycle state machine; it distinguishes "the work
+ * failed" (task_failure) from "the work could not run" (capability/environment).
+ * One canonical vocabulary, defined in orchestration/types.ts.
+ */
+export type AiraTaskFailureKind = AiraChildFailureKind;
 
 /** Where a task row came from. */
 export type AiraTaskSource = "user" | "model" | "child";
@@ -47,6 +57,8 @@ export interface AiraTask {
 	childRole?: string;
 	/** Bounded one-line detail (child failure category, etc). */
 	detail?: string;
+	/** Child-derived failure kind metadata (never a lifecycle state change). */
+	failureKind?: AiraTaskFailureKind;
 }
 
 /** Compact single-task patch (never full-list replacement). */
@@ -69,6 +81,8 @@ export interface AiraTaskSnapshotRow {
 	childRole?: string;
 	/** Bounded one-line detail. */
 	detail?: string;
+	/** Child-derived failure kind metadata. */
+	failureKind?: AiraTaskFailureKind;
 }
 
 /** Canonical task snapshot published into AiraSessionState.tasks (token-free). */

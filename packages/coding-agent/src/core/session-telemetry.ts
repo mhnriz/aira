@@ -27,7 +27,7 @@ import { resolveReadPathAsync, resolveToCwd } from "./tools/path-utils.ts";
  * Step 4 compaction block and the Step 7 repository observation counters are
  * additive.
  */
-export const SESSION_TELEMETRY_SCHEMA_VERSION = "1.3.0";
+export const SESSION_TELEMETRY_SCHEMA_VERSION = "1.4.0";
 
 /** Cap on retained per-request context summaries (bounded ring, newest first). */
 export const CONTEXT_REQUEST_HISTORY_LIMIT = 10;
@@ -215,6 +215,16 @@ export interface SessionTelemetrySnapshot {
 	agent: {
 		askUser: number;
 		childAgents: number;
+		/** Settled child-run outcomes by deterministic failure classification. */
+		childOutcomes: {
+			completed: number;
+			taskFailed: number;
+			capabilityFailed: number;
+			environmentFailed: number;
+			timedOut: number;
+			cancelled: number;
+			unknownFailed: number;
+		};
 		taskTransitions: number;
 		taskTransitionsByType: Record<string, number>;
 	};
@@ -338,6 +348,16 @@ export class SessionTelemetry {
 	private askUserInvocations = 0;
 	private childAgents = 0;
 	private readonly seenChildRunIds = new Set<string>();
+	private readonly seenChildOutcomes = new Set<string>();
+	private readonly childOutcomes = {
+		completed: 0,
+		taskFailed: 0,
+		capabilityFailed: 0,
+		environmentFailed: 0,
+		timedOut: 0,
+		cancelled: 0,
+		unknownFailed: 0,
+	};
 	private taskTransitions = 0;
 	private readonly taskTransitionsByType = new Map<string, number>();
 	private readonly taskStatusById = new Map<string, string>();
@@ -681,11 +701,21 @@ export class SessionTelemetry {
 		}
 	}
 
-	/** Count a child run the first time its run id is observed. */
-	observeChildRunId(runId: string): void {
-		if (this.seenChildRunIds.has(runId)) return;
-		this.seenChildRunIds.add(runId);
-		this.childAgents++;
+	/**
+	 * Observe one child run from the orchestration snapshot: counts the agent once
+	 * and, once the run has settled, one outcome category. Categories only — no
+	 * error prose, no provider data.
+	 */
+	observeChildRun(child: { id: string; status: string; failureKind?: string }): void {
+		if (!this.seenChildRunIds.has(child.id)) {
+			this.seenChildRunIds.add(child.id);
+			this.childAgents++;
+		}
+		if (this.seenChildOutcomes.has(child.id)) return;
+		const outcome = childRunOutcome(child.status, child.failureKind);
+		if (outcome === undefined) return;
+		this.seenChildOutcomes.add(child.id);
+		this.childOutcomes[outcome]++;
 	}
 
 	/**
@@ -844,6 +874,7 @@ export class SessionTelemetry {
 			agent: {
 				askUser: this.askUserInvocations,
 				childAgents: this.childAgents,
+				childOutcomes: { ...this.childOutcomes },
 				taskTransitions: this.taskTransitions,
 				taskTransitionsByType: Object.fromEntries(
 					[...this.taskTransitionsByType.entries()].sort(([a], [b]) => a.localeCompare(b)),
@@ -861,6 +892,35 @@ export class SessionTelemetry {
 
 function formatCount(value: number): string {
 	return value.toLocaleString("en-US");
+}
+
+/**
+ * Map a settled child run to its telemetry outcome bucket. `failureKind` is the
+ * deterministic classification; cancelled/timed-out run statuses win because
+ * they are the run's own conclusion. Returns undefined until the run settles.
+ */
+function childRunOutcome(
+	runStatus: string,
+	failureKind: string | undefined,
+): keyof SessionTelemetrySnapshot["agent"]["childOutcomes"] | undefined {
+	if (runStatus === "completed") return "completed";
+	if (runStatus === "cancelled" || runStatus === "rejected") return "cancelled";
+	if (runStatus === "timed-out") return "timedOut";
+	if (runStatus !== "failed") return undefined;
+	switch (failureKind) {
+		case "task_failure":
+			return "taskFailed";
+		case "capability_failure":
+			return "capabilityFailed";
+		case "environment_failure":
+			return "environmentFailed";
+		case "timeout":
+			return "timedOut";
+		case "cancelled":
+			return "cancelled";
+		default:
+			return "unknownFailed";
+	}
 }
 
 /** Compact human-readable rendering for /telemetry (no theme dependency). */
@@ -934,6 +994,9 @@ export function renderSessionTelemetryText(snapshot: SessionTelemetrySnapshot): 
 	lines.push("Agent");
 	lines.push(`  ask_user           ${formatCount(agent.askUser)}`);
 	lines.push(`  child agents       ${formatCount(agent.childAgents)}`);
+	lines.push(
+		`  child outcomes     ${formatCount(agent.childOutcomes.completed)} completed, ${formatCount(agent.childOutcomes.taskFailed)} task-failed, ${formatCount(agent.childOutcomes.capabilityFailed)} capability-failed, ${formatCount(agent.childOutcomes.environmentFailed)} environment-failed, ${formatCount(agent.childOutcomes.timedOut)} timed-out, ${formatCount(agent.childOutcomes.cancelled)} cancelled, ${formatCount(agent.childOutcomes.unknownFailed)} unknown-failed`,
+	);
 	lines.push(`  task transitions   ${formatCount(agent.taskTransitions)}`);
 	lines.push("");
 	lines.push("Timing");

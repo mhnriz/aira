@@ -32,7 +32,7 @@ import type { AiraIntelligenceHandle } from "../intelligence/coordinator.ts";
 import { createAiraIntelligenceToolDefinitions } from "../intelligence/model-tools.ts";
 import type { AiraMode } from "../state.ts";
 import { airaChildRoleOf } from "./roles.ts";
-import type { AiraChildRole } from "./types.ts";
+import type { AiraChildCapabilityGap, AiraChildRole } from "./types.ts";
 
 /** Tool names backed by the read-only semantic class. */
 export const AIRA_CHILD_READ_TOOL_NAMES = ["read", "grep", "find", "ls"] as const;
@@ -60,6 +60,12 @@ export interface AiraChildToolSet {
 	capabilities: string[];
 	/** True when the set includes workspace-mutating or process-executing tools. */
 	mutating: boolean;
+	/**
+	 * Required capability classes the runtime could not grant (for example a
+	 * process-capable role without managed execution). Bounded metadata only:
+	 * surfaced as failure evidence when the run fails, never a launch gate.
+	 */
+	capabilityGaps: AiraChildCapabilityGap[];
 }
 
 /** Build the mode-gated, capability-derived child tool set. */
@@ -114,9 +120,19 @@ export function buildAiraChildToolSet(options: AiraChildToolSetOptions): AiraChi
 	}
 
 	const mutating = classes.includes("mutating") || classes.includes("process");
+	const capabilityGaps: AiraChildCapabilityGap[] = [];
+	if (classes.includes("process") && !options.executionManager) {
+		capabilityGaps.push({
+			capability: "process",
+			component: "process-manager",
+			operation: "resolve",
+			message: "managed execution is not configured for this session",
+		});
+	}
 	return {
 		tools,
 		capabilities: classes.map((c) => airaCapabilityClassLabel(c)),
 		mutating,
+		capabilityGaps,
 	};
 }

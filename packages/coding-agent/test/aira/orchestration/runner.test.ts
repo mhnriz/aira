@@ -300,6 +300,138 @@ describe("Aira child runner (Phase 9)", () => {
 		}
 	});
 
+	describe("failure classification (Step 8)", () => {
+		it("classifies a provider rejection as capability_failure with preserved provider evidence", async () => {
+			const root = makeProjectDir();
+			const { runtime, setResponses } = fauxRuntime();
+			const message = fauxAssistantMessage(fauxText("boom"), {
+				stopReason: "error",
+				errorMessage: "HTTP 400: missing required session header",
+			});
+			message.diagnostics = [
+				{
+					type: "provider-error",
+					timestamp: Date.now(),
+					error: { code: "MissingSessionID", message: "missing required session header" },
+					details: { status: 400 },
+				},
+			];
+			setResponses([message]);
+			const outcome = await runAiraChild(runtime, {
+				cwd: root,
+				prompt: "TASK",
+				systemPrompt: "",
+				tools: readOnlyTools(root),
+				timeoutMs: 5000,
+			});
+			expect(outcome.ok).toBe(false);
+			if (!outcome.ok) {
+				// The delegated work was attempted, but the capability failed.
+				expect(outcome.error?.kind).toBe("capability_failure");
+				expect(outcome.error?.component).toBe("child-provider");
+				expect(outcome.error?.operation).toBe("stream");
+				expect(outcome.error?.code).toBe("MissingSessionID");
+				expect(outcome.error?.taskStatus).toBe("attempted");
+				expect(outcome.error?.retryableHint).toBe("no");
+				expect(outcome.error?.message).toContain("missing required session header");
+			}
+		});
+
+		it("classifies an unparseable child result as a capability (protocol) failure", async () => {
+			const root = makeProjectDir();
+			const { runtime, setResponses } = fauxRuntime();
+			setResponses([fauxAssistantMessage(fauxText("I could not produce JSON, sorry."))]);
+			const outcome = await runAiraChild(runtime, {
+				cwd: root,
+				prompt: "TASK",
+				systemPrompt: "",
+				tools: readOnlyTools(root),
+				timeoutMs: 5000,
+			});
+			expect(outcome.ok).toBe(false);
+			if (!outcome.ok) {
+				expect(outcome.error?.kind).toBe("capability_failure");
+				expect(outcome.error?.component).toBe("child-protocol");
+				expect(outcome.error?.operation).toBe("parse-result");
+			}
+		});
+
+		it("classifies a missing child model as capability_failure before any work runs", async () => {
+			const root = makeProjectDir();
+			const { runtime } = fauxRuntime();
+			const outcome = await runAiraChild({ streamFn: runtime.streamFn } as AiraChildRuntime, {
+				cwd: root,
+				prompt: "TASK",
+				systemPrompt: "",
+				tools: readOnlyTools(root),
+				timeoutMs: 5000,
+			});
+			expect(outcome.ok).toBe(false);
+			if (!outcome.ok) {
+				expect(outcome.error?.kind).toBe("capability_failure");
+				expect(outcome.error?.component).toBe("child-model");
+				expect(outcome.error?.operation).toBe("resolve");
+				expect(outcome.error?.taskStatus).toBe("not_attempted");
+			}
+		});
+
+		it("classifies budget exhaustion as task_failure (the work ran, it just did not converge)", async () => {
+			const root = makeProjectDir();
+			const { runtime, setResponses } = fauxRuntime();
+			setResponses([
+				fauxAssistantMessage(fauxToolCall("read", { path: "missing-does-not-exist.ts" })),
+				fauxAssistantMessage(fauxToolCall("read", { path: "missing-does-not-exist.ts" })),
+			]);
+			const outcome = await runAiraChild(runtime, {
+				cwd: root,
+				prompt: "TASK",
+				systemPrompt: "",
+				tools: readOnlyTools(root),
+				timeoutMs: 5000,
+				maxToolRounds: 1,
+			});
+			expect(outcome.ok).toBe(false);
+			if (!outcome.ok) {
+				expect(outcome.error?.kind).toBe("task_failure");
+				expect(outcome.error?.taskStatus).toBe("attempted");
+			}
+		});
+
+		it("classifies its own timeout and cancellation kinds", async () => {
+			const root = makeProjectDir();
+			const timeoutRuntime = fauxRuntime();
+			timeoutRuntime.setResponses([() => new Promise(() => {}) as never]);
+			const timedOut = await runAiraChild(timeoutRuntime.runtime, {
+				cwd: root,
+				prompt: "TASK",
+				systemPrompt: "",
+				tools: readOnlyTools(root),
+				timeoutMs: 150,
+			});
+			expect(timedOut.ok).toBe(false);
+			if (!timedOut.ok) {
+				expect(timedOut.error?.kind).toBe("timeout");
+				expect(timedOut.error?.category).toBe("timeout");
+			}
+
+			const cancelRuntime = fauxRuntime();
+			cancelRuntime.setResponses([() => new Promise(() => {}) as never]);
+			const controller = new AbortController();
+			const run = runAiraChild(
+				cancelRuntime.runtime,
+				{ cwd: root, prompt: "TASK", systemPrompt: "", tools: readOnlyTools(root), timeoutMs: 60_000 },
+				controller.signal,
+			);
+			controller.abort();
+			const cancelled = await run;
+			expect(cancelled.ok).toBe(false);
+			if (!cancelled.ok) {
+				expect(cancelled.error?.kind).toBe("cancelled");
+				expect(cancelled.error?.taskStatus).toBe("attempted");
+			}
+		});
+	});
+
 	describe("Agent Inspector event capture (Phase 12.x)", () => {
 		it("captures assistant text, thinking, tool calls, and tool results as structured events", async () => {
 			const root = makeProjectDir();

@@ -10,9 +10,11 @@
  *
  * Failure behavior: any driver failure (model/provider error, timeout,
  * cancellation, tool-budget exhaustion, unparseable result) yields
- * `{ driverError }` — the manager maps it to a failed run with a bounded
- * failure category, never to a fabricated result. Token usage is carried
- * when the provider exposes it (`AssistantMessage.usage`) and never invented.
+ * `{ driverError, error }` — the manager maps it to a failed run with a bounded
+ * failure category plus a deterministic failure kind (capability/environment/
+ * task/timeout/cancelled/unknown), never to a fabricated result. Token usage is
+ * carried when the provider exposes it (`AssistantMessage.usage`) and never
+ * invented.
  */
 import type { AgentTool, StreamFn } from "@earendil-works/pi-agent-core";
 import type {
@@ -41,7 +43,8 @@ import {
 	MAX_CHILD_EVENT_RESULT_SUMMARY_CHARS,
 	MAX_CHILD_EVENT_TEXT_CHARS,
 } from "./events.ts";
-import type { AiraChildResult, AiraChildTokenUsage } from "./types.ts";
+import { type AiraFailureEvidence, classifyAiraChildFailure, toAiraFailureEvidence } from "./failures.ts";
+import type { AiraChildFailureInfo, AiraChildResult, AiraChildTokenUsage } from "./types.ts";
 
 export const DEFAULT_CHILD_TIMEOUT_MS = 300_000;
 export const MAX_CHILD_TOOL_ROUNDS = 8;
@@ -98,6 +101,8 @@ export type AiraChildOutcome =
 	| {
 			ok: false;
 			driverError: string;
+			/** Deterministic failure classification (kind + preserved evidence). */
+			error?: AiraChildFailureInfo;
 			toolCallsUsed?: number;
 			toolBudgetLimit?: number;
 			toolBudgetExtensions?: number;
@@ -111,7 +116,15 @@ export async function runAiraChild(
 ): Promise<AiraChildOutcome> {
 	const { model, streamFn } = runtime;
 	if (!model) {
-		return { ok: false, driverError: "no child model configured" };
+		// Aira capability seam: no child session can be created at all, so the
+		// delegated work was never attempted.
+		const failure = classifyAiraChildFailure({
+			origin: "capability",
+			message: "no child model configured",
+			component: "child-model",
+			operation: "resolve",
+		});
+		return { ok: false, driverError: failure.message, error: failure };
 	}
 
 	const timeoutMs = options.timeoutMs ?? DEFAULT_CHILD_TIMEOUT_MS;
@@ -182,9 +195,17 @@ export async function runAiraChild(
 		while (hasToolCalls(assistant)) {
 			if (round >= allowedRounds) {
 				if (toolBudgetExtensions >= MAX_CHILD_TOOL_EXTENSIONS || !roundHadProgress) {
+					// The child ran and spent its budget: the execution capability worked.
+					const failure = classifyAiraChildFailure({
+						origin: "task",
+						message: "child exceeded its tool budget",
+						component: "child-run",
+						operation: "tool-budget",
+					});
 					return {
 						ok: false,
-						driverError: "child exceeded its tool budget",
+						driverError: failure.message,
+						error: failure,
 						toolCallsUsed,
 						toolBudgetLimit,
 						toolBudgetExtensions,
@@ -261,20 +282,40 @@ export async function runAiraChild(
 			accumulateUsage(assistant);
 		}
 		if (hasToolCalls(assistant)) {
+			const failure = classifyAiraChildFailure({
+				origin: "task",
+				message: "child exceeded its tool budget",
+				component: "child-run",
+				operation: "tool-budget",
+			});
 			return {
 				ok: false,
-				driverError: "child exceeded its tool budget",
+				driverError: failure.message,
+				error: failure,
 				toolCallsUsed,
 				toolBudgetLimit,
 				toolBudgetExtensions,
 			};
 		}
 		if (assistant.stopReason === "error" || assistant.stopReason === "aborted") {
-			return { ok: false, driverError: assistant.errorMessage ?? `child ${assistant.stopReason}` };
+			// Provider/child-session capability seam: the provider rejected or
+			// aborted the child request. This is not evidence that the delegated
+			// work was wrong.
+			const failure = classifyAiraChildFailure(childProviderFailureEvidence(assistant, signal));
+			return { ok: false, driverError: failure.message, error: failure };
 		}
 		const parsed = parseChildResult(contentText(assistant));
 		if (!parsed) {
-			return { ok: false, driverError: "child returned no valid structured result" };
+			// Child-result protocol seam: the child ran but produced no usable
+			// result contract, which is a mechanism failure, not task evidence.
+			const failure = classifyAiraChildFailure({
+				origin: "capability",
+				message: "child returned no valid structured result",
+				component: "child-protocol",
+				operation: "parse-result",
+				taskStatus: "attempted",
+			});
+			return { ok: false, driverError: failure.message, error: failure };
 		}
 		return {
 			ok: true,
@@ -287,9 +328,38 @@ export async function runAiraChild(
 		};
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
+		const timedOut = message === "child timed out";
+		const cancelled = !timedOut && (message === "child cancelled" || signal?.aborted === true);
+		// Classification is deterministic: explicit timeout/cancel state first,
+		// then typed errors / Node codes / provider status, else capability seam.
+		const caught = toAiraFailureEvidence(error, "child run failed");
+		const evidence: AiraFailureEvidence = timedOut
+			? {
+					timedOut: true,
+					message: `child timed out after ${timeoutMs}ms`,
+					component: "child-run",
+					operation: "timeout",
+				}
+			: cancelled
+				? {
+						cancelled: true,
+						message: "child cancelled",
+						component: "child-run",
+						operation: "cancel",
+						taskStatus: "attempted",
+					}
+				: {
+						...caught,
+						origin: caught.origin ?? "capability",
+						component: caught.component ?? "child-provider",
+						operation: caught.operation ?? "stream",
+						taskStatus: caught.taskStatus ?? "attempted",
+					};
+		const failure = classifyAiraChildFailure(evidence);
 		return {
 			ok: false,
-			driverError: message === "child timed out" ? `child timed out after ${timeoutMs}ms` : message,
+			driverError: failure.message,
+			error: failure,
 			toolCallsUsed,
 			toolBudgetLimit,
 			toolBudgetExtensions,
@@ -299,6 +369,32 @@ export async function runAiraChild(
 			clearTimeout(timeoutTimer);
 		}
 	}
+}
+
+/**
+ * Structured provider evidence from a failed/aborted child stream: provider
+ * error code/status when the provider layer exposed them, cancellation when the
+ * stream was aborted, and the preserved message otherwise.
+ */
+function childProviderFailureEvidence(assistant: AssistantMessage, signal?: AbortSignal): AiraFailureEvidence {
+	const cancelled = assistant.stopReason === "aborted" || signal?.aborted === true;
+	const diagnostics = assistant.diagnostics ?? [];
+	let diagnostic: (typeof diagnostics)[number] | undefined;
+	for (const entry of diagnostics) {
+		if (entry.error !== undefined) diagnostic = entry;
+	}
+	const code = diagnostic?.error?.code;
+	const details = diagnostic?.details;
+	const status = details?.status ?? details?.statusCode;
+	return {
+		...(cancelled ? { cancelled: true } : { origin: "capability" as const }),
+		message: assistant.errorMessage ?? `child ${assistant.stopReason}`,
+		code: typeof code === "string" || typeof code === "number" ? code : undefined,
+		status: typeof status === "number" ? status : undefined,
+		component: "child-provider",
+		operation: "stream",
+		taskStatus: "attempted",
+	};
 }
 
 function callStream(
