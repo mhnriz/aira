@@ -194,7 +194,7 @@ describe("copyToClipboard", () => {
 			throw new Error("pbcopy failed");
 		});
 
-		await expect(copyToClipboard("hello")).rejects.toThrow("Failed to copy to clipboard");
+		await expect(copyToClipboard("hello")).rejects.toThrow("Clipboard unavailable");
 		expect(osc52Writes()).toHaveLength(0);
 	});
 
@@ -217,7 +217,50 @@ describe("copyToClipboard", () => {
 			throw new Error("pbcopy failed");
 		});
 
-		await expect(copyToClipboard("x".repeat(80_000))).rejects.toThrow("Failed to copy to clipboard");
+		await expect(copyToClipboard("x".repeat(80_000))).rejects.toThrow("Clipboard unavailable");
 		expect(osc52Writes()).toHaveLength(0);
+	});
+
+	test("reports the X11 clipboard tools when no backend works", async () => {
+		mockedPlatform.mockReturnValue("linux");
+		vi.stubEnv("TERMUX_VERSION", "");
+		vi.stubEnv("WAYLAND_DISPLAY", "");
+		vi.stubEnv("DISPLAY", ":0");
+		mockedExecSync.mockImplementation(() => {
+			throw new Error("clipboard tool failed");
+		});
+
+		await expect(copyToClipboard("hello")).rejects.toThrow(
+			"Clipboard unavailable: install `xclip` or `xsel`, or check X11 access",
+		);
+		expect(osc52Writes()).toHaveLength(0);
+	});
+
+	test("reports the Wayland clipboard tool before the X11 fallback", async () => {
+		mockedPlatform.mockReturnValue("linux");
+		vi.stubEnv("TERMUX_VERSION", "");
+		vi.stubEnv("WAYLAND_DISPLAY", "wayland-0");
+		vi.stubEnv("DISPLAY", ":0");
+		mockedExecSync.mockImplementation(() => {
+			throw new Error("clipboard tool failed");
+		});
+
+		await expect(copyToClipboard("hello")).rejects.toThrow(
+			"Clipboard unavailable: install `wl-clipboard` (`wl-copy`) or check Wayland access",
+		);
+	});
+
+	test("reports a missing display when no backend works", async () => {
+		mockedPlatform.mockReturnValue("linux");
+		vi.stubEnv("TERMUX_VERSION", "");
+		vi.stubEnv("WAYLAND_DISPLAY", "");
+		vi.stubEnv("DISPLAY", "");
+		mockedExecSync.mockImplementation(() => {
+			throw new Error("clipboard tool failed");
+		});
+
+		await expect(copyToClipboard("hello")).rejects.toThrow(
+			"Clipboard unavailable: no Wayland or X11 display detected",
+		);
 	});
 });
