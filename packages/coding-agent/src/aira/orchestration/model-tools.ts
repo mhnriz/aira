@@ -133,6 +133,98 @@ function childFailureRecommendation(kind: string): string {
 	}
 }
 
+/**
+ * Parent-facing bound for the child result projection.
+ *
+ * Children are required by their envelope to emit summary/findings/
+ * relevantFiles/tests/errors, but only the summary reached the parent model:
+ * the structured fields stayed in UI-only `details` (packages/ai never reads
+ * `details`, so it is never provider-visible). These bounds project the
+ * already-produced fields into the parent tool result deterministically. They
+ * are the parent-consumer bound, stricter than the child's own emission bound
+ * (runner.ts MAX_CHILD_*), derived from the observed distribution of real child
+ * results (findings max 8, relevantFiles max 12, tests max 5, errors max 1).
+ * `evidence` is deliberately not projected: it is a path/line index whose
+ * non-redundant content duplicates the file:line refs already carried by
+ * findings and relevantFiles.
+ */
+const AIRA_CHILD_RESULT_MAX_FINDINGS = 8;
+const AIRA_CHILD_RESULT_MAX_FILES = 12;
+const AIRA_CHILD_RESULT_MAX_TESTS = 6;
+const AIRA_CHILD_RESULT_MAX_ERRORS = 4;
+const AIRA_CHILD_RESULT_PROSE_CHARS = 240;
+const AIRA_CHILD_RESULT_PATH_CHARS = 160;
+
+/** Structural view of the child result envelope fields the parent consumes. */
+type AiraChildResultProjection = {
+	status?: string;
+	summary?: string;
+	findings?: string[];
+	relevantFiles?: string[];
+	changedFiles?: string[];
+	tests?: string[];
+	errors?: string[];
+};
+
+function clipChildResultItem(value: string, limit: number): string {
+	const collapsed = value.replace(/\s+/g, " ").trim();
+	return collapsed.length <= limit ? collapsed : `${collapsed.slice(0, limit - 1).trimEnd()}\u2026`;
+}
+
+/** Deterministic, field-priority projection of a child's structured result. */
+function renderChildResultProjection(result: AiraChildResultProjection): string[] {
+	const sections = [
+		{
+			label: "errors",
+			items: result.errors,
+			limit: AIRA_CHILD_RESULT_MAX_ERRORS,
+			chars: AIRA_CHILD_RESULT_PROSE_CHARS,
+		},
+		{
+			label: "findings",
+			items: result.findings,
+			limit: AIRA_CHILD_RESULT_MAX_FINDINGS,
+			chars: AIRA_CHILD_RESULT_PROSE_CHARS,
+		},
+		{
+			label: "files",
+			items: result.relevantFiles,
+			limit: AIRA_CHILD_RESULT_MAX_FILES,
+			chars: AIRA_CHILD_RESULT_PATH_CHARS,
+		},
+		{
+			label: "validation",
+			items: result.tests,
+			limit: AIRA_CHILD_RESULT_MAX_TESTS,
+			chars: AIRA_CHILD_RESULT_PATH_CHARS,
+		},
+	];
+	const lines: string[] = [];
+	for (const section of sections) {
+		const items = (section.items ?? [])
+			.filter((item) => typeof item === "string" && item.trim().length > 0)
+			.map((item) => clipChildResultItem(item, section.chars));
+		if (items.length === 0) continue;
+		lines.push(`  ${section.label}:`);
+		for (const item of items.slice(0, section.limit)) lines.push(`    - ${item}`);
+		const hidden = items.length - section.limit;
+		if (hidden > 0) lines.push(`    … +${hidden} more (full result in UI details)`);
+	}
+	return lines;
+}
+
+/** Returns the projection only when the payload carries real structured content. */
+function asChildResultProjection(value: unknown): AiraChildResultProjection | undefined {
+	if (typeof value !== "object" || value === null) return undefined;
+	const candidate = value as AiraChildResultProjection;
+	for (const items of [candidate.errors, candidate.findings, candidate.relevantFiles, candidate.tests]) {
+		if (Array.isArray(items) && items.some((item) => typeof item === "string" && item.trim().length > 0)) {
+			return candidate;
+		}
+	}
+	return undefined;
+}
+
 function renderRunLine(task: {
 	taskId: string;
 	role: string;
@@ -158,7 +250,14 @@ function renderRunLine(task: {
 		return `- ${task.taskId} (${task.role}): accepted`;
 	}
 	if (task.failure) {
-		return renderFailureLine(task.taskId, task.role, task.failure);
+		const failureLine = renderFailureLine(task.taskId, task.role, task.failure);
+		// Step 8 classification stays authoritative; when the failure preserved the
+		// child's structured result, return that evidence too instead of only the
+		// recommendation that tells the parent to use it.
+		const preserved = asChildResultProjection(task.result);
+		if (preserved === undefined) return failureLine;
+		const preservedLines = renderChildResultProjection(preserved);
+		return preservedLines.length > 0 ? `${failureLine}\n${preservedLines.join("\n")}` : failureLine;
 	}
 	if (task.result === undefined) {
 		return `- ${task.taskId} (${task.role}): run ${task.runId}`;
@@ -166,10 +265,12 @@ function renderRunLine(task: {
 	if (typeof task.result === "string") {
 		return `- ${task.taskId} (${task.role}): ${task.result}`;
 	}
-	const result = task.result as { status?: string; summary?: string; changedFiles?: string[]; errors?: string[] };
+	const result = task.result as AiraChildResultProjection;
 	const changed =
 		result.changedFiles && result.changedFiles.length > 0 ? ` · changed: ${result.changedFiles.join(", ")}` : "";
-	return `- ${task.taskId} (${task.role}): ${result.status ?? "settled"}: ${result.summary ?? "no summary"}${changed}`;
+	const head = `- ${task.taskId} (${task.role}): ${result.status ?? "settled"}: ${result.summary ?? "no summary"}${changed}`;
+	const detail = renderChildResultProjection(result);
+	return detail.length > 0 ? `${head}\n${detail.join("\n")}` : head;
 }
 
 function renderStatus(status: AiraOrchestrationStatusSnapshot): string {

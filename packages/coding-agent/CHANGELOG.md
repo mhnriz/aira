@@ -163,6 +163,24 @@
   `agent` gains `childOutcomes` counters (completed/taskFailed/
   capabilityFailed/environmentFailed/timedOut/cancelled/unknownFailed, schema
   1.4.0). Governed by `src/aira/orchestration/failures.ts`.
+- **Aira**: The parent model now consumes the child's structured result instead
+  of only its summary. A child is already required by its envelope to emit
+  `status`/`summary`/`findings`/`evidence`/`relevantFiles`/`changedFiles`/
+  `tests`/`errors`, but only the summary reached the parent model: the other
+  fields lived in UI-only `details`, which no provider reads. Parents now get a
+  deterministic, byte-bounded projection of `errors`, `findings`,
+  `relevantFiles`, and `validation` appended to the existing one-line result
+  row, so a review or exploration child's `file:line` evidence, completion-time
+  errors, and validation claims reach the parent that has to act on them.
+  `evidence` stays in the untouched `details` (a path/line index that duplicates
+  the refs already carried by findings and relevantFiles), empty fields add no
+  ceremony for tiny results, and each row is bounded per child (findings 8,
+  relevantFiles 12, validation 6, errors 4, 240/160 characters per item) with an
+  explicit `+N more (full result in UI details)` marker. A `task_failure` that
+  preserved a structured result returns that evidence after the unchanged
+  classification line. No child prompt, envelope, startup, scheduling, reuse,
+  or failure-semantics change. Governed by
+  `src/aira/orchestration/model-tools.ts`.
 
 ### Fixed
 
