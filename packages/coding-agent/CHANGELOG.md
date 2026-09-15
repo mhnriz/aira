@@ -166,6 +166,11 @@
 
 ### Fixed
 
+- **Aira**: Name the code-intelligence tool in each `aira_symbol_search`,
+  `aira_module_report`, `aira_semantic_navigation`, and `aira_diagnostics`
+  system guideline. These bullets rendered without a subject
+  ("Use for ...", "Use after edits ...") directly after the bash bullet, so
+  the model could misread them as extending an unrelated tool's guidance.
 - Apply Session Context keyboard resizing at every terminal width: the
   previous adaptive sidebar growth (27-30% of very wide terminals) pinned the
   pane at 54-60 columns on 180+ column screens, masking every preference

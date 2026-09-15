@@ -51,7 +51,7 @@ function createDefinitions(runtimeForTools: AiraIntelligenceHandle) {
 				"Find likely project files and declared symbols by identifier or name. This is cheap, structured lexical/indexed discovery, not semantic reference truth; use the returned path with a module report or semantic navigation when appropriate.",
 			promptSnippet: "Find likely files and declared symbols",
 			promptGuidelines: [
-				"Use for symbol/file discovery when you do not yet know the source path; results are indexed lexical evidence, not semantic references.",
+				"Use aira_symbol_search for symbol/file discovery when you do not yet know the source path; results are indexed lexical evidence, not semantic references.",
 			],
 			parameters: symbolSearchSchema,
 			async execute(_toolCallId: string, params: SymbolSearchParams) {
@@ -65,7 +65,7 @@ function createDefinitions(runtimeForTools: AiraIntelligenceHandle) {
 				"Give a compact structural orientation for one indexed source file: declarations, imports, reverse importers, and source/test counterparts. Use before reading a large file when structure is enough.",
 			promptSnippet: "Orient within one indexed source file",
 			promptGuidelines: [
-				"Use for bounded module structure and import relationships; it does not provide source bodies or semantic call sites.",
+				"Use aira_module_report for bounded module structure and import relationships; it does not provide source bodies or semantic call sites.",
 			],
 			parameters: moduleReportSchema,
 			async execute(_toolCallId: string, params: ModuleReportParams) {
@@ -79,7 +79,7 @@ function createDefinitions(runtimeForTools: AiraIntelligenceHandle) {
 				"Use the project language server for go-to-definition, semantic references/call sites, or document symbols. Definition and references can start from a symbol name without exact coordinates; optionally provide a project path and zero-based line/character for precision. Results are bounded and may report ambiguity or unavailable language support.",
 			promptSnippet: "Navigate code semantically with the project language server",
 			promptGuidelines: [
-				"Use for definitions, semantic references/call sites, and document symbols when language-server evidence is useful; grep/read/find remain valid fallbacks for literals and broad text discovery.",
+				"Use aira_semantic_navigation for definitions, semantic references/call sites, and document symbols when language-server evidence is useful; grep/read/find remain valid fallbacks for literals and broad text discovery.",
 			],
 			parameters: semanticNavigationSchema,
 			async execute(_toolCallId: string, params: SemanticNavigationParams, signal?: AbortSignal) {
@@ -93,7 +93,7 @@ function createDefinitions(runtimeForTools: AiraIntelligenceHandle) {
 				"Query live language-server diagnostics for specific or changed project files: severity, code, message, and 1-based line/character per finding, plus error/warning totals. Cold-starts the language server on demand; only the scoped files are diagnosed, never the whole repository. Per-file status is truthful: `ready` with an empty list means the file is clean, `no-publish` means the server produced nothing within the bounded budget, `server-unavailable` means the server could not start, `unsupported-language`/`invalid-path`/`unreadable` name the scope problem. Never runs compilers or builds.",
 			promptSnippet: "Query live LSP diagnostics for changed or specific files",
 			promptGuidelines: [
-				"Use after edits or before claiming a file is clean; pass project-relative paths, or omit `paths` to diagnose the changed/working-set files. Distinguish `ready` with no diagnostics (clean) from `no-publish`/`server-unavailable` before concluding.",
+				"Use aira_diagnostics after edits or before claiming a file is clean; pass project-relative paths, or omit `paths` to diagnose the changed/working-set files. Distinguish `ready` with no diagnostics (clean) from `no-publish`/`server-unavailable` before concluding.",
 			],
 			parameters: diagnosticsSchema,
 			async execute(_toolCallId: string, params: DiagnosticsParams, signal?: AbortSignal) {
