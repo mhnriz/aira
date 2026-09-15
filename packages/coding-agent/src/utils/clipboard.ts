@@ -164,9 +164,11 @@ export async function copyToClipboard(text: string): Promise<void> {
 		}
 	}
 
-	if (remote || !copied) {
-		const osc52Copied = emitOsc52(text);
-		copied = copied || osc52Copied;
+	// OSC 52 writes cannot be verified. Only remote sessions rely on them as a
+	// transfer channel; for local sessions an unverified write must not be
+	// reported as a successful copy (#9618).
+	if (remote) {
+		copied = emitOsc52(text) || copied;
 	}
 
 	if (!copied) {

@@ -187,7 +187,19 @@ describe("copyToClipboard", () => {
 		expect(osc52Writes()).toHaveLength(0);
 	});
 
-	test("uses OSC 52 fallback when native and shell tools fail", async () => {
+	test("local failure does not report an unverified OSC 52 write as success", async () => {
+		// Regression test for #9618: a local copy must not be confirmed by unverified OSC 52 output.
+		mocks.clipboard.setText.mockRejectedValue(new Error("native failed"));
+		mockedExecSync.mockImplementation(() => {
+			throw new Error("pbcopy failed");
+		});
+
+		await expect(copyToClipboard("hello")).rejects.toThrow("Failed to copy to clipboard");
+		expect(osc52Writes()).toHaveLength(0);
+	});
+
+	test("uses OSC 52 fallback when native and shell tools fail in a remote session", async () => {
+		vi.stubEnv("SSH_CONNECTION", "client server");
 		mocks.clipboard.setText.mockRejectedValue(new Error("native failed"));
 		mockedExecSync.mockImplementation(() => {
 			throw new Error("pbcopy failed");
@@ -199,6 +211,7 @@ describe("copyToClipboard", () => {
 	});
 
 	test("does not emit oversized OSC 52 payloads", async () => {
+		vi.stubEnv("SSH_CONNECTION", "client server");
 		mocks.clipboard.setText.mockRejectedValue(new Error("native failed"));
 		mockedExecSync.mockImplementation(() => {
 			throw new Error("pbcopy failed");
