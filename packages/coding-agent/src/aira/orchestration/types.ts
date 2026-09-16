@@ -75,6 +75,26 @@ export interface AiraChildCapabilityGap {
 }
 
 /**
+ * Bounded, privacy-safe diagnostics captured when a child's final message could
+ * not be parsed into the result contract. Carries provenance (hash, length,
+ * stop reason) and short secret-sanitized excerpts — never the raw body.
+ */
+export interface AiraChildResultDiagnostics {
+	/** Provider stop reason of the unparseable message ("stop", "length", ...). */
+	stopReason: string;
+	/** Character length of the raw unparsed final message. */
+	rawLength: number;
+	/** SHA-256 of the raw unparsed final message (provenance, not content). */
+	rawSha256: string;
+	/** Secret-sanitized head excerpt (bounded). */
+	head: string;
+	/** Secret-sanitized tail excerpt (bounded). */
+	tail: string;
+	/** Whether a successful edit/write landed before the parse failure. */
+	workspaceMutated: boolean;
+}
+
+/**
  * Bounded, secret-sanitized failure envelope. Preserves the original error
  * evidence (message, code, component, operation) while exposing the truthful
  * failure kind, so the parent can decide the next action.
@@ -91,6 +111,8 @@ export interface AiraChildFailureInfo {
 	taskStatus: AiraChildTaskExecutionStatus;
 	/** Required capabilities that were unavailable when the run launched. */
 	capabilityGaps?: AiraChildCapabilityGap[];
+	/** Bounded parse diagnostics when a result could not be parsed (never the raw body). */
+	diagnostics?: AiraChildResultDiagnostics;
 }
 
 /** One dispatchable child task (the parent-owned contract). */
@@ -249,6 +271,8 @@ export interface AiraChildFailure {
 	code?: string;
 	component?: string;
 	operation?: string;
+	/** Bounded parse diagnostics when the failure was an unparseable result. */
+	diagnostics?: AiraChildResultDiagnostics;
 }
 
 /** Canonical orchestration snapshot published into AiraSessionState.orchestration. */

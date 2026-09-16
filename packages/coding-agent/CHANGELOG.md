@@ -233,6 +233,18 @@
   window instead of being split. Canonical history is untouched and the
   transform stays pure, deterministic, idempotent, and fail-open with no model
   calls. Governed by `src/aira/context-compaction.ts`.
+- **Aira**: Child structured-result reliability. A child that finishes with an
+  unparseable final message now records bounded, privacy-safe parse diagnostics
+  (provider stop reason, character length, SHA-256, sanitized head/tail
+  excerpts, and whether a workspace edit already landed) instead of collapsing
+  truncation, prose, and malformed JSON into one unobservable error. A
+  `stopReason: "length"` truncation gets one bounded continuation with the same
+  output budget before failing with a distinct `child-result-truncated` code;
+  the result parser now targets the last balanced top-level JSON object so
+  multi-object narration no longer poisons extraction; and parse-failure task
+  status is derived from observed mutation/tool activity instead of hardcoding
+  `attempted`. Governed by `src/aira/orchestration/runner.ts`, `envelope.ts`,
+  and `failures.ts`.
 
 ### Changed
 

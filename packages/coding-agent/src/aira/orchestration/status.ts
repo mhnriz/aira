@@ -93,6 +93,7 @@ export function toAiraChildFailure(run: AiraChildRun): AiraChildFailure {
 		...(run.error?.code !== undefined ? { code: run.error.code } : {}),
 		...(run.error?.component !== undefined ? { component: run.error.component } : {}),
 		...(run.error?.operation !== undefined ? { operation: run.error.operation } : {}),
+		...(run.error?.diagnostics ? { diagnostics: run.error.diagnostics } : {}),
 	};
 }
 

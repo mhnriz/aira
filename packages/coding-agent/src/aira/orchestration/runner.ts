@@ -16,6 +16,7 @@
  * carried when the provider exposes it (`AssistantMessage.usage`) and never
  * invented.
  */
+import { createHash } from "node:crypto";
 import type { AgentTool, StreamFn } from "@earendil-works/pi-agent-core";
 import type {
 	AssistantMessage,
@@ -43,8 +44,18 @@ import {
 	MAX_CHILD_EVENT_RESULT_SUMMARY_CHARS,
 	MAX_CHILD_EVENT_TEXT_CHARS,
 } from "./events.ts";
-import { type AiraFailureEvidence, classifyAiraChildFailure, toAiraFailureEvidence } from "./failures.ts";
-import type { AiraChildFailureInfo, AiraChildResult, AiraChildTokenUsage } from "./types.ts";
+import {
+	type AiraFailureEvidence,
+	classifyAiraChildFailure,
+	sanitizeAiraFailureMessage,
+	toAiraFailureEvidence,
+} from "./failures.ts";
+import type {
+	AiraChildFailureInfo,
+	AiraChildResult,
+	AiraChildResultDiagnostics,
+	AiraChildTokenUsage,
+} from "./types.ts";
 
 export const DEFAULT_CHILD_TIMEOUT_MS = 300_000;
 export const MAX_CHILD_TOOL_ROUNDS = 8;
@@ -52,6 +63,13 @@ export const MAX_CHILD_TOOL_CALLS_PER_ROUND = 4;
 export const MAX_CHILD_OUTPUT_TOKENS = 2_000;
 export const MAX_CHILD_TOOL_EXTENSIONS = 1;
 export const CHILD_TOOL_EXTENSION_CALLS = 8;
+/** Character cap for each privacy-safe excerpt in parse-result diagnostics. */
+export const MAX_CHILD_DIAGNOSTIC_EXCERPT_CHARS = 300;
+/** Single bounded continuation prompt used only when a result was truncated. */
+export const CHILD_RESULT_CONTINUATION_PROMPT =
+	"Your previous message was cut off by the output limit before the required JSON result was complete. " +
+	"Reply with ONLY the final JSON result object from the task's Result contract. " +
+	"Do not call tools, do not add prose or markdown fences, and keep every field as short as possible.";
 
 export interface AiraChildRuntime {
 	model: Model<any>;
@@ -133,6 +151,7 @@ export async function runAiraChild(
 	let toolBudgetLimit = maxRounds * MAX_CHILD_TOOL_CALLS_PER_ROUND;
 	let toolCallsUsed = 0;
 	let toolBudgetExtensions = 0;
+	let workspaceMutated = false;
 	const seenToolCalls = new Set<string>();
 	const baseOptions: SimpleStreamOptions = {
 		maxTokens: MAX_CHILD_OUTPUT_TOKENS,
@@ -248,7 +267,10 @@ export async function runAiraChild(
 				const outcome = await executeChildTool(options.tools, call, signal);
 				if (!outcome.isError && (call.name === "edit" || call.name === "write")) {
 					const path = toolPath(call);
-					if (path) options.workspaceMutation?.(path);
+					if (path) {
+						workspaceMutated = true;
+						options.workspaceMutation?.(path);
+					}
 				}
 				if (isNewToolCall && !outcome.isError) roundHadProgress = true;
 				results.push(outcome.message);
@@ -304,16 +326,48 @@ export async function runAiraChild(
 			const failure = classifyAiraChildFailure(childProviderFailureEvidence(assistant, signal));
 			return { ok: false, driverError: failure.message, error: failure };
 		}
-		const parsed = parseChildResult(contentText(assistant));
+		let resultText = contentText(assistant);
+		let parsed = parseChildResult(resultText);
+		if (!parsed && assistant.stopReason === "length") {
+			// Truncation-aware recovery: the final message hit the output cap mid
+			// JSON. Ask exactly once for the compact contract with the SAME output
+			// budget (no token bump); a truncated payload is otherwise unparseable.
+			const continued = await raceWithTimeout(
+				callStream(
+					streamFn,
+					model,
+					options.systemPrompt,
+					[...messages, assistant, childResultContinuationMessage()],
+					[],
+					baseOptions,
+					signal,
+					options.events,
+				),
+				timeout,
+				signal,
+			);
+			accumulateUsage(continued);
+			assistant = continued;
+			resultText = contentText(continued);
+			parsed = parseChildResult(resultText);
+		}
 		if (!parsed) {
+			const truncated = assistant.stopReason === "length";
 			// Child-result protocol seam: the child ran but produced no usable
 			// result contract, which is a mechanism failure, not task evidence.
+			// Bounded, secret-sanitized diagnostics distinguish truncation from
+			// prose/malformation without storing the raw body. Workspace-mutation
+			// evidence keeps the task status truthful instead of hardcoding it.
 			const failure = classifyAiraChildFailure({
 				origin: "capability",
-				message: "child returned no valid structured result",
+				message: truncated
+					? "child result truncated before a valid structured result"
+					: "child returned no valid structured result",
+				...(truncated ? { code: "child-result-truncated" } : {}),
 				component: "child-protocol",
 				operation: "parse-result",
-				taskStatus: "attempted",
+				taskStatus: workspaceMutated || toolCallsUsed > 0 ? "attempted" : "not_attempted",
+				diagnostics: buildChildResultDiagnostics(resultText, assistant.stopReason, workspaceMutated),
 			});
 			return { ok: false, driverError: failure.message, error: failure };
 		}
@@ -622,10 +676,8 @@ function contentText(message: AssistantMessage): string {
 export function parseChildResult(text: string): Record<string, unknown> | undefined {
 	const trimmed = text.trim();
 	const fenced = /```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/i.exec(trimmed)?.[1];
-	const objectStart = trimmed.indexOf("{");
-	const objectEnd = trimmed.lastIndexOf("}");
-	const embedded = objectStart >= 0 && objectEnd > objectStart ? trimmed.slice(objectStart, objectEnd + 1) : undefined;
-	for (const candidate of [fenced, embedded, trimmed]) {
+	const balanced = lastBalancedObject(trimmed);
+	for (const candidate of [fenced, balanced, trimmed]) {
 		if (!candidate) {
 			continue;
 		}
@@ -639,6 +691,89 @@ export function parseChildResult(text: string): Record<string, unknown> | undefi
 		}
 	}
 	return undefined;
+}
+
+/**
+ * Return the LAST balanced top-level `{...}` region of `text`, respecting
+ * string literals and escapes so braces inside strings do not break balance.
+ * This isolates the final result object from earlier JSON examples in prose,
+ * unlike slicing from the first `{` to the last `}` (which spans both and
+ * yields invalid JSON). Returns undefined when a trailing object was opened
+ * but never closed, so a truncated payload is not misread as an earlier
+ * narration example.
+ */
+function lastBalancedObject(text: string): string | undefined {
+	let depth = 0;
+	let start = -1;
+	let last: string | undefined;
+	let inString = false;
+	let escaped = false;
+	for (let index = 0; index < text.length; index += 1) {
+		const char = text[index];
+		if (inString) {
+			if (escaped) {
+				escaped = false;
+			} else if (char === "\\") {
+				escaped = true;
+			} else if (char === '"') {
+				inString = false;
+			}
+			continue;
+		}
+		if (char === '"') {
+			inString = true;
+			continue;
+		}
+		if (char === "{") {
+			if (depth === 0) start = index;
+			depth += 1;
+			continue;
+		}
+		if (char === "}" && depth > 0) {
+			depth -= 1;
+			if (depth === 0 && start >= 0) {
+				last = text.slice(start, index + 1);
+				start = -1;
+			}
+		}
+	}
+	// An opened-but-unclosed object means the trailing (likely final) result was
+	// truncated; do not fall back to an earlier balanced object in the prose.
+	return depth > 0 ? undefined : last;
+}
+
+/** One bounded, secret-sanitized diagnostic excerpt. */
+function diagnosticExcerpt(value: string): string {
+	return boundChildText(sanitizeAiraFailureMessage(value), MAX_CHILD_DIAGNOSTIC_EXCERPT_CHARS);
+}
+
+/**
+ * Build bounded, privacy-safe diagnostics for an unparseable child result.
+ * Records provenance (hash + length + stop reason) and short sanitized
+ * excerpts; the raw body is never stored.
+ */
+function buildChildResultDiagnostics(
+	raw: string,
+	stopReason: string,
+	workspaceMutated: boolean,
+): AiraChildResultDiagnostics {
+	return {
+		stopReason,
+		rawLength: raw.length,
+		rawSha256: createHash("sha256").update(raw).digest("hex"),
+		head: diagnosticExcerpt(raw.slice(0, MAX_CHILD_DIAGNOSTIC_EXCERPT_CHARS)),
+		tail: diagnosticExcerpt(raw.slice(-MAX_CHILD_DIAGNOSTIC_EXCERPT_CHARS)),
+		workspaceMutated,
+	};
+}
+
+/** The single bounded continuation prompt used when a result was truncated. */
+function childResultContinuationMessage(): Message {
+	return {
+		role: "user",
+		content: [{ type: "text", text: CHILD_RESULT_CONTINUATION_PROMPT }],
+		timestamp: Date.now(),
+	};
 }
 
 /** Normalize + bound a raw child result into the hardened contract. */

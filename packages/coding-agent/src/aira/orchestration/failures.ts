@@ -24,6 +24,7 @@ import type {
 	AiraChildFailureCategory,
 	AiraChildFailureInfo,
 	AiraChildFailureKind,
+	AiraChildResultDiagnostics,
 	AiraChildTaskExecutionStatus,
 	AiraRetryableHint,
 } from "./types.ts";
@@ -51,6 +52,8 @@ export interface AiraFailureEvidence {
 	cancelled?: boolean;
 	/** Required capabilities the runtime could not grant before the run. */
 	capabilityGaps?: AiraChildCapabilityGap[];
+	/** Bounded parse diagnostics when an unparseable result caused the failure. */
+	diagnostics?: AiraChildResultDiagnostics;
 }
 
 /** Input for the legacy-compatible failure record (all fields optional). */
@@ -65,6 +68,7 @@ export interface AiraFailureInput {
 	retryableHint?: AiraRetryableHint;
 	taskStatus?: AiraChildTaskExecutionStatus;
 	capabilityGaps?: AiraChildCapabilityGap[];
+	diagnostics?: AiraChildResultDiagnostics;
 }
 
 const MESSAGE_LIMIT = 600;
@@ -134,6 +138,7 @@ export function buildAiraChildFailure(input: AiraFailureInput): AiraChildFailure
 		operation: input.operation,
 		taskStatus: input.taskStatus ?? "unknown",
 		...(input.capabilityGaps && input.capabilityGaps.length > 0 ? { capabilityGaps: input.capabilityGaps } : {}),
+		...(input.diagnostics ? { diagnostics: input.diagnostics } : {}),
 	};
 }
 
@@ -153,6 +158,7 @@ export function classifyAiraChildFailure(evidence: AiraFailureEvidence): AiraChi
 		component: evidence.component,
 		operation: evidence.operation,
 		capabilityGaps: evidence.capabilityGaps,
+		diagnostics: evidence.diagnostics,
 	};
 
 	if (evidence.cancelled) {

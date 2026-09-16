@@ -130,6 +130,9 @@ export function buildAiraChildEnvelope(input: AiraChildEnvelopeInput): AiraChild
 		`  "tests": ["tests/checks you performed"],`,
 		`  "errors": ["explicit errors, if any"]`,
 		`}`,
+		`Keep the final JSON compact: <= 600 chars of summary, <= 12 findings, and <= 25 items per list.`,
+		`Never paste file contents, diffs, or command output into the narration or the JSON — reference`,
+		`paths and short identifiers only. Your final message must be only the JSON object.`,
 		`Use tools as needed, then return the JSON as your final message.`,
 	);
 
