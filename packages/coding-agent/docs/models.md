@@ -432,6 +432,7 @@ Built-in Anthropic models enable `supportsStrictTools` in their model metadata. 
 | `forceAdaptiveThinking` | Whether to send adaptive thinking (`thinking.type: "adaptive"` plus `output_config.effort`) for this model. Built-in adaptive models set this automatically. Default: `false`. |
 | `allowEmptySignature` | Whether to replay empty thinking signatures as `signature: ""` instead of converting thinking to text. Default: `false`. |
 | `supportsStrictTools` | Whether the provider accepts strict JSON-schema tool definitions. Default: `false`; built-in Anthropic models enable it in generated metadata. |
+| `allowedFallbackModels` | Up to three server-side fallback models, each with `provider`, `model`, and complete `cost` metadata. An empty array disables fallback. |
 
 ## OpenAI Compatibility
 
