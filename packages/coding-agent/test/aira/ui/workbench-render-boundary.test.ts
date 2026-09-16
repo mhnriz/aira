@@ -46,7 +46,7 @@ function createController(): {
 	layoutChanged: ReturnType<typeof vi.fn>;
 } {
 	const session = {
-		sessionId: "render-boundary-" + Math.random().toString(36).slice(2),
+		sessionId: `render-boundary-${Math.random().toString(36).slice(2)}`,
 		settingsManager: {
 			getWorkbenchSettings: () => ({ ...stored }),
 			setWorkbenchSettings: (patch: Partial<typeof stored>) => Object.assign(stored, patch),

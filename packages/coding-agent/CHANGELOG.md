@@ -181,6 +181,15 @@
   classification line. No child prompt, envelope, startup, scheduling, reuse,
   or failure-semantics change. Governed by
   `src/aira/orchestration/model-tools.ts`.
+- **Aira**: Selective task planning. The `tasks` tool no longer implies that
+  every multi-step request needs a task graph: direct execution is the default
+  for one coherent deliverable, and tasks appear only when the user asked for a
+  plan/checklist or durable task state materially helps execution, recovery,
+  coordination, or visibility (multiple independent workstreams, long-running
+  or pausable work, child-agent coordination). Patching stays one task per
+  call, orchestration-owned child rows stay immutable, and the tool still never
+  injects the full graph into context. Governed by
+  `src/aira/tasks/model-tool.ts`.
 
 ### Fixed
 
@@ -214,6 +223,16 @@
   graceful: when csharp-ls is not installed, C# projects degrade to a
   truthful unavailable state with plain-search navigation instead of
   crashing or faking readiness.
+- **Aira**: Compact long-running active turns. Progressive context compaction
+  previously protected the newest user message and everything after it, so one
+  substantial request driving a long autonomous model/tool run could never
+  compact. Active-request protection is now narrower: the newest user message
+  stays verbatim, the newest execution history stays verbatim by the existing
+  byte budget, and older same-turn assistant/tool history becomes eligible. A
+  tool call/result pair straddling the verbatim boundary is pulled into the
+  window instead of being split. Canonical history is untouched and the
+  transform stays pure, deterministic, idempotent, and fail-open with no model
+  calls. Governed by `src/aira/context-compaction.ts`.
 
 ### Changed
 
