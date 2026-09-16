@@ -212,8 +212,7 @@ export function createAiraBrowserToolDefinitions(
 			"Open (or reuse) the Aira browser: an ISOLATED Aira-owned Chromium with a disposable profile. It never attaches to your personal browser. Local verification (localhost/loopback) is the default; the browser is headless. Use browser_observe after opening to see the page semantically.",
 		promptSnippet: "Open the isolated Aira browser",
 		promptGuidelines: [
-			"Prefer local/loopback URLs — the isolated profile has no personal cookies or logins.",
-			"The browser persists across tool calls within this session; close it with browser_close when done.",
+			"Prefer local/loopback URLs; the isolated browser has no personal cookies or logins. Close it with browser_close when done.",
 		],
 		parameters: browserOpenSchema,
 		executionMode: "sequential",

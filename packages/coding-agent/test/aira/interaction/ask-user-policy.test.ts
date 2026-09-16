@@ -1,13 +1,14 @@
 /**
- * Aira interaction — ask_user decision policy tests (0.1.7 step 5).
+ * Aira interaction — ask_user decision policy tests (0.1.8 lean prompt C).
  *
  * Proves the canonical model-facing guidance treats ask_user as a decision
  * boundary rather than an uncertainty escape hatch: repository-resolvable
- * questions are investigated first, routine reversible choices proceed,
- * user-owned product/architecture/destructive ambiguity is asked, explicit
- * user decisions are never re-asked, and investigation stops when it stops
- * improving confidence. The tool surface, runtime seam, and execution
- * behavior are unchanged; no classifier or hidden model call is involved.
+ * questions are investigated first, routine reversible choices proceed, and
+ * user-owned product/architecture/destructive ambiguity is asked. The
+ * condensed guideline text keeps those anchors; the tool description
+ * continues to state one-question quality and the cancelled-question
+ * contract. The tool surface, runtime seam, and execution behavior are
+ * unchanged; no classifier or hidden model call is involved.
  */
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
@@ -52,19 +53,15 @@ describe("ask_user decision policy guidance", () => {
 
 	it("investigates repository-resolvable questions before asking", () => {
 		const text = guidanceText();
+		expect(text).toMatch(/investigate first when the repository or environment can answer/i);
 		expect(text).toMatch(/the repository or environment/);
-		expect(text).toMatch(/established local convention/i);
-		expect(text).toMatch(/reversible and low-risk/i);
+		expect(text).toMatch(/proceed on routine reversible choices/i);
 	});
 
-	it("proceeds on routine reversible implementation choices", () => {
+	it("proceeds on routine reversible choices instead of asking", () => {
 		const text = guidanceText();
-		expect(text).toMatch(/routine reversible implementation choices/i);
-		expect(text).toMatch(/naming/i);
-		expect(text).toMatch(/helper placement/i);
-		expect(text).toMatch(/internal data structures/i);
-		expect(text).toMatch(/established test framework/i);
-		expect(text).toMatch(/validate the result/i);
+		expect(text).toMatch(/proceed on routine reversible choices/i);
+		expect(text).toMatch(/proceed on reversible choices/i);
 	});
 
 	it("asks for user-owned product, UX, and architecture direction", () => {
@@ -77,35 +74,33 @@ describe("ask_user decision policy guidance", () => {
 	it("asks before destructive or irreversible actions", () => {
 		const text = guidanceText();
 		expect(text).toMatch(/destructive or irreversible actions/i);
-		expect(text).toMatch(/deleting data/i);
-		expect(text).toMatch(/destructive migrations/i);
-		expect(text).toMatch(/replacing public APIs/i);
-		expect(text).toMatch(/breaking backwards compatibility/i);
 	});
 
-	it("never re-asks an explicit user decision, even against repository convention", () => {
+	it("never re-asks an explicit user decision", () => {
 		const text = guidanceText();
-		expect(text).toMatch(/never re-ask a decision the user already made explicitly/i);
-		expect(text).toMatch(/even when repository convention differs/i);
+		expect(text).toMatch(/never re-ask what the user already decided explicitly/i);
+		expect(text).toMatch(/never re-ask what the user already decided/i);
 	});
 
-	it("stops investigating when confidence no longer improves", () => {
+	it("keeps question quality: one concrete question and a recommended default", () => {
 		const text = guidanceText();
-		expect(text).toMatch(/stop investigating when further inspection no longer improves confidence/i);
-		expect(text).toMatch(/two or more materially different options remain/i);
-		expect(text).toMatch(/ask instead of searching again/i);
+		expect(text).toMatch(/exactly one concrete question with concise options and a recommended default/i);
+		expect(text).toMatch(/exactly one concrete question per call/i);
+		expect(text).toMatch(/recommend a\s+default when evidence supports one/i);
 	});
 
-	it("keeps question quality: one concrete question, consequences, recommended default", () => {
+	it("keeps the cancelled-question contract in both guideline and description", () => {
 		const text = guidanceText();
-		expect(text).toMatch(/exactly one concrete question per ask_user call/i);
-		expect(text).toMatch(/consequence of each/i);
-		expect(text).toMatch(/recommend a default when evidence supports one/i);
-		expect(text).toMatch(/leave internal investigation detail out/i);
+		expect(text).toMatch(/a cancelled or unavailable question is not an answer/i);
+		expect(text).toMatch(/cancelled\/unavailable question/i);
+		expect(text).toMatch(/NOT an answer/i);
 	});
 
-	it("drops mechanical uncertainty triggers from the old wording", () => {
+	it("condenses the old exploratory wording without adding uncertainty triggers", () => {
 		const text = guidanceText();
+		// Consciously removed by the lean prompt: the "stop investigating"
+		// meta-rule and the enumerated reversible-choice examples.
+		expect(text).not.toMatch(/stop investigating when further inspection no longer improves confidence/i);
 		expect(text).not.toMatch(/I'm uncertain|if unsure, ask/i);
 		expect(text).not.toMatch(/confidence score/i);
 	});
@@ -160,7 +155,7 @@ describe("ask_user decision policy guidance", () => {
 			cwd: process.cwd(),
 		});
 		expect(prompt).toContain("genuine decision boundary");
-		expect(prompt).toContain("check whether the repository or environment already answers the question");
+		expect(prompt).toContain("investigate first when the repository or environment can answer");
 		expect(prompt).toContain("Ask the user one focused question and wait for the answer");
 	});
 

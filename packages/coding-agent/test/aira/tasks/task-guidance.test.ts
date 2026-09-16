@@ -1,12 +1,12 @@
 /**
- * Aira tasks — task-use policy guidance tests (0.1.7 step 1).
+ * Aira tasks — task-use policy guidance tests (0.1.8 lean prompt C).
  *
  * Proves the canonical model-facing guidance communicates the selective
  * task-use policy: direct execution is the default for one coherent
- * deliverable (even with several acceptance criteria); tasks remain
- * appropriate when the user requests a plan/checklist, the work has
- * independent workstreams, or child-agent coordination is involved. The
- * tool surface itself is unchanged.
+ * deliverable; tasks remain appropriate when the work is independent,
+ * long-running or resumable, or explicitly requested. Task bookkeeping stays
+ * one-at-a-time and child-delegated rows stay orchestration-owned. The tool
+ * surface itself is unchanged.
  */
 import { describe, expect, it } from "vitest";
 import { acquireAiraSessionState, disposeAiraSessionState } from "../../../src/aira/state.ts";
@@ -28,12 +28,10 @@ function guidanceText(): string {
 }
 
 describe("tasks task-use guidance (selective planning)", () => {
-	it("does not encourage a task graph for one coherent deliverable with multiple acceptance criteria", () => {
+	it("does not encourage a task graph for one coherent deliverable", () => {
 		const text = guidanceText();
-		expect(text).toMatch(/work directly by default/i);
-		expect(text).toMatch(/coherent engineering deliverable/i);
-		expect(text).toMatch(/several acceptance criteria/i);
-		expect(text).toMatch(/do not convert every numbered requirement into a task/i);
+		expect(text).toMatch(/work directly for one coherent deliverable/i);
+		expect(text).toMatch(/use tasks selectively/i);
 	});
 
 	it("removed the mechanical step-count trigger", () => {
@@ -42,22 +40,28 @@ describe("tasks task-use guidance (selective planning)", () => {
 
 	it("keeps task usage appropriate when the user explicitly requests a plan or checklist", () => {
 		const text = guidanceText();
-		expect(text).toMatch(/user explicitly asked for a plan, checklist, or tracked progress/i);
+		expect(text).toMatch(/explicitly requested/i);
 		expect(text).toMatch(/plan\/checklist/i);
 	});
 
 	it("keeps task usage appropriate for independent workstreams", () => {
-		expect(guidanceText()).toMatch(/multiple independent workstreams/i);
+		expect(guidanceText()).toMatch(/independent/i);
 	});
 
 	it("keeps task usage appropriate for child-agent coordination", () => {
 		const text = guidanceText();
-		expect(text).toMatch(/child-agent coordination/i);
+		expect(text).toMatch(/orchestration-owned/i);
 		expect(text).toMatch(/agents_delegate/i);
 	});
 
 	it("keeps task usage appropriate for long-running or resumable work", () => {
-		expect(guidanceText()).toMatch(/long-running or may be paused and resumed/i);
+		expect(guidanceText()).toMatch(/long-running or resumable/i);
+	});
+
+	it("keeps the one-task-at-a-time bookkeeping contract", () => {
+		const text = guidanceText();
+		expect(text).toMatch(/Patch one task at a time/i);
+		expect(text).toMatch(/unfinished dependencies is blocked/i);
 	});
 
 	it("keeps the task tool surface available and unchanged", async () => {
@@ -101,7 +105,7 @@ describe("tasks task-use guidance (selective planning)", () => {
 			skills: [],
 			cwd: process.cwd(),
 		});
-		expect(prompt).toContain("- Use tasks selectively. Work directly by default:");
+		expect(prompt).toContain("- Use tasks selectively: work directly for one coherent deliverable");
 		expect(prompt).not.toContain("3+ distinct steps");
 	});
 });

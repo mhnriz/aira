@@ -17,10 +17,8 @@ import type { AiraTaskManagerHandle } from "./manager.ts";
 const TASKS_PROMPT_SNIPPET = "Manage a compact task list for tracked multi-step work";
 
 const TASKS_PROMPT_GUIDELINES = [
-	"Use tasks selectively. Work directly by default: one coherent engineering deliverable should not create a task graph even if it has several acceptance criteria or an obvious step sequence (scaffold, implement, test, document). Do not convert every numbered requirement into a task.",
-	"Create tasks when durable task state materially helps execution, recovery, coordination, or visibility: the user explicitly asked for a plan, checklist, or tracked progress; the work has multiple independent workstreams; work is long-running or may be paused and resumed; or child-agent coordination is involved. Make each task a meaningful unit of work.",
-	"Patch ONE task at a time (create/patch by id); never rewrite the whole list. Mark a task active before starting it (one at a time) and completed only when actually done.",
-	"A task with unfinished dependencies is blocked and cannot be activated; children delegated with agents_delegate appear automatically and are orchestration-owned (never patch them).",
+	"Use tasks selectively: work directly for one coherent deliverable; create tasks when work is independent, long-running or resumable, or explicitly requested.",
+	"Patch one task at a time; mark a task active before starting it and completed only when done. A task with unfinished dependencies is blocked, and agent-delegated children are orchestration-owned (never patch them).",
 ] as const;
 
 const TASKS_DESCRIPTION = `Track session tasks (one canonical task graph; Token-free projection).

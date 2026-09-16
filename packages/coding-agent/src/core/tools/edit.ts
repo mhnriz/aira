@@ -59,11 +59,8 @@ const editSchema = Type.Object(
 export const editToolSystemPromptContribution = {
 	snippet: "Make precise file edits with exact text replacement, including multiple disjoint edits in one call",
 	guidelines: [
-		"Use edit for precise changes (edits[].oldText must match exactly)",
-		"When changing multiple separate locations in one file, use one edit call with multiple entries in edits[] instead of multiple edit calls",
-		"Each edits[].oldText is matched against the original file, not after earlier edits are applied. Do not emit overlapping or nested edits. Merge nearby changes into one edit.",
-		"Keep edits[].oldText as small as possible while still being unique in the file. Do not pad with large unchanged regions.",
-		"If the file changed since you read it, the tool may re-anchor one stale old_text to the current file automatically. An EDIT_CONFLICT result means it could not: reread the region and retry with current exact text instead of resending or widening oldText.",
+		"Use edit for precise changes; edits[].oldText must match the original file exactly, be as small as possible while unique, and must not overlap other edits in the same call.",
+		"If the file changed since you read it, the tool may re-anchor one stale old_text; an EDIT_CONFLICT result means you must reread the region and retry with current exact text instead of resending or widening oldText.",
 	],
 } as const;
 

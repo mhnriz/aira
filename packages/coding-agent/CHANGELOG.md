@@ -250,6 +250,13 @@
 
 - Preserve Pi 0.85.1 compatibility while retaining Aira's native runtime,
   Workbench, and recovery architecture.
+- **Aira**: Canonicalize the model-facing system-prompt guidance to remove
+  duplicated instruction prose. The intelligence funnel, edit recovery,
+  process, browser, delegation, `ask_user`, and task guidance keep every
+  decision anchor (investigate before asking, proceed on reversible choices,
+  ask on user-owned decisions, edit safety, child failure semantics) while
+  dropping wording already supplied by the tool schemas. Tool surface,
+  runtime, and behavior are unchanged.
 
 ## [0.84.4] - 2026-08-28
 

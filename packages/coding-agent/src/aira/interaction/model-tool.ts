@@ -43,13 +43,9 @@ export interface AiraInteractionToolRuntime {
 const ASK_USER_PROMPT_SNIPPET = "Ask the user one focused question and wait for the answer";
 
 const ASK_USER_PROMPT_GUIDELINES = [
-	"Use ask_user only at a genuine decision boundary, not as an uncertainty escape: before asking, check whether the repository or environment already answers the question, whether one option follows an established local convention, and whether the choice is reversible and low-risk. If any of those resolve it, proceed instead.",
-	"Proceed on routine reversible implementation choices (naming, helper placement, internal data structures, an established test framework, formatting) and validate the result instead of asking.",
-	"Ask when materially different outcomes remain: user-owned product/UX direction, architecture trade-offs, destructive or irreversible actions (deleting data, destructive migrations, replacing public APIs, breaking backwards compatibility), or facts only the user can supply.",
-	"Never re-ask a decision the user already made explicitly; follow the explicit instruction even when repository convention differs, and surface the conflict only when it materially changes product behavior.",
-	"Stop investigating when further inspection no longer improves confidence: if two or more materially different options remain after the useful evidence is in, ask instead of searching again.",
-	"Ask exactly one concrete question per ask_user call, with concise options and the consequence of each, and recommend a default when evidence supports one; keep context to a short summary and leave internal investigation detail out.",
-	"A cancelled or unavailable question is NOT an answer: do not invent one; state the blocker or re-ask when the decision is truly required.",
+	"Use ask_user only at a genuine decision boundary: investigate first when the repository or environment can answer, and proceed on routine reversible choices.",
+	"Ask when materially different outcomes remain: user-owned product/UX direction, architecture trade-offs, destructive or irreversible actions, or facts only the user can supply. Never re-ask what the user already decided explicitly.",
+	"Ask exactly one concrete question with concise options and a recommended default; a cancelled or unavailable question is not an answer, so state the blocker or re-ask when the decision is truly required.",
 ] as const;
 
 const ASK_USER_DESCRIPTION = `Ask the user a structured question and wait for the answer.

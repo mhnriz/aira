@@ -328,11 +328,8 @@ export function createAiraOrchestrationToolDefinitions(options: {
 			"Dispatch bounded work to isolated child agents. Each child receives ONLY its explicit envelope (task, role, files, context, mode) plus a capability-derived tool set — never the parent conversation. Roles: explore/research/review are read-only; test runs managed tests/checks; implement makes workspace changes. Declare requiredCapabilities when the task needs process execution, mutation, or browser interaction; incompatible roles are rejected before provider spend. Dependencies are task ids in this batch. PLAN remains read-only. Children cannot spawn children.",
 		promptSnippet: "Delegate bounded work to isolated child agents",
 		promptGuidelines: [
-			"Keep task text bounded (<= 4000 chars) and self-contained: children do not see the conversation.",
-			"Use dependencies only when ordering matters; prefer parallel dispatch otherwise.",
-			"Prefer await=false for long work, then poll agents_status; await=true blocks until settlement (bounded by per-child timeouts).",
-			"Do not delegate trivial tasks; children consume model tokens.",
-			"Declare requiredCapabilities for obvious execution or mutation work so the host can reject incompatible roles before invoking a child.",
+			"Keep task text self-contained: children do not see the conversation. Use dependencies only when ordering matters and prefer parallel dispatch.",
+			"Prefer await=false for long work, then poll agents_status. Do not delegate trivial tasks; children consume model tokens. Declare requiredCapabilities for execution or mutation work.",
 			"Read settled child results by failure kind: task_failure means the child ran and the evidence should revise the work; capability_failure/environment_failure mean the child mechanism could not run, so diagnose or continue directly instead of rewriting the failed capability with ad-hoc primitives.",
 		],
 		parameters: delegateSchema,

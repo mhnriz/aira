@@ -478,11 +478,9 @@ export function createAiraProcessToolDefinitions(
 			"Launch a managed process in the session working directory. Use for long-running or owned commands: dev servers (background, purpose dev, reuse reuse), tests, builds, and type checks. For quick one-off commands prefer bash. Foreground runs wait and return the exit code with bounded output tails; background runs return immediately with a process id that process_status/process_logs/process_stop manage. Background processes keep running after this tool returns and are cleaned up when the session ends. Output in results is a bounded tail (full logs stay accessible via process_logs).",
 		promptSnippet: "Launch managed processes (dev servers, tests, builds)",
 		promptGuidelines: [
-			"Use background + purpose dev for development servers; reuse with reuse=reuse so a compatible running server is reused instead of spawned again.",
-			"Prefer foreground for short verification (tests, builds, checks); set timeout only when a bound is needed.",
-			"Use background=auto when a command may be either quick or long-running: it stays foreground if it finishes quickly and becomes a managed background process if it outlives ~20s.",
-			"Use interactive=true only when the command requires a local terminal; secrets are collected by the local UI and never returned to the model.",
-			"process_start never times out by itself: it runs until the process exits (or timeout is given).",
+			"Use background + purpose dev for development servers; reuse with reuse=reuse so a compatible running server is reused. Prefer foreground for short verification, and background=auto for commands that may outlive ~20s.",
+			"Use interactive=true only when the command requires a local terminal.",
+			"process_start never times out by itself: it runs until the process exits or a timeout is given.",
 		],
 		parameters: processStartSchema,
 		async execute(_toolCallId, params, signal) {
