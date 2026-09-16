@@ -438,6 +438,67 @@ describe("SessionTelemetry collector", () => {
 		expect(snapshot.validation.checks).toBe(1);
 	});
 
+	it("classifies validation invocations from bash tool commands", async () => {
+		const temp = createTempDir();
+		cleanups.push(temp.cleanup);
+		const telemetry = new SessionTelemetry();
+
+		await telemetry.onAgentEvent(toolStart("t1", "bash", { command: "npm test" }), temp.dir);
+		await telemetry.onAgentEvent(toolEnd("t1", "bash", false, emptyResult()), temp.dir);
+		await telemetry.onAgentEvent(toolStart("t2", "bash", { command: "./test.sh" }), temp.dir);
+		await telemetry.onAgentEvent(toolEnd("t2", "bash", false, emptyResult()), temp.dir);
+		await telemetry.onAgentEvent(toolStart("t3", "bash", { command: "npm run build" }), temp.dir);
+		await telemetry.onAgentEvent(toolEnd("t3", "bash", false, emptyResult()), temp.dir);
+		await telemetry.onAgentEvent(toolStart("t4", "bash", { command: "npm run check" }), temp.dir);
+		await telemetry.onAgentEvent(toolEnd("t4", "bash", false, emptyResult()), temp.dir);
+		await telemetry.onAgentEvent(toolStart("t5", "bash", { command: "tsc --noEmit" }), temp.dir);
+		await telemetry.onAgentEvent(toolEnd("t5", "bash", false, emptyResult()), temp.dir);
+
+		const snapshot = telemetry.snapshot({
+			inputTokens: 0,
+			outputTokens: 0,
+			cacheReadTokens: 0,
+			cacheWriteTokens: 0,
+			costUsd: 0,
+		});
+		expect(snapshot.validation.tests).toBe(2);
+		expect(snapshot.validation.builds).toBe(1);
+		expect(snapshot.validation.checks).toBe(2);
+	});
+
+	it("ignores non-validation bash tool commands", async () => {
+		const temp = createTempDir();
+		cleanups.push(temp.cleanup);
+		const telemetry = new SessionTelemetry();
+
+		const nonValidation = [
+			"ls",
+			"git status --short",
+			"cat package.json",
+			"npm ci",
+			"npm run dev",
+			"echo test",
+			"test -f package.json",
+		];
+		for (const [index, command] of nonValidation.entries()) {
+			const id = `t${index}`;
+			await telemetry.onAgentEvent(toolStart(id, "bash", { command }), temp.dir);
+			await telemetry.onAgentEvent(toolEnd(id, "bash", false, emptyResult()), temp.dir);
+		}
+
+		const snapshot = telemetry.snapshot({
+			inputTokens: 0,
+			outputTokens: 0,
+			cacheReadTokens: 0,
+			cacheWriteTokens: 0,
+			costUsd: 0,
+		});
+		expect(snapshot.validation.tests).toBe(0);
+		expect(snapshot.validation.builds).toBe(0);
+		expect(snapshot.validation.checks).toBe(0);
+		expect(snapshot.tools.byName.bash).toBe(nonValidation.length);
+	});
+
 	it("counts verifier runs only on transitions into a running state", async () => {
 		const telemetry = new SessionTelemetry();
 		telemetry.observeVerificationState("idle");

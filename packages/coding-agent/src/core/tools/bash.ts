@@ -23,15 +23,10 @@ import type {
 	ToolRenderContext,
 	ToolRenderResultOptions,
 } from "../extensions/types.ts";
-import {
-	buildCompactRow,
-	classifyShellCommand,
-	formatCompactDuration,
-	summarizeBashError,
-	summarizeTestOutput,
-} from "./compact.ts";
+import { buildCompactRow, formatCompactDuration, summarizeBashError, summarizeTestOutput } from "./compact.ts";
 import { OutputAccumulator } from "./output-accumulator.ts";
 import { getTextOutput, invalidArgText, str } from "./render-utils.ts";
+import { classifyShellCommand } from "./shell-command.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, type TruncationResult } from "./truncate.ts";
 

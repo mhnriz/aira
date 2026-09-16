@@ -56,6 +56,13 @@
   triggering model calls. `/telemetry` renders a compact summary and
   `/telemetry --json` (plus the RPC `get_session_telemetry` command) expose a
   stable schema-versioned snapshot. Data is session-local and in-memory only.
+- **Aira**: Validation telemetry now also covers validation run through the
+  generic `bash` tool, not just the `process_start` purpose parameter. Bash
+  commands are classified by the same shell-command structure classifier used
+  for compact tool labels: `npm test`, `bun test`, `./test.sh`, `npm run
+  build`, `npm run check`, and `tsc` increment the schema-1.4.0 `validation`
+  counters, while routine shell work (`ls`, `git status`, `cat`, POSIX `test`
+  conditionals) stays out.
 - **Aira**: Model-request context payload telemetry. Every request through the
   canonical agent-loop boundary is measured before dispatch: deterministic
   UTF-8 serialized bytes for the system prompt, for the conversation split by

@@ -3,6 +3,7 @@ import type { AgentEvent, ModelContextPayloadMeasurement } from "@earendil-works
 import type { AiraContextCompactionReport } from "../aira/context-compaction.ts";
 import type { RepositoryObservationStats } from "./repository-observations.ts";
 import { resolveReadPathAsync, resolveToCwd } from "./tools/path-utils.ts";
+import { classifyShellCommand } from "./tools/shell-command.ts";
 
 /**
  * Session telemetry — local, passive observability for the current session.
@@ -207,8 +208,11 @@ export interface SessionTelemetrySnapshot {
 		retries: number;
 	};
 	validation: {
+		/** Test invocations from the `process_start` purpose or a classified `bash` command. */
 		tests: number;
+		/** Build invocations from the `process_start` purpose or a classified `bash` command. */
 		builds: number;
+		/** Check invocations from the `process_start` purpose or a classified `bash` command. */
 		checks: number;
 		verifications: number;
 	};
@@ -515,6 +519,12 @@ export class SessionTelemetry {
 		return typeof purpose === "string" ? purpose : undefined;
 	}
 
+	private static argumentCommand(args: unknown): string | undefined {
+		if (!args || typeof args !== "object") return undefined;
+		const command = (args as Record<string, unknown>).command;
+		return typeof command === "string" ? command : undefined;
+	}
+
 	/**
 	 * Record one agent event. The collector only observes; it never returns
 	 * values that influence the agent. Async only for the one stat per `read`
@@ -547,6 +557,9 @@ export class SessionTelemetry {
 				}
 				if (event.toolName === "process_start") {
 					this.recordValidationPurpose(SessionTelemetry.argumentPurpose(event.args));
+				}
+				if (event.toolName === "bash") {
+					this.recordShellValidation(SessionTelemetry.argumentCommand(event.args));
 				}
 				return;
 			}
@@ -667,6 +680,34 @@ export class SessionTelemetry {
 		// The process_start tool's `purpose` parameter is authoritative tool
 		// metadata (AiraProcessPurpose), not natural-language classification.
 		switch (purpose) {
+			case "test":
+				this.testInvocations++;
+				break;
+			case "build":
+				this.buildInvocations++;
+				break;
+			case "check":
+				this.checkInvocations++;
+				break;
+			default:
+				break;
+		}
+	}
+
+	/**
+	 * Count validation executed through the generic `bash` tool. The shell
+	 * classifier is the same one that labels compact tool rows, so telemetry
+	 * counts exactly the commands presented to the user as test/check/build
+	 * runs. Routine shell work (`ls`, `git status`, `cat`, ...) classifies as
+	 * `bash` and stays out of the validation counters.
+	 *
+	 * Classification is lexical (wrapper-stripped subcommand), so it needs no
+	 * process spawn, filesystem read, or per-framework heuristics beyond the
+	 * shared vocabulary in `shell-command.ts`.
+	 */
+	private recordShellValidation(command: string | undefined): void {
+		if (!command) return;
+		switch (classifyShellCommand(command).kind) {
 			case "test":
 				this.testInvocations++;
 				break;
