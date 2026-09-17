@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-09-17
+
 ### New Features
 
 - Add durable session/runtime ownership and recovery across sessions, branches,
@@ -257,21 +259,24 @@
   signal is already aborted instead of running until their timeout, and the
   abort listener is released once the race settles. The language-server
   diagnostics probe and the child-cancellation test no longer depend on fixed
-  sleeps that could flake under parallel load. Bash classification now
-  recognizes Windows-style test scripts (`.\test.ps1`, `.\test.bat`) and
+  sleeps that could flake under parallel load. The edit-conflict fixture write
+  is now awaited so file creation cannot race the edit tool. Bash classification
+  now recognizes Windows-style test scripts (`.\test.ps1`, `.\test.bat`) and
   backslash path targets for the compact tool summary.
 
 ### Changed
 
 - Preserve Pi 0.85.1 compatibility while retaining Aira's native runtime,
   Workbench, and recovery architecture.
-- **Aira**: Canonicalize the model-facing system-prompt guidance to remove
-  duplicated instruction prose. The intelligence funnel, edit recovery,
-  process, browser, delegation, `ask_user`, and task guidance keep every
-  decision anchor (investigate before asking, proceed on reversible choices,
-  ask on user-owned decisions, edit safety, child failure semantics) while
-  dropping wording already supplied by the tool schemas. Tool surface,
-  runtime, and behavior are unchanged.
+- **Aira**: Canonicalize the model-facing system-prompt guidance to the lean
+  variant C prompt, removing duplicated instruction prose. The intelligence
+  funnel, edit recovery, process, browser, delegation, `ask_user`, and task
+  guidance keep every decision anchor (investigate before asking, proceed on
+  reversible choices, ask on user-owned decisions, edit safety, child failure
+  semantics) while dropping wording already supplied by the tool schemas. The
+  lean guidance measures 5829 B, down from 8630 B (~32.4% reduction), with
+  every decision boundary preserved. Tool surface, runtime, and behavior are
+  unchanged.
 
 ## [0.84.4] - 2026-08-28
 
