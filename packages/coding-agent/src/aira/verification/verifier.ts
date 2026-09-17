@@ -259,15 +259,20 @@ function callStream(
 function raceWithTimeout<T>(promise: Promise<T>, timeout: Promise<never>, signal?: AbortSignal): Promise<T> {
 	return new Promise<T>((resolve, reject) => {
 		let settled = false;
-		const settle = (action: () => void): void => {
-			if (!settled) {
-				settled = true;
-				action();
-			}
-		};
 		const onAbort = () => {
 			settle(() => reject(new Error("verifier cancelled")));
 		};
+		const settle = (action: () => void): void => {
+			if (!settled) {
+				settled = true;
+				signal?.removeEventListener("abort", onAbort);
+				action();
+			}
+		};
+		if (signal?.aborted) {
+			onAbort();
+			return;
+		}
 		signal?.addEventListener("abort", onAbort, { once: true });
 		promise.then(
 			(value) => settle(() => resolve(value)),

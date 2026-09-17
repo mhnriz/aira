@@ -380,7 +380,7 @@ describe("editing telemetry", () => {
 	it("counts an unresolved EDIT_CONFLICT as a failure and conflict without a retry", async () => {
 		const dir = await createTempDir();
 		const file = join(dir, "conflict.js");
-		writeFile(file, "const a = 1;\n", "utf-8");
+		await writeFile(file, "const a = 1;\n", "utf-8");
 		const tool = createEditTool(dir);
 		let message = "";
 		try {

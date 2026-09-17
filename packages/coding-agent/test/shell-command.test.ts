@@ -24,6 +24,14 @@ describe("classifyShellCommand", () => {
 		expect(kindOf("vite build")).toBe("build");
 	});
 
+	it("detects Windows-style test invocations and targets", () => {
+		expect(kindOf(".\\test.ps1")).toBe("test");
+		expect(kindOf(".\\test.bat")).toBe("test");
+		const info = classifyShellCommand("vitest run test\\core\\tools");
+		expect(info.kind).toBe("test");
+		expect(info.target).toBe("test\\core\\tools");
+	});
+
 	it("leaves routine shell work and POSIX conditionals unclassified", () => {
 		expect(kindOf("ls")).toBe("bash");
 		expect(kindOf("git status --short")).toBe("bash");

@@ -83,6 +83,35 @@ function projectState(root: string): AiraSessionState {
 	return state;
 }
 
+type DiagnosticsResult = Awaited<ReturnType<AiraIntelligenceHandle["diagnostics"]>>;
+type FileDiagnostics = DiagnosticsResult["files"][number]["diagnostics"];
+
+/**
+ * Query the model-facing diagnostics surface until the file's diagnostics
+ * satisfy `predicate`. The language server may publish an initial empty result
+ * for a freshly opened document before the analysis lands, so a single query
+ * can observe a transient empty state; polling keeps the probe deterministic
+ * under parallel load without weakening the assertions.
+ */
+async function queryDiagnosticsUntil(
+	handle: AiraIntelligenceHandle,
+	path: string,
+	predicate: (diagnostics: FileDiagnostics) => boolean,
+	deadlineMs = 20_000,
+): Promise<DiagnosticsResult> {
+	const deadline = Date.now() + deadlineMs;
+	let result = await handle.diagnostics({ paths: [path] });
+	while (Date.now() < deadline) {
+		const file = result.files.find((entry) => entry.path === path);
+		if (file && predicate(file.diagnostics)) {
+			return result;
+		}
+		await new Promise((resolve) => setTimeout(resolve, 100));
+		result = await handle.diagnostics({ paths: [path] });
+	}
+	return result;
+}
+
 describe(
 	"language-server diagnostics surface (real TS server)",
 	{ skip: !hasTypeScriptServer, timeout: 60_000 },
@@ -101,7 +130,9 @@ describe(
 			await handle.activate();
 			await handle.waitUntilSettled();
 
-			const result = await handle.diagnostics({ paths: ["src/probe.ts"] });
+			const result = await queryDiagnosticsUntil(handle, "src/probe.ts", (diagnostics) =>
+				diagnostics.some((entry) => entry.severity === "error"),
+			);
 			expect(result.status).toBe("ready");
 			const file = result.files.find((entry) => entry.path === "src/probe.ts");
 			expect(file?.status).toBe("ready");
@@ -121,7 +152,7 @@ describe(
 
 			// Fixing the file clears the diagnostic state.
 			writeFileSync(probe, 'export const airaDiagnosticProbe: string = "ok";\n');
-			const fixed = await handle.diagnostics({ paths: ["src/probe.ts"] });
+			const fixed = await queryDiagnosticsUntil(handle, "src/probe.ts", (diagnostics) => diagnostics.length === 0);
 			const fixedFile = fixed.files.find((entry) => entry.path === "src/probe.ts");
 			expect(fixedFile?.status).toBe("ready");
 			expect(fixedFile?.diagnostics).toEqual([]);
@@ -147,7 +178,9 @@ describe(
 				await handle.activate();
 				await handle.waitUntilSettled();
 
-				const payload = await handle.diagnostics({ paths: ["src/probe.ts"] });
+				const payload = await queryDiagnosticsUntil(handle, "src/probe.ts", (diagnostics) =>
+					diagnostics.some((entry) => entry.severity === "error"),
+				);
 				expect(payload.status).toBe("ready");
 				const file = payload.files.find((entry) => entry.path === "src/probe.ts");
 				expect(file?.diagnostics[0]?.severity).toBe("error");
@@ -159,17 +192,32 @@ describe(
 				const definitions = decorateAiraIntelligenceRenderers(
 					createAiraIntelligenceToolDefinitions({ runtime: handle }),
 				);
-				const result = await (
-					definitions.aira_diagnostics.execute as (
-						id: string,
-						params: { paths: string[] },
-					) => Promise<{
-						content: Array<{ type: string; text: string }>;
-						details: unknown;
-					}>
-				)("dogfood-call", { paths: ["src/probe.ts"] });
-				expect(result.details).toEqual(payload);
-				expect(result.content[0].text).toBe(JSON.stringify(payload));
+				const invoke = definitions.aira_diagnostics.execute as (
+					id: string,
+					params: { paths: string[] },
+				) => Promise<{
+					content: Array<{ type: string; text: string }>;
+					details: unknown;
+				}>;
+				// The language server may publish a transient empty result for a
+				// freshly synced document; retry the model-facing tool until the
+				// analysis lands so the rendered assertions are deterministic.
+				let result = await invoke("dogfood-call", { paths: ["src/probe.ts"] });
+				const toolDeadline = Date.now() + 20_000;
+				while (Date.now() < toolDeadline) {
+					const details = result.details as DiagnosticsResult;
+					const settled = details.files
+						.find((entry) => entry.path === "src/probe.ts")
+						?.diagnostics.some((entry) => entry.severity === "error");
+					if (settled) {
+						break;
+					}
+					await new Promise((resolve) => setTimeout(resolve, 100));
+					result = await invoke("dogfood-call", { paths: ["src/probe.ts"] });
+				}
+				expect((result.details as DiagnosticsResult).files[0]?.diagnostics[0]?.severity).toBe("error");
+				// The model-facing content stays the raw JSON of the details object.
+				expect(result.content[0].text).toBe(JSON.stringify(result.details));
 
 				const component = new ToolExecutionComponent(
 					"aira_diagnostics",

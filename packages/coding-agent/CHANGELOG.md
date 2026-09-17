@@ -252,6 +252,14 @@
   status is derived from observed mutation/tool activity instead of hardcoding
   `attempted`. Governed by `src/aira/orchestration/runner.ts`, `envelope.ts`,
   and `failures.ts`.
+- **Aira**: Harden child-cancellation and diagnostics reliability. Child and
+  verifier model streams now settle as cancelled immediately when the run
+  signal is already aborted instead of running until their timeout, and the
+  abort listener is released once the race settles. The language-server
+  diagnostics probe and the child-cancellation test no longer depend on fixed
+  sleeps that could flake under parallel load. Bash classification now
+  recognizes Windows-style test scripts (`.\test.ps1`, `.\test.bat`) and
+  backslash path targets for the compact tool summary.
 
 ### Changed
 

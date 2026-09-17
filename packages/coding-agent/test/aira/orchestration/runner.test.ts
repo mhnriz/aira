@@ -300,6 +300,23 @@ describe("Aira child runner (Phase 9)", () => {
 		}
 	});
 
+	it("cancellation settles when the signal is already aborted", async () => {
+		const root = makeProjectDir();
+		const { runtime, setResponses } = fauxRuntime();
+		setResponses([() => new Promise(() => {}) as never]);
+		const controller = new AbortController();
+		controller.abort();
+		const outcome = await runAiraChild(
+			runtime,
+			{ cwd: root, prompt: "TASK", systemPrompt: "", tools: readOnlyTools(root), timeoutMs: 5_000 },
+			controller.signal,
+		);
+		expect(outcome.ok).toBe(false);
+		if (!outcome.ok) {
+			expect(outcome.driverError).toContain("cancelled");
+		}
+	});
+
 	describe("failure classification (Step 8)", () => {
 		it("classifies a provider rejection as capability_failure with preserved provider evidence", async () => {
 			const root = makeProjectDir();

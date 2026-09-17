@@ -360,7 +360,11 @@ describe("Step 8 failure policy: timeout, cancellation, unknown", () => {
 				});
 			});
 		const scheduled = fixture.handle.schedule([{ id: "a", role: "explore", task: "t" }], { awaitResults: true });
-		await new Promise((resolve) => setTimeout(resolve, 30));
+		const deadline = Date.now() + 5_000;
+		while (!childSignal && Date.now() < deadline) {
+			await new Promise((resolve) => setTimeout(resolve, 5));
+		}
+		expect(childSignal).toBeDefined();
 		fixture.handle.cancel(undefined, "user abort");
 		const result = await scheduled;
 		const run = fixture.handle.list()[0]!;
