@@ -509,3 +509,302 @@ describe("compactAiraModelContext — long-running active turn", () => {
 		expect(result.messages[result.messages.length - 1]).toBe(messages[messages.length - 1]);
 	});
 });
+
+function pathToolCall(toolName: string, path: string, id: string, prose = "working", timestamp = 1): AgentMessage {
+	return fauxAssistantMessage([fauxText(prose), fauxToolCall(toolName, { path }, { id })], { timestamp });
+}
+
+function namedToolResult(
+	toolName: string,
+	toolCallId: string,
+	text: string,
+	options: { isError?: boolean; timestamp?: number } = {},
+): AgentMessage {
+	return {
+		role: "toolResult",
+		toolCallId,
+		toolName,
+		content: [fauxText(text)],
+		isError: options.isError ?? false,
+		timestamp: options.timestamp ?? 1,
+	};
+}
+
+function textOf(message: AgentMessage | undefined): string {
+	if (message?.role !== "toolResult") return "";
+	const block = message.content[0];
+	return block?.type === "text" ? block.text : "";
+}
+
+const PROTECTION_SETTINGS = { triggerBytes: 100, recentBytes: 800, maxRecentMessageBytes: 2_000 };
+
+/** read target -> repository search -> oversized result -> edit preparation. */
+function pressureFixture(): { messages: AgentMessage[]; readResultIndex: number } {
+	const messages: AgentMessage[] = [user("read the target and prepare an edit", 1)];
+	messages.push(pathToolCall("read", "src/target.ts", "read-target", longProse("reading target"), 2));
+	const readResultIndex = messages.length;
+	messages.push(
+		namedToolResult("read", "read-target", `TARGET FILE BODY ${"contents ".repeat(200)}`, { timestamp: 2 }),
+	);
+	messages.push(assistantProse(longProse("exploring the repository"), 3));
+	messages.push(
+		fauxAssistantMessage(
+			[fauxText(longProse("searching")), fauxToolCall("search", { query: "needle" }, { id: "search-1" })],
+			{ timestamp: 4 },
+		),
+	);
+	messages.push(namedToolResult("search", "search-1", `SEARCH RESULT ${"hit ".repeat(20_000)}`, { timestamp: 4 }));
+	messages.push(user("now prepare the edit", 5));
+	return { messages, readResultIndex };
+}
+
+describe("compactAiraModelContext — progressive context protection", () => {
+	it("keeps the latest read of an active path verbatim when a large result dominates", () => {
+		const { messages, readResultIndex } = pressureFixture();
+		const result = compactAiraModelContext(messages, settings(PROTECTION_SETTINGS));
+
+		expect(result.report.triggered).toBe(true);
+		expect(result.report.protectedActiveReads).toBe(1);
+		expect(result.report.protectedActiveReadBytes).toBeGreaterThan(0);
+		expect(result.report.activePathsConsidered).toBe(1);
+		expect(result.report.oversizedResultCapApplied).toBeGreaterThanOrEqual(1);
+		expect(result.messages[readResultIndex]).toBe(messages[readResultIndex]);
+		expect(textOf(result.messages[readResultIndex])).toContain("TARGET FILE BODY");
+	});
+
+	it("eventually compacts an old read whose path is no longer active", () => {
+		const messages: AgentMessage[] = [user("start", 1)];
+		messages.push(pathToolCall("read", "src/old.ts", "old-read", longProse("reading old"), 2));
+		messages.push(namedToolResult("read", "old-read", `OLD BODY ${"stale ".repeat(300)}`, { timestamp: 2 }));
+		for (let i = 0; i < 5; i++) {
+			messages.push(assistantProse(longProse(`filler ${i}`), 10 + i));
+			messages.push(
+				namedToolResult("search", `filler-${i}`, `FILLER ${"filler ".repeat(300)}`, { timestamp: 10 + i }),
+			);
+		}
+		messages.push(user("active", 100));
+
+		const result = compactAiraModelContext(
+			messages,
+			settings({ ...PROTECTION_SETTINGS, activePathLookbackMessages: 4 }),
+		);
+		expect(result.report.triggered).toBe(true);
+		expect(result.report.activePathsConsidered).toBe(0);
+		expect(result.report.protectedActiveReads).toBe(0);
+		const oldRead = result.messages.find((m) => m.role === "toolResult" && m.toolCallId === "old-read");
+		expect(textOf(oldRead).startsWith("[earlier read result compacted")).toBe(true);
+	});
+
+	it("bounds how many active paths can pin reads", () => {
+		const messages: AgentMessage[] = [user("start", 1)];
+		for (let i = 0; i < 6; i++) {
+			messages.push(pathToolCall("read", `src/f${i}.ts`, `read-${i}`, longProse(`reading ${i}`), 2 + i));
+			messages.push(
+				namedToolResult("read", `read-${i}`, `BODY ${i} ${"content ".repeat(300)}`, { timestamp: 2 + i }),
+			);
+		}
+		messages.push(
+			fauxAssistantMessage(
+				[fauxText(longProse("searching")), fauxToolCall("search", { query: "x" }, { id: "search-1" })],
+				{ timestamp: 50 },
+			),
+		);
+		messages.push(namedToolResult("search", "search-1", `HUGE ${"hit ".repeat(20_000)}`, { timestamp: 50 }));
+		messages.push(user("active", 100));
+
+		const result = compactAiraModelContext(
+			messages,
+			settings({ ...PROTECTION_SETTINGS, maxProtectedActiveReads: 2 }),
+		);
+		expect(result.report.protectedActiveReads).toBe(2);
+		const bodies = result.messages.filter((m) => m.role === "toolResult" && m.toolCallId.startsWith("read-"));
+		expect(bodies).toHaveLength(6);
+		// The two newest reads survive; the older four are compacted.
+		expect(textOf(bodies[5])).toContain("BODY 5");
+		expect(textOf(bodies[4])).toContain("BODY 4");
+		for (let i = 0; i < 4; i++) {
+			expect(textOf(bodies[i]).startsWith("[earlier read result compacted")).toBe(true);
+		}
+	});
+
+	it("protects only the latest read when a path is read repeatedly", () => {
+		const messages: AgentMessage[] = [user("start", 1)];
+		messages.push(pathToolCall("read", "src/foo.ts", "read-1", longProse("read one"), 2));
+		messages.push(namedToolResult("read", "read-1", `FOO V1 ${"v1 ".repeat(300)}`, { timestamp: 2 }));
+		messages.push(pathToolCall("read", "src/foo.ts", "read-2", longProse("read two"), 3));
+		messages.push(namedToolResult("read", "read-2", `FOO V2 ${"v2 ".repeat(300)}`, { timestamp: 3 }));
+		messages.push(
+			fauxAssistantMessage(
+				[fauxText(longProse("searching")), fauxToolCall("search", { query: "x" }, { id: "search-1" })],
+				{ timestamp: 50 },
+			),
+		);
+		messages.push(namedToolResult("search", "search-1", `HUGE ${"hit ".repeat(20_000)}`, { timestamp: 50 }));
+		messages.push(user("active", 100));
+
+		const result = compactAiraModelContext(messages, settings(PROTECTION_SETTINGS));
+		expect(result.report.protectedActiveReads).toBe(1);
+		const first = result.messages.find((m) => m.role === "toolResult" && m.toolCallId === "read-1");
+		const second = result.messages.find((m) => m.role === "toolResult" && m.toolCallId === "read-2");
+		expect(textOf(second)).toContain("FOO V2");
+		expect(textOf(first).startsWith("[earlier read result compacted")).toBe(true);
+	});
+
+	it("does not protect errored reads", () => {
+		const messages: AgentMessage[] = [user("start", 1)];
+		messages.push(pathToolCall("read", "src/foo.ts", "read-1", longProse("read"), 2));
+		messages.push(namedToolResult("read", "read-1", `FAILED ${"err ".repeat(300)}`, { isError: true, timestamp: 2 }));
+		messages.push(
+			fauxAssistantMessage(
+				[fauxText(longProse("searching")), fauxToolCall("search", { query: "x" }, { id: "search-1" })],
+				{ timestamp: 50 },
+			),
+		);
+		messages.push(namedToolResult("search", "search-1", `HUGE ${"hit ".repeat(20_000)}`, { timestamp: 50 }));
+		messages.push(user("active", 100));
+
+		const result = compactAiraModelContext(messages, settings(PROTECTION_SETTINGS));
+		expect(result.report.activePathsConsidered).toBe(1);
+		expect(result.report.protectedActiveReads).toBe(0);
+		const failed = result.messages.find((m) => m.role === "toolResult" && m.toolCallId === "read-1");
+		expect(textOf(failed)).toContain("FAILED");
+	});
+
+	it("releases a read once a newer edit supersedes it", () => {
+		const messages: AgentMessage[] = [user("start", 1)];
+		messages.push(pathToolCall("read", "src/foo.ts", "read-1", longProse("read"), 2));
+		messages.push(namedToolResult("read", "read-1", `FOO ${"body ".repeat(300)}`, { timestamp: 2 }));
+		messages.push(pathToolCall("edit", "src/foo.ts", "edit-1", longProse("editing"), 3));
+		messages.push(namedToolResult("edit", "edit-1", `EDITED ${"diff ".repeat(100)}`, { timestamp: 3 }));
+		messages.push(
+			fauxAssistantMessage(
+				[fauxText(longProse("searching")), fauxToolCall("search", { query: "x" }, { id: "search-1" })],
+				{ timestamp: 50 },
+			),
+		);
+		messages.push(namedToolResult("search", "search-1", `HUGE ${"hit ".repeat(20_000)}`, { timestamp: 50 }));
+		messages.push(user("active", 100));
+
+		const result = compactAiraModelContext(messages, settings(PROTECTION_SETTINGS));
+		expect(result.report.protectedActiveReads).toBe(0);
+		const read = result.messages.find((m) => m.role === "toolResult" && m.toolCallId === "read-1");
+		expect(textOf(read).startsWith("[earlier read result compacted")).toBe(true);
+	});
+
+	it("protects the latest read taken after an edit", () => {
+		const messages: AgentMessage[] = [user("start", 1)];
+		messages.push(pathToolCall("read", "src/foo.ts", "read-1", longProse("read one"), 2));
+		messages.push(namedToolResult("read", "read-1", `FOO V1 ${"v1 ".repeat(300)}`, { timestamp: 2 }));
+		messages.push(pathToolCall("edit", "src/foo.ts", "edit-1", longProse("editing"), 3));
+		messages.push(namedToolResult("edit", "edit-1", `EDITED ${"diff ".repeat(100)}`, { timestamp: 3 }));
+		messages.push(pathToolCall("read", "src/foo.ts", "read-2", longProse("re-reading"), 4));
+		messages.push(namedToolResult("read", "read-2", `FOO V2 ${"v2 ".repeat(300)}`, { timestamp: 4 }));
+		messages.push(
+			fauxAssistantMessage(
+				[fauxText(longProse("searching")), fauxToolCall("search", { query: "x" }, { id: "search-1" })],
+				{ timestamp: 50 },
+			),
+		);
+		messages.push(namedToolResult("search", "search-1", `HUGE ${"hit ".repeat(20_000)}`, { timestamp: 50 }));
+		messages.push(user("active", 100));
+
+		const result = compactAiraModelContext(messages, settings(PROTECTION_SETTINGS));
+		expect(result.report.protectedActiveReads).toBe(1);
+		const latest = result.messages.find((m) => m.role === "toolResult" && m.toolCallId === "read-2");
+		expect(textOf(latest)).toContain("FOO V2");
+	});
+
+	it("stops one oversized result from monopolizing the recent window", () => {
+		const build = (): AgentMessage[] => [
+			user("start", 1),
+			assistantProse(longProse("filler zero"), 2),
+			namedToolResult("read", "filler-0", `FILLER 0 ${"filler ".repeat(300)}`, { timestamp: 2 }),
+			assistantProse(longProse("filler one"), 3),
+			namedToolResult("read", "filler-1", `FILLER 1 ${"filler ".repeat(300)}`, { timestamp: 3 }),
+			assistantProse(longProse("valuable old context", 3_000), 4),
+			namedToolResult("read", "valuable", `VALUABLE ${"body ".repeat(100)}`, { timestamp: 4 }),
+			assistantProse("short thinking", 5),
+			namedToolResult("read", "huge", `HUGE ${"hit ".repeat(40_000)}`, { timestamp: 5 }),
+			user("active", 100),
+		];
+
+		const capped = compactAiraModelContext(
+			build(),
+			settings({ triggerBytes: 100, recentBytes: 1_000, maxRecentMessageBytes: 400 }),
+		);
+		expect(capped.report.triggered).toBe(true);
+		expect(capped.report.oversizedResultCapApplied).toBeGreaterThanOrEqual(1);
+		const cappedValuable = capped.messages.find((m) => m.role === "toolResult" && m.toolCallId === "valuable");
+		expect(textOf(cappedValuable)).toContain("VALUABLE");
+
+		const uncapped = compactAiraModelContext(
+			build(),
+			settings({ triggerBytes: 100, recentBytes: 1_000, maxRecentMessageBytes: Number.MAX_SAFE_INTEGER }),
+		);
+		expect(uncapped.report.oversizedResultCapApplied).toBe(0);
+		const uncappedValuable = uncapped.messages.find((m) => m.role === "toolResult" && m.toolCallId === "valuable");
+		expect(textOf(uncappedValuable).startsWith("[earlier read result compacted")).toBe(true);
+	});
+
+	it("is idempotent with active-read protection in play", () => {
+		const { messages } = pressureFixture();
+		const options = settings(PROTECTION_SETTINGS);
+		const first = compactAiraModelContext(messages, options);
+		const again = compactAiraModelContext(first.messages, options);
+		expect(again.messages).toEqual(first.messages);
+		expect(again.report.savedBytes).toBe(0);
+	});
+
+	it("records compacted context categories in the report", () => {
+		const messages: AgentMessage[] = [user("start", 1)];
+		for (let i = 0; i < 6; i++) {
+			messages.push(
+				fauxAssistantMessage([fauxThinking(longProse(`think ${i}`)), fauxText(longProse(`step ${i}`))], {
+					timestamp: i + 2,
+				}),
+			);
+			messages.push(
+				namedToolResult(i % 2 === 0 ? "read" : "search", `call-${i}`, `body ${i} ${"payload ".repeat(500)}`, {
+					timestamp: i + 2,
+				}),
+			);
+		}
+		messages.push(user("active", 100));
+
+		const result = compactAiraModelContext(messages, settings({ triggerBytes: 100, recentBytes: 500 }));
+		expect(result.report.triggered).toBe(true);
+		expect(result.report.compactedAssistantThinking).toBeGreaterThan(0);
+		expect(result.report.compactedAssistantNarration).toBeGreaterThan(0);
+		expect(result.report.compactedToolResultsByTool.read ?? 0).toBeGreaterThan(0);
+		const byToolTotal = Object.values(result.report.compactedToolResultsByTool).reduce((sum, n) => sum + n, 0);
+		expect(byToolTotal).toBe(result.report.toolResultsCompacted);
+	});
+
+	it("protects a target read across substantial intervening exploration", () => {
+		const messages: AgentMessage[] = [user("start", 1)];
+		messages.push(pathToolCall("read", "src/target.ts", "read-target", longProse("reading target"), 2));
+		const targetIndex = messages.length;
+		messages.push(namedToolResult("read", "read-target", `TARGET ${"contents ".repeat(200)}`, { timestamp: 2 }));
+		for (let i = 0; i < 40; i++) {
+			messages.push(
+				fauxAssistantMessage(
+					[
+						fauxText(longProse(`searching ${i}`)),
+						fauxToolCall("search", { query: `q${i}` }, { id: `search-${i}` }),
+					],
+					{ timestamp: 3 + i },
+				),
+			);
+			messages.push(
+				namedToolResult("search", `search-${i}`, `HIT ${i} ${"hit ".repeat(200)}`, { timestamp: 3 + i }),
+			);
+		}
+		messages.push(user("prepare the edit", 100));
+
+		const result = compactAiraModelContext(messages, settings(PROTECTION_SETTINGS));
+		expect(result.report.triggered).toBe(true);
+		expect(result.report.protectedActiveReads).toBe(1);
+		expect(result.messages[targetIndex]).toBe(messages[targetIndex]);
+		expect(textOf(result.messages[targetIndex])).toContain("TARGET");
+	});
+});

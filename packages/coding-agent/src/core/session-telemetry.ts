@@ -74,6 +74,12 @@ export interface ContextRequestSummary {
 		preConversationBytes: number;
 		postConversationBytes: number;
 		savedBytes: number;
+		protectedByRecentWindow: number;
+		protectedActiveReads: number;
+		compactedAssistantThinking: number;
+		compactedAssistantNarration: number;
+		compactedToolResultsByTool: Record<string, number>;
+		oversizedResultCapApplied: number;
 	} | null;
 }
 
@@ -108,6 +114,22 @@ export interface SessionTelemetryContextCompaction {
 	messagesCompacted: number;
 	/** Total successful tool results whose payload was reduced. */
 	toolResultsCompacted: number;
+	/** Total assistant reasoning blocks reduced to the thinking marker. */
+	assistantThinkingCompacted: number;
+	/** Total assistant narration blocks reduced (replaced or truncated). */
+	assistantNarrationCompacted: number;
+	/** Total successful tool results compacted, keyed by tool name. */
+	toolResultsCompactedByTool: Record<string, number>;
+	/** Total messages kept verbatim by the recent-byte window. */
+	protectedByRecentWindow: number;
+	/** Total projection bytes kept verbatim by the recent-byte window. */
+	protectedByRecentWindowBytes: number;
+	/** Total successful active-path reads kept verbatim outside the window. */
+	protectedActiveReads: number;
+	/** Total projection bytes retained by active-path read protection. */
+	protectedActiveReadBytes: number;
+	/** Total messages whose recent-byte charge was capped as oversized. */
+	oversizedResultCapApplied: number;
 }
 
 /** Size aggregation for one contributor identity. */
@@ -420,6 +442,14 @@ export class SessionTelemetry {
 	private compactionSavedBytes = 0;
 	private compactionMessages = 0;
 	private compactionToolResults = 0;
+	private compactionAssistantThinking = 0;
+	private compactionAssistantNarration = 0;
+	private readonly compactionToolResultsByTool = new Map<string, number>();
+	private compactionProtectedByRecentWindow = 0;
+	private compactionProtectedByRecentWindowBytes = 0;
+	private compactionProtectedActiveReads = 0;
+	private compactionProtectedActiveReadBytes = 0;
+	private compactionOversizedResultCapApplied = 0;
 	/**
 	 * Compaction accounting for the NEXT request. The transform projection runs
 	 * immediately before the request it feeds, so the report is consumed by the
@@ -493,6 +523,16 @@ export class SessionTelemetry {
 				savedBytes: this.compactionSavedBytes,
 				messagesCompacted: this.compactionMessages,
 				toolResultsCompacted: this.compactionToolResults,
+				assistantThinkingCompacted: this.compactionAssistantThinking,
+				assistantNarrationCompacted: this.compactionAssistantNarration,
+				toolResultsCompactedByTool: Object.fromEntries(
+					[...this.compactionToolResultsByTool.entries()].sort(([a], [b]) => a.localeCompare(b)),
+				),
+				protectedByRecentWindow: this.compactionProtectedByRecentWindow,
+				protectedByRecentWindowBytes: this.compactionProtectedByRecentWindowBytes,
+				protectedActiveReads: this.compactionProtectedActiveReads,
+				protectedActiveReadBytes: this.compactionProtectedActiveReadBytes,
+				oversizedResultCapApplied: this.compactionOversizedResultCapApplied,
 			},
 		};
 	}
@@ -796,6 +836,16 @@ export class SessionTelemetry {
 		this.compactionSavedBytes += report.savedBytes;
 		this.compactionMessages += report.messagesCompacted;
 		this.compactionToolResults += report.toolResultsCompacted;
+		this.compactionAssistantThinking += report.compactedAssistantThinking;
+		this.compactionAssistantNarration += report.compactedAssistantNarration;
+		for (const [toolName, count] of Object.entries(report.compactedToolResultsByTool)) {
+			this.compactionToolResultsByTool.set(toolName, (this.compactionToolResultsByTool.get(toolName) ?? 0) + count);
+		}
+		this.compactionProtectedByRecentWindow += report.protectedByRecentWindow;
+		this.compactionProtectedByRecentWindowBytes += report.protectedByRecentWindowBytes;
+		this.compactionProtectedActiveReads += report.protectedActiveReads;
+		this.compactionProtectedActiveReadBytes += report.protectedActiveReadBytes;
+		this.compactionOversizedResultCapApplied += report.oversizedResultCapApplied;
 	}
 
 	/**
@@ -826,6 +876,12 @@ export class SessionTelemetry {
 						preConversationBytes: pending.originalBytes,
 						postConversationBytes: pending.compactedBytes,
 						savedBytes: pending.savedBytes,
+						protectedByRecentWindow: pending.protectedByRecentWindow,
+						protectedActiveReads: pending.protectedActiveReads,
+						compactedAssistantThinking: pending.compactedAssistantThinking,
+						compactedAssistantNarration: pending.compactedAssistantNarration,
+						compactedToolResultsByTool: { ...pending.compactedToolResultsByTool },
+						oversizedResultCapApplied: pending.oversizedResultCapApplied,
 					}
 				: null,
 		};
@@ -1021,6 +1077,10 @@ export function renderSessionTelemetryText(snapshot: SessionTelemetrySnapshot): 
 	lines.push(`  saved              ${formatPayloadBytes(context.compaction.savedBytes)}`);
 	lines.push(`  messages           ${formatCount(context.compaction.messagesCompacted)}`);
 	lines.push(`  tool results       ${formatCount(context.compaction.toolResultsCompacted)}`);
+	lines.push(`  thinking           ${formatCount(context.compaction.assistantThinkingCompacted)}`);
+	lines.push(`  narration          ${formatCount(context.compaction.assistantNarrationCompacted)}`);
+	lines.push(`  active reads kept  ${formatCount(context.compaction.protectedActiveReads)}`);
+	lines.push(`  oversized capped   ${formatCount(context.compaction.oversizedResultCapApplied)}`);
 	lines.push("");
 	lines.push("Tools");
 	lines.push(`  calls              ${formatCount(tools.total)}`);

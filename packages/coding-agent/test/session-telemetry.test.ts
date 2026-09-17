@@ -700,6 +700,14 @@ describe("SessionTelemetry collector", () => {
 				savedBytes: 0,
 				messagesCompacted: 0,
 				toolResultsCompacted: 0,
+				assistantThinkingCompacted: 0,
+				assistantNarrationCompacted: 0,
+				toolResultsCompactedByTool: {},
+				protectedByRecentWindow: 0,
+				protectedByRecentWindowBytes: 0,
+				protectedActiveReads: 0,
+				protectedActiveReadBytes: 0,
+				oversizedResultCapApplied: 0,
 			},
 		});
 		expect(parsed.usage).toEqual({
@@ -936,6 +944,14 @@ describe("SessionTelemetry context payload", () => {
 				savedBytes: 0,
 				messagesCompacted: 0,
 				toolResultsCompacted: 0,
+				assistantThinkingCompacted: 0,
+				assistantNarrationCompacted: 0,
+				toolResultsCompactedByTool: {},
+				protectedByRecentWindow: 0,
+				protectedByRecentWindowBytes: 0,
+				protectedActiveReads: 0,
+				protectedActiveReadBytes: 0,
+				oversizedResultCapApplied: 0,
 			},
 		});
 	});

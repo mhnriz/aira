@@ -84,6 +84,23 @@ export interface AiraContextCompactionSettings {
 	 * Default: 400 bytes.
 	 */
 	minToolResultBytes: number;
+	/**
+	 * Upper bound on how many conversation-projection bytes a single message
+	 * may charge against the recent-byte window. A result larger than this no
+	 * longer consumes the whole window by itself, so nearby older context stays
+	 * verbatim. Default: 8 KB.
+	 */
+	maxRecentMessageBytes: number;
+	/**
+	 * How far back (in messages) the compactor looks for active repository
+	 * paths. Activity older than this no longer protects a read. Default: 256.
+	 */
+	activePathLookbackMessages: number;
+	/**
+	 * Upper bound on the number of distinct active paths whose latest
+	 * successful read is protected from compaction in one pass. Default: 2.
+	 */
+	maxProtectedActiveReads: number;
 }
 
 /** The canonical default policy. Deterministic; identical across sessions. */
@@ -94,6 +111,9 @@ export const DEFAULT_AIRA_CONTEXT_COMPACTION_SETTINGS: AiraContextCompactionSett
 	minAssistantProseChars: 200,
 	assistantConclusionHeadChars: 400,
 	minToolResultBytes: 400,
+	maxRecentMessageBytes: 8_000,
+	activePathLookbackMessages: 256,
+	maxProtectedActiveReads: 2,
 };
 
 /**
@@ -131,6 +151,24 @@ export interface AiraContextCompactionReport {
 	toolResultsCompacted: number;
 	/** Lowest message index touched by this pass, or null when untouched. */
 	firstCompactedIndex: number | null;
+	/** Messages kept verbatim because they fall inside the recent-byte window. */
+	protectedByRecentWindow: number;
+	/** Projection bytes kept verbatim by the recent-byte window. */
+	protectedByRecentWindowBytes: number;
+	/** Distinct active repository paths considered by this pass. */
+	activePathsConsidered: number;
+	/** Successful active-path reads kept verbatim outside the recent window. */
+	protectedActiveReads: number;
+	/** Projection bytes retained by active-path read protection. */
+	protectedActiveReadBytes: number;
+	/** Assistant reasoning blocks replaced by the thinking marker. */
+	compactedAssistantThinking: number;
+	/** Assistant narration blocks reduced (replaced or truncated). */
+	compactedAssistantNarration: number;
+	/** Successful tool results compacted, keyed by tool name. */
+	compactedToolResultsByTool: Record<string, number>;
+	/** Messages whose recent-byte charge was capped as oversized. */
+	oversizedResultCapApplied: number;
 }
 
 /** Result of one deterministic projection pass. */
@@ -218,9 +256,14 @@ function compactAssistantText(text: string, keepHeadChars: number, minChars: num
  * - a message with no tool call is a turn conclusion: its prose keeps a bounded
  *   head so the conclusion survives.
  */
-function compactAssistantMessage(message: AssistantMessage, settings: AiraContextCompactionSettings): AssistantMessage {
+function compactAssistantMessage(
+	message: AssistantMessage,
+	settings: AiraContextCompactionSettings,
+): { message: AssistantMessage; narration: number; thinking: number } {
 	const hasToolCall = message.content.some((block) => block.type === "toolCall");
 	let changed = false;
+	let narration = 0;
+	let thinking = 0;
 	const content = message.content.map((block) => {
 		if (block.type === "text") {
 			const next = hasToolCall
@@ -228,18 +271,22 @@ function compactAssistantMessage(message: AssistantMessage, settings: AiraContex
 					? block.text
 					: AIRA_CONTEXT_COMPACTION_MARKERS.assistantProse
 				: compactAssistantText(block.text, settings.assistantConclusionHeadChars, settings.minAssistantProseChars);
-			if (next !== block.text) changed = true;
+			if (next !== block.text) {
+				changed = true;
+				narration++;
+			}
 			return next === block.text ? block : ({ ...block, text: next } satisfies TextContent);
 		}
 		if (block.type === "thinking") {
 			if (isPlaceholder(block.thinking)) return block;
 			changed = true;
+			thinking++;
 			return { ...block, thinking: AIRA_CONTEXT_COMPACTION_MARKERS.assistantThinking };
 		}
 		return block;
 	});
-	if (!changed) return message;
-	return { ...message, content };
+	if (!changed) return { message, narration: 0, thinking: 0 };
+	return { message: { ...message, content }, narration, thinking };
 }
 
 /**
@@ -315,20 +362,136 @@ function extendVerbatimOverStraddlingToolPairs(messages: readonly AgentMessage[]
 function compactMessage(
 	message: AgentMessage,
 	settings: AiraContextCompactionSettings,
-): { message: AgentMessage; compacted: boolean } {
+): { message: AgentMessage; compacted: boolean; narrationBlocks: number; thinkingBlocks: number } {
 	switch (message.role) {
 		case "assistant": {
-			const next = compactAssistantMessage(message as AssistantMessage, settings);
-			return { message: next, compacted: next !== message };
+			const result = compactAssistantMessage(message as AssistantMessage, settings);
+			return {
+				message: result.message,
+				compacted: result.message !== message,
+				narrationBlocks: result.narration,
+				thinkingBlocks: result.thinking,
+			};
 		}
-		case "toolResult":
-			return compactToolResultMessage(message as Extract<AgentMessage, { role: "toolResult" }>, settings);
+		case "toolResult": {
+			const result = compactToolResultMessage(message as Extract<AgentMessage, { role: "toolResult" }>, settings);
+			return { message: result.message, compacted: result.compacted, narrationBlocks: 0, thinkingBlocks: 0 };
+		}
 		default:
 			// Fail open: user content, bash executions, Aira custom messages
 			// (intelligence/browser context), summaries, and any future message
 			// type are preserved unchanged.
-			return { message, compacted: false };
+			return { message, compacted: false, narrationBlocks: 0, thinkingBlocks: 0 };
 	}
+}
+
+/** Tool names whose `path` argument marks a repository path as active. */
+const ACTIVE_READ_TOOL_NAMES = new Set(["read"]);
+const ACTIVE_MUTATION_TOOL_NAMES = new Set(["edit", "write"]);
+
+/** Read the `path` string argument out of a tool call, if present. */
+function toolCallPath(block: { name: string; arguments: Record<string, unknown> }): string | undefined {
+	if (!ACTIVE_READ_TOOL_NAMES.has(block.name) && !ACTIVE_MUTATION_TOOL_NAMES.has(block.name)) return undefined;
+	const value = block.arguments.path;
+	return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+interface ActivePathActivity {
+	readIndex: number;
+	readBytes: number;
+	mutationIndex: number;
+}
+
+/**
+ * Pick the bounded set of active-path reads to protect from compaction.
+ *
+ * Compaction is otherwise positional: a large newest result can push the
+ * latest exact read of a file the model is still working on outside the
+ * recent-byte window. This helper reads only existing tool-call metadata:
+ *
+ * - active paths are the most recently touched paths (read/edit/write) within
+ *   `activePathLookbackMessages` messages of the tail, capped by
+ *   `maxProtectedActiveReads` and a small candidate bound;
+ * - for each active path it protects the latest successful read result;
+ * - an edit/write newer than that read makes the read stale, so it is not
+ *   protected (the mutation result carries the newer working copy);
+ * - errored reads are never protected.
+ *
+ * Deterministic and linear in the message count.
+ */
+function collectActiveReadProtection(
+	messages: readonly AgentMessage[],
+	settings: AiraContextCompactionSettings,
+): { indices: Set<number>; activePaths: number; bytes: number } {
+	if (settings.maxProtectedActiveReads <= 0 || settings.activePathLookbackMessages <= 0) {
+		return { indices: new Set(), activePaths: 0, bytes: 0 };
+	}
+
+	// Collect the most recently touched distinct paths, newest first. The
+	// candidate bound keeps the scan bounded even for a very long history.
+	const windowStart = Math.max(0, messages.length - settings.activePathLookbackMessages);
+	const candidateLimit = settings.maxProtectedActiveReads * 4;
+	const candidates: string[] = [];
+	const seen = new Set<string>();
+	for (let i = messages.length - 1; i >= windowStart && candidates.length < candidateLimit; i--) {
+		const message = messages[i];
+		if (message.role !== "assistant") continue;
+		for (let b = message.content.length - 1; b >= 0; b--) {
+			const block = message.content[b];
+			if (block.type !== "toolCall") continue;
+			const path = toolCallPath(block);
+			if (path === undefined || seen.has(path)) continue;
+			seen.add(path);
+			candidates.push(path);
+			if (candidates.length >= candidateLimit) break;
+		}
+	}
+	if (candidates.length === 0) return { indices: new Set(), activePaths: 0, bytes: 0 };
+
+	const candidateSet = new Set(candidates);
+	const activity = new Map<string, ActivePathActivity>();
+	for (const path of candidates) activity.set(path, { readIndex: -1, readBytes: 0, mutationIndex: -1 });
+
+	const readCallPaths = new Map<string, string>();
+	for (let i = 0; i < messages.length; i++) {
+		const message = messages[i];
+		if (message.role === "assistant") {
+			for (const block of message.content) {
+				if (block.type !== "toolCall") continue;
+				const path = toolCallPath(block);
+				if (path === undefined || !candidateSet.has(path)) continue;
+				if (ACTIVE_MUTATION_TOOL_NAMES.has(block.name)) {
+					const entry = activity.get(path);
+					if (entry !== undefined && i > entry.mutationIndex) entry.mutationIndex = i;
+				}
+				if (ACTIVE_READ_TOOL_NAMES.has(block.name)) readCallPaths.set(block.id, path);
+			}
+			continue;
+		}
+		if (message.role === "toolResult" && !message.isError) {
+			const path = readCallPaths.get(message.toolCallId);
+			if (path === undefined) continue;
+			const entry = activity.get(path);
+			if (entry !== undefined && i > entry.readIndex) {
+				entry.readIndex = i;
+				entry.readBytes = projectionBytes(message);
+			}
+		}
+	}
+
+	// Walk candidates in recency order so the cap keeps the newest protectable
+	// reads.
+	const indices = new Set<number>();
+	let bytes = 0;
+	for (const path of candidates) {
+		if (indices.size >= settings.maxProtectedActiveReads) break;
+		const entry = activity.get(path);
+		if (entry === undefined || entry.readIndex < 0) continue;
+		if (entry.mutationIndex > entry.readIndex) continue;
+		indices.add(entry.readIndex);
+		bytes += entry.readBytes;
+	}
+	return { indices, activePaths: candidates.length, bytes };
 }
 
 /**
@@ -352,6 +515,15 @@ export function compactAiraModelContext(
 		messagesCompacted: 0,
 		toolResultsCompacted: 0,
 		firstCompactedIndex: null,
+		protectedByRecentWindow: 0,
+		protectedByRecentWindowBytes: 0,
+		activePathsConsidered: 0,
+		protectedActiveReads: 0,
+		protectedActiveReadBytes: 0,
+		compactedAssistantThinking: 0,
+		compactedAssistantNarration: 0,
+		compactedToolResultsByTool: {},
+		oversizedResultCapApplied: 0,
 	};
 	if (!settings.enabled || originalBytes <= settings.triggerBytes || messages.length === 0) {
 		return { messages: messages.slice(), report: baseReport };
@@ -373,9 +545,16 @@ export function compactAiraModelContext(
 	// protection of the work tail for no structural benefit.
 	let verbatimStart = messages.length;
 	let accumulated = 0;
+	let oversizedResultCapApplied = 0;
+	const recentMessageCap =
+		settings.maxRecentMessageBytes > 0 ? settings.maxRecentMessageBytes : Number.POSITIVE_INFINITY;
 	for (let i = messages.length - 1; i >= 0; i--) {
 		if (i === activeUserIndex) continue;
-		accumulated += projectionBytes(messages[i]);
+		const bytes = projectionBytes(messages[i]);
+		if (bytes > recentMessageCap) oversizedResultCapApplied++;
+		// Charge at most `recentMessageCap` so one oversized message cannot
+		// monopolize the whole window and evict nearby useful context.
+		accumulated += Math.min(bytes, recentMessageCap);
 		verbatimStart = i;
 		if (accumulated >= settings.recentBytes) break;
 	}
@@ -386,28 +565,60 @@ export function compactAiraModelContext(
 		return { messages: messages.slice(), report: baseReport };
 	}
 
+	// Active-path reads outside the recent window stay verbatim so a large
+	// newest result cannot push the file the model is still working on out of
+	// context.
+	const protection = collectActiveReadProtection(messages, settings);
+
+	let protectedByRecentWindow = 0;
+	let protectedByRecentWindowBytes = 0;
+	for (let i = verbatimStart; i < messages.length; i++) {
+		if (i === activeUserIndex) continue;
+		protectedByRecentWindow++;
+		protectedByRecentWindowBytes += projectionBytes(messages[i]);
+	}
+
 	const output: AgentMessage[] = messages.slice();
 	let messagesCompacted = 0;
 	let toolResultsCompacted = 0;
 	let firstCompactedIndex: number | null = null;
 	let compactedBytes = 0;
+	let compactedAssistantNarration = 0;
+	let compactedAssistantThinking = 0;
+	let protectedActiveReads = 0;
+	let protectedActiveReadBytes = 0;
+	const compactedToolResultsByTool: Record<string, number> = {};
 
 	for (let i = 0; i < verbatimStart; i++) {
 		// The active user request is never compacted, whatever the byte
 		// budget says. Role dispatch already fails open for user content;
 		// this is the explicit invariant.
 		if (i === activeUserIndex) continue;
-		const before = projectionBytes(messages[i]);
-		const outcome = compactMessage(messages[i], settings);
+		const source = messages[i];
+		const before = projectionBytes(source);
+		const outcome = compactMessage(source, settings);
+		if (protection.indices.has(i)) {
+			// Keep the latest useful read for an active path. Only count it as
+			// protected when compaction would otherwise have shrunk it.
+			if (outcome.compacted) {
+				protectedActiveReads++;
+				protectedActiveReadBytes += before;
+			}
+			continue;
+		}
 		if (!outcome.compacted) continue;
 		output[i] = outcome.message;
 		const after = projectionBytes(outcome.message);
 		compactedBytes += before - after;
 		if (firstCompactedIndex === null) firstCompactedIndex = i;
-		if (messages[i].role === "toolResult") {
+		if (source.role === "toolResult") {
 			toolResultsCompacted++;
+			const toolName = source.toolName;
+			compactedToolResultsByTool[toolName] = (compactedToolResultsByTool[toolName] ?? 0) + 1;
 		} else {
 			messagesCompacted++;
+			compactedAssistantNarration += outcome.narrationBlocks;
+			compactedAssistantThinking += outcome.thinkingBlocks;
 		}
 	}
 
@@ -426,6 +637,15 @@ export function compactAiraModelContext(
 			messagesCompacted,
 			toolResultsCompacted,
 			firstCompactedIndex,
+			protectedByRecentWindow,
+			protectedByRecentWindowBytes,
+			activePathsConsidered: protection.activePaths,
+			protectedActiveReads,
+			protectedActiveReadBytes,
+			compactedAssistantThinking,
+			compactedAssistantNarration,
+			compactedToolResultsByTool,
+			oversizedResultCapApplied,
 		},
 	};
 }
