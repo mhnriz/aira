@@ -651,7 +651,7 @@ describe("SessionTelemetry collector", () => {
 		});
 		const parsed = JSON.parse(renderSessionTelemetryJson(snapshot)) as Record<string, unknown>;
 
-		expect(parsed.schemaVersion).toBe("1.4.0");
+		expect(parsed.schemaVersion).toBe("1.5.0");
 		expect(Object.keys(parsed).sort()).toEqual([
 			"agent",
 			"context",
@@ -1003,7 +1003,7 @@ describe("SessionTelemetry integration", () => {
 		await harness.session.prompt("read the file");
 
 		const snapshot = harness.session.getTelemetrySnapshot();
-		expect(snapshot.schemaVersion).toBe("1.4.0");
+		expect(snapshot.schemaVersion).toBe("1.5.0");
 		expect(snapshot.tools.total).toBe(1);
 		expect(snapshot.tools.byName).toEqual({ read: 1 });
 		expect(snapshot.repository.reads).toBe(1);

@@ -1,6 +1,7 @@
 import { stat } from "node:fs/promises";
 import type { AgentEvent, ModelContextPayloadMeasurement } from "@earendil-works/pi-agent-core";
 import type { AiraContextCompactionReport } from "../aira/context-compaction.ts";
+import type { AiraVerifierFailureKind } from "../aira/verification/types.ts";
 import type { RepositoryObservationStats } from "./repository-observations.ts";
 import { resolveReadPathAsync, resolveToCwd } from "./tools/path-utils.ts";
 import { classifyShellCommand } from "./tools/shell-command.ts";
@@ -28,7 +29,7 @@ import { classifyShellCommand } from "./tools/shell-command.ts";
  * Step 4 compaction block and the Step 7 repository observation counters are
  * additive.
  */
-export const SESSION_TELEMETRY_SCHEMA_VERSION = "1.4.0";
+export const SESSION_TELEMETRY_SCHEMA_VERSION = "1.5.0";
 
 /** Cap on retained per-request context summaries (bounded ring, newest first). */
 export const CONTEXT_REQUEST_HISTORY_LIMIT = 10;
@@ -215,6 +216,8 @@ export interface SessionTelemetrySnapshot {
 		/** Check invocations from the `process_start` purpose or a classified `bash` command. */
 		checks: number;
 		verifications: number;
+		/** Verifier driver failures by structured kind (additive, schema 1.5.0). */
+		verifierOutcomes: Record<AiraVerifierFailureKind, number>;
 	};
 	agent: {
 		askUser: number;
@@ -347,6 +350,16 @@ export class SessionTelemetry {
 	private buildInvocations = 0;
 	private checkInvocations = 0;
 	private verificationRuns = 0;
+	private lastVerifierFailureKind: AiraVerifierFailureKind | null = null;
+	private readonly verifierOutcomes: Record<AiraVerifierFailureKind, number> = {
+		timeout: 0,
+		cancelled: 0,
+		provider: 0,
+		"tool-budget": 0,
+		"invalid-verdict": 0,
+		configuration: 0,
+		internal: 0,
+	};
 
 	// Agent behavior
 	private askUserInvocations = 0;
@@ -854,7 +867,7 @@ export class SessionTelemetry {
 	 * Observe a verification snapshot state; a transition into "preparing" or
 	 * "running" from another state starts one verifier invocation.
 	 */
-	observeVerificationState(state: string): void {
+	observeVerificationState(state: string, failureKind?: AiraVerifierFailureKind): void {
 		const previous = this.verificationState;
 		this.verificationState = state;
 		if (
@@ -865,6 +878,13 @@ export class SessionTelemetry {
 		) {
 			this.verificationRuns++;
 		}
+		// A terminal failure publish carries a structured kind. Count each run
+		// once: repeated publishes keep the same kind, and the next run clears
+		// the kind (undefined) before failing again.
+		if (failureKind !== undefined && failureKind !== this.lastVerifierFailureKind) {
+			this.verifierOutcomes[failureKind]++;
+		}
+		this.lastVerifierFailureKind = failureKind ?? null;
 	}
 
 	/**
@@ -911,6 +931,7 @@ export class SessionTelemetry {
 				builds: this.buildInvocations,
 				checks: this.checkInvocations,
 				verifications: this.verificationRuns,
+				verifierOutcomes: { ...this.verifierOutcomes },
 			},
 			agent: {
 				askUser: this.askUserInvocations,
@@ -1031,6 +1052,19 @@ export function renderSessionTelemetryText(snapshot: SessionTelemetrySnapshot): 
 	lines.push(`  builds             ${formatCount(validation.builds)}`);
 	lines.push(`  checks             ${formatCount(validation.checks)}`);
 	lines.push(`  verifications      ${formatCount(validation.verifications)}`);
+	const verifierFailures =
+		validation.verifierOutcomes.timeout +
+		validation.verifierOutcomes.cancelled +
+		validation.verifierOutcomes.provider +
+		validation.verifierOutcomes["tool-budget"] +
+		validation.verifierOutcomes["invalid-verdict"] +
+		validation.verifierOutcomes.configuration +
+		validation.verifierOutcomes.internal;
+	if (verifierFailures > 0) {
+		lines.push(
+			`  verifier failures  ${formatCount(validation.verifierOutcomes.timeout)} timeout, ${formatCount(validation.verifierOutcomes.cancelled)} cancelled, ${formatCount(validation.verifierOutcomes.provider)} provider, ${formatCount(validation.verifierOutcomes["tool-budget"])} tool-budget, ${formatCount(validation.verifierOutcomes["invalid-verdict"])} invalid-verdict, ${formatCount(validation.verifierOutcomes.configuration)} config, ${formatCount(validation.verifierOutcomes.internal)} internal`,
+		);
+	}
 	lines.push("");
 	lines.push("Agent");
 	lines.push(`  ask_user           ${formatCount(agent.askUser)}`);

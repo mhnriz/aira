@@ -147,7 +147,7 @@ describe("Step 8 failure policy: normal completion", () => {
 		expect(snapshot.agent.childAgents).toBe(1);
 		expect(snapshot.agent.childOutcomes.completed).toBe(1);
 		expect(snapshot.agent.askUser).toBe(0);
-		expect(snapshot.schemaVersion).toBe("1.4.0");
+		expect(snapshot.schemaVersion).toBe("1.5.0");
 	});
 
 	it("keeps the pending -> active -> completed task lifecycle intact", async () => {
@@ -410,7 +410,7 @@ describe("Step 8 failure policy: telemetry truthfulness", () => {
 		// ...while the telemetry artifact carries categories only.
 		const snapshot = telemetrySnapshot(fixture.telemetry);
 		const json = renderSessionTelemetryJson(snapshot);
-		expect(snapshot.schemaVersion).toBe("1.4.0");
+		expect(snapshot.schemaVersion).toBe("1.5.0");
 		expect(snapshot.agent.childOutcomes.capabilityFailed).toBe(1);
 		expect(json).not.toContain("sk-live-abcdef0123456789");
 		expect(json).not.toContain("Bearer");

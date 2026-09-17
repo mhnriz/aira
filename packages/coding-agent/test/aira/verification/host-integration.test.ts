@@ -229,7 +229,11 @@ describe("Aira independent verification through the host (Phase 8)", () => {
 
 	it("driver failure degrades truthfully: INCONCLUSIVE with lastError, session keeps working", async () => {
 		const harness = await makeVerifyHarness({
-			runner: async () => ({ ok: false as const, driverError: "provider exploded" }),
+			runner: async () => ({
+				ok: false as const,
+				driverError: "provider exploded",
+				failureKind: "provider" as const,
+			}),
 		});
 		harness.setResponses([fauxAssistantMessage([editCall("t1")]), fauxAssistantMessage(fauxText("final"))]);
 		await harness.session.prompt("fix the player staying black");

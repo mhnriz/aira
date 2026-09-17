@@ -10,8 +10,8 @@
  *
  * Failure behavior: any driver failure (model/provider error, timeout,
  * cancellation, tool-budget exhaustion, unparseable verdict) yields
- * `{ driverError }` — the manager maps it to INCONCLUSIVE with an explicit
- * `lastError`, never to PASS.
+ * `{ driverError, failureKind }` — the manager maps it to INCONCLUSIVE with an
+ * explicit `lastError`, never to PASS.
  */
 import type { AgentTool, StreamFn } from "@earendil-works/pi-agent-core";
 import type {
@@ -26,6 +26,18 @@ import { createFindTool } from "../../core/tools/find.ts";
 import { createGrepTool } from "../../core/tools/grep.ts";
 import { createLsTool } from "../../core/tools/ls.ts";
 import { createReadTool } from "../../core/tools/read.ts";
+import { toAiraFailureEvidence } from "../orchestration/failures.ts";
+import {
+	type AiraRunDeadline,
+	callModelStream,
+	contentText,
+	createAiraRunDeadline,
+	hasToolCalls,
+	lastBalancedObject,
+	toolCallsOf,
+	toolResultIsError,
+	toolResultMessage,
+} from "../orchestration/model-call.ts";
 import type { AiraChildTokenUsage } from "../orchestration/types.ts";
 import { VERIFIER_SYSTEM_PROMPT } from "./prompt.ts";
 import {
@@ -35,7 +47,9 @@ import {
 	normalizeScopeAssessment,
 	normalizeVerificationRequirements,
 } from "./requirements.ts";
-import type { AiraVerificationResult, AiraVerificationVerdict } from "./types.ts";
+import type { AiraVerificationResult, AiraVerificationVerdict, AiraVerifierFailureKind } from "./types.ts";
+
+export type { AiraVerifierFailureKind };
 
 export const DEFAULT_VERIFIER_TIMEOUT_MS = 180_000;
 export const MAX_VERIFIER_TOOL_ROUNDS = 8;
@@ -77,6 +91,7 @@ export type AiraVerifierOutcome =
 	| {
 			ok: false;
 			driverError: string;
+			failureKind: AiraVerifierFailureKind;
 			toolCallsUsed?: number;
 			toolBudgetLimit?: number;
 			toolBudgetExtensions?: number;
@@ -99,7 +114,7 @@ export async function runAiraVerifier(
 ): Promise<AiraVerifierOutcome> {
 	const { model, streamFn } = runtime;
 	if (!model) {
-		return { ok: false, driverError: "no verifier model configured" };
+		return { ok: false, driverError: "no verifier model configured", failureKind: "configuration" };
 	}
 
 	const tools = createVerifierTools(options.cwd);
@@ -122,10 +137,8 @@ export async function runAiraVerifier(
 	if (runtime.headers !== undefined) baseOptions.headers = runtime.headers;
 	if (runtime.env !== undefined) baseOptions.env = runtime.env;
 
-	let timeoutTimer: NodeJS.Timeout | undefined;
-	const timeout = new Promise<never>((_, reject) => {
-		timeoutTimer = setTimeout(() => reject(new Error("verifier timed out")), timeoutMs);
-	});
+	const deadline = createAiraRunDeadline({ timeoutMs, signal, label: "verifier" });
+	const runSignal = deadline.signal;
 
 	const messages: Message[] = [
 		{
@@ -151,10 +164,8 @@ export async function runAiraVerifier(
 	};
 
 	try {
-		let assistant = await raceWithTimeout(
-			callStream(streamFn, model, messages, tools, baseOptions, signal),
-			timeout,
-			signal,
+		let assistant = await deadline.race(
+			callModelStream(streamFn, model, VERIFIER_SYSTEM_PROMPT, messages, tools, baseOptions, runSignal),
 		);
 		accumulateUsage(assistant);
 		let round = 0;
@@ -165,6 +176,7 @@ export async function runAiraVerifier(
 					return {
 						ok: false,
 						driverError: "verifier exceeded its read-only tool budget",
+						failureKind: "tool-budget",
 						toolCallsUsed,
 						toolBudgetLimit,
 						toolBudgetExtensions,
@@ -186,15 +198,17 @@ export async function runAiraVerifier(
 				const signature = `${call.name}:${JSON.stringify(call.arguments ?? {})}`;
 				const isNewToolCall = !seenToolCalls.has(signature);
 				seenToolCalls.add(signature);
-				const result = await executeVerifierTool(tools, call, signal);
+				// One run -> one deadline: tool execution shares the model-call
+				// deadline and receives its signal. Signal-aware tools stop at the
+				// deadline; a tool that cannot be interrupted keeps running in the
+				// background, but the loop stops awaiting it once the race rejects.
+				const result = await deadline.race(executeVerifierTool(tools, call, runSignal));
 				if (isNewToolCall && !result.isError) roundHadProgress = true;
 				results.push(result);
 			}
 			messages.push(assistant, ...results);
-			assistant = await raceWithTimeout(
-				callStream(streamFn, model, messages, tools, baseOptions, signal),
-				timeout,
-				signal,
+			assistant = await deadline.race(
+				callModelStream(streamFn, model, VERIFIER_SYSTEM_PROMPT, messages, tools, baseOptions, runSignal),
 			);
 			accumulateUsage(assistant);
 		}
@@ -202,17 +216,26 @@ export async function runAiraVerifier(
 			return {
 				ok: false,
 				driverError: "verifier exceeded its read-only tool budget",
+				failureKind: "tool-budget",
 				toolCallsUsed,
 				toolBudgetLimit,
 				toolBudgetExtensions,
 			};
 		}
 		if (assistant.stopReason === "error" || assistant.stopReason === "aborted") {
-			return { ok: false, driverError: assistant.errorMessage ?? `verifier ${assistant.stopReason}` };
+			return {
+				ok: false,
+				driverError: assistant.errorMessage ?? `verifier ${assistant.stopReason}`,
+				failureKind: verifierStopReasonKind(deadline, assistant),
+			};
 		}
 		const parsed = parseVerifierVerdict(contentText(assistant));
 		if (!parsed) {
-			return { ok: false, driverError: "verifier returned no valid structured verdict" };
+			return {
+				ok: false,
+				driverError: "verifier returned no valid structured verdict",
+				failureKind: "invalid-verdict",
+			};
 		}
 		return {
 			ok: true,
@@ -223,78 +246,70 @@ export async function runAiraVerifier(
 			toolBudgetExtensions,
 		};
 	} catch (error) {
-		const message = error instanceof Error ? error.message : String(error);
+		const failure = classifyVerifierThrown(error, deadline, timeoutMs);
 		return {
 			ok: false,
-			driverError: message === "verifier timed out" ? `verifier timed out after ${timeoutMs}ms` : message,
+			driverError: failure.driverError,
+			failureKind: failure.failureKind,
 			toolCallsUsed,
 			toolBudgetLimit,
 			toolBudgetExtensions,
 		};
 	} finally {
-		if (timeoutTimer) {
-			clearTimeout(timeoutTimer);
-		}
+		deadline.dispose();
 	}
 }
 
-function callStream(
-	streamFn: StreamFn,
-	model: Model<any>,
-	messages: Message[],
-	tools: AgentTool[],
-	options: SimpleStreamOptions,
-	signal?: AbortSignal,
-): Promise<AssistantMessage> {
-	const maybePromise = streamFn(
-		model,
-		{ systemPrompt: VERIFIER_SYSTEM_PROMPT, messages, tools },
-		{ ...options, signal },
-	);
-	return (maybePromise instanceof Promise ? maybePromise : Promise.resolve(maybePromise)).then((stream) =>
-		stream.result(),
-	);
+/** Map the deadline's abort source to a verifier failure kind. */
+function verifierAbortKind(deadline: AiraRunDeadline): AiraVerifierFailureKind | undefined {
+	if (deadline.kind === "timeout") {
+		return "timeout";
+	}
+	if (deadline.kind === "cancelled") {
+		return "cancelled";
+	}
+	return undefined;
 }
 
-function raceWithTimeout<T>(promise: Promise<T>, timeout: Promise<never>, signal?: AbortSignal): Promise<T> {
-	return new Promise<T>((resolve, reject) => {
-		let settled = false;
-		const onAbort = () => {
-			settle(() => reject(new Error("verifier cancelled")));
-		};
-		const settle = (action: () => void): void => {
-			if (!settled) {
-				settled = true;
-				signal?.removeEventListener("abort", onAbort);
-				action();
-			}
-		};
-		if (signal?.aborted) {
-			onAbort();
-			return;
-		}
-		signal?.addEventListener("abort", onAbort, { once: true });
-		promise.then(
-			(value) => settle(() => resolve(value)),
-			(error) => settle(() => reject(error instanceof Error ? error : new Error(String(error)))),
-		);
-		timeout.then(
-			() => undefined,
-			(error) => settle(() => reject(error instanceof Error ? error : new Error(String(error)))),
-		);
-	});
+/**
+ * Classify a thrown verifier-loop error.
+ *
+ * The deadline records timeout vs caller cancellation explicitly, so a stream
+ * that later surfaces an AbortError still lands in the correct bucket.
+ * Otherwise, structured provider/tooling evidence (HTTP status, Node code, or an
+ * Aira failure origin) is a provider failure; anything else is an unknown /
+ * internal failure. Human detail is preserved either way.
+ */
+function classifyVerifierThrown(
+	error: unknown,
+	deadline: AiraRunDeadline,
+	timeoutMs: number,
+): { failureKind: AiraVerifierFailureKind; driverError: string } {
+	const abort = verifierAbortKind(deadline);
+	if (abort === "timeout") {
+		return { failureKind: "timeout", driverError: `verifier timed out after ${timeoutMs}ms` };
+	}
+	if (abort === "cancelled") {
+		return { failureKind: "cancelled", driverError: "verifier cancelled" };
+	}
+	const evidence = toAiraFailureEvidence(error, "verifier failed");
+	const driverError = evidence.message ?? "verifier failed";
+	if (evidence.code !== undefined || evidence.status !== undefined || evidence.origin !== undefined) {
+		return { failureKind: "provider", driverError };
+	}
+	return { failureKind: "internal", driverError };
+}
+
+function verifierStopReasonKind(deadline: AiraRunDeadline, assistant: AssistantMessage): AiraVerifierFailureKind {
+	const abort = verifierAbortKind(deadline);
+	if (abort !== undefined) {
+		return abort;
+	}
+	return assistant.stopReason === "aborted" ? "cancelled" : "provider";
 }
 
 function createVerifierTools(cwd: string): AgentTool[] {
 	return [createReadTool(cwd), createGrepTool(cwd), createFindTool(cwd), createLsTool(cwd)];
-}
-
-function hasToolCalls(message: AssistantMessage): boolean {
-	return message.content.some((block) => (block as { type?: string }).type === "toolCall");
-}
-
-function toolCallsOf(message: AssistantMessage): ToolCall[] {
-	return message.content.filter((block): block is ToolCall => (block as { type?: string }).type === "toolCall");
 }
 
 async function executeVerifierTool(
@@ -304,19 +319,12 @@ async function executeVerifierTool(
 ): Promise<ToolResultMessage> {
 	const tool = tools.find((candidate) => candidate.name === call.name);
 	if (!tool) {
-		return toolResultMessage(call, [{ type: "text", text: `unknown tool ${call.name}` }], true);
+		return toolResultMessage(call, [{ type: "text", text: `Error: unknown tool ${call.name}` }], true);
 	}
 	try {
 		const params = tool.prepareArguments ? tool.prepareArguments(call.arguments) : call.arguments;
 		const result = await tool.execute(call.id, params, signal);
-		return toolResultMessage(
-			call,
-			result.content,
-			result.content.some(
-				(block) =>
-					(block as { type?: string }).type === "text" && (block as { text?: string }).text?.startsWith("Error"),
-			),
-		);
+		return toolResultMessage(call, result.content, toolResultIsError(result.content));
 	} catch (error) {
 		return toolResultMessage(
 			call,
@@ -326,32 +334,11 @@ async function executeVerifierTool(
 	}
 }
 
-function toolResultMessage(call: ToolCall, content: ToolResultMessage["content"], isError: boolean): ToolResultMessage {
-	return {
-		role: "toolResult",
-		toolCallId: call.id,
-		toolName: call.name,
-		content,
-		isError,
-		timestamp: Date.now(),
-	};
-}
-
-function contentText(message: AssistantMessage): string {
-	return message.content
-		.filter((block): block is { type: "text"; text: string } => (block as { type?: string }).type === "text")
-		.map((block) => block.text)
-		.join("\n")
-		.trim();
-}
-
 /** Extract the structured verdict JSON from the verifier's final text. */
 export function parseVerifierVerdict(text: string): Record<string, unknown> | undefined {
 	const trimmed = text.trim();
 	const fenced = /```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/i.exec(trimmed)?.[1];
-	const objectStart = trimmed.indexOf("{");
-	const objectEnd = trimmed.lastIndexOf("}");
-	const embedded = objectStart >= 0 && objectEnd > objectStart ? trimmed.slice(objectStart, objectEnd + 1) : undefined;
+	const embedded = lastBalancedObject(trimmed);
 	for (const candidate of [fenced, embedded, trimmed]) {
 		if (!candidate) {
 			continue;

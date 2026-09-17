@@ -20,7 +20,6 @@ import { createHash } from "node:crypto";
 import type { AgentTool, StreamFn } from "@earendil-works/pi-agent-core";
 import type {
 	AssistantMessage,
-	AssistantMessageEvent,
 	Message,
 	Model,
 	SimpleStreamOptions,
@@ -50,6 +49,18 @@ import {
 	sanitizeAiraFailureMessage,
 	toAiraFailureEvidence,
 } from "./failures.ts";
+import {
+	type AiraModelStream,
+	type AiraRunDeadline,
+	callModelStream,
+	contentText,
+	createAiraRunDeadline,
+	hasToolCalls,
+	lastBalancedObject,
+	toolCallsOf,
+	toolResultIsError,
+	toolResultMessage,
+} from "./model-call.ts";
 import type {
 	AiraChildFailureInfo,
 	AiraChildResult,
@@ -165,10 +176,8 @@ export async function runAiraChild(
 	if (runtime.headers !== undefined) baseOptions.headers = runtime.headers;
 	if (runtime.env !== undefined) baseOptions.env = runtime.env;
 
-	let timeoutTimer: NodeJS.Timeout | undefined;
-	const timeout = new Promise<never>((_, reject) => {
-		timeoutTimer = setTimeout(() => reject(new Error("child timed out")), timeoutMs);
-	});
+	const deadline = createAiraRunDeadline({ timeoutMs, signal, label: "child" });
+	const runSignal = deadline.signal;
 
 	const messages: Message[] = [
 		{
@@ -194,19 +203,17 @@ export async function runAiraChild(
 	};
 
 	try {
-		let assistant = await raceWithTimeout(
-			callStream(
+		let assistant = await deadline.race(
+			callModelStream(
 				streamFn,
 				model,
 				options.systemPrompt,
 				messages,
 				options.tools,
 				baseOptions,
-				signal,
-				options.events,
+				runSignal,
+				(stream) => void consumeStreamEvents(stream, options.events),
 			),
-			timeout,
-			signal,
 		);
 		accumulateUsage(assistant);
 		let round = 0;
@@ -264,7 +271,11 @@ export async function runAiraChild(
 					);
 					continue;
 				}
-				const outcome = await executeChildTool(options.tools, call, signal);
+				// One run -> one deadline: tool execution shares the model-call
+				// deadline and receives its signal. Signal-aware tools stop at the
+				// deadline; a tool that cannot be interrupted keeps running in the
+				// background, but the loop stops awaiting it once the race rejects.
+				const outcome = await deadline.race(executeChildTool(options.tools, call, runSignal));
 				if (!outcome.isError && (call.name === "edit" || call.name === "write")) {
 					const path = toolPath(call);
 					if (path) {
@@ -287,19 +298,17 @@ export async function runAiraChild(
 				});
 			}
 			messages.push(assistant, ...results);
-			assistant = await raceWithTimeout(
-				callStream(
+			assistant = await deadline.race(
+				callModelStream(
 					streamFn,
 					model,
 					options.systemPrompt,
 					messages,
 					options.tools,
 					baseOptions,
-					signal,
-					options.events,
+					runSignal,
+					(stream) => void consumeStreamEvents(stream, options.events),
 				),
-				timeout,
-				signal,
 			);
 			accumulateUsage(assistant);
 		}
@@ -323,7 +332,9 @@ export async function runAiraChild(
 			// Provider/child-session capability seam: the provider rejected or
 			// aborted the child request. This is not evidence that the delegated
 			// work was wrong.
-			const failure = classifyAiraChildFailure(childProviderFailureEvidence(assistant, signal));
+			const failure = classifyAiraChildFailure(
+				childAbortEvidence(deadline, timeoutMs) ?? childProviderFailureEvidence(assistant, runSignal),
+			);
 			return { ok: false, driverError: failure.message, error: failure };
 		}
 		let resultText = contentText(assistant);
@@ -332,19 +343,17 @@ export async function runAiraChild(
 			// Truncation-aware recovery: the final message hit the output cap mid
 			// JSON. Ask exactly once for the compact contract with the SAME output
 			// budget (no token bump); a truncated payload is otherwise unparseable.
-			const continued = await raceWithTimeout(
-				callStream(
+			const continued = await deadline.race(
+				callModelStream(
 					streamFn,
 					model,
 					options.systemPrompt,
 					[...messages, assistant, childResultContinuationMessage()],
 					[],
 					baseOptions,
-					signal,
-					options.events,
+					runSignal,
+					(stream) => void consumeStreamEvents(stream, options.events),
 				),
-				timeout,
-				signal,
 			);
 			accumulateUsage(continued);
 			assistant = continued;
@@ -381,34 +390,17 @@ export async function runAiraChild(
 			toolBudgetExtensions,
 		};
 	} catch (error) {
-		const message = error instanceof Error ? error.message : String(error);
-		const timedOut = message === "child timed out";
-		const cancelled = !timedOut && (message === "child cancelled" || signal?.aborted === true);
-		// Classification is deterministic: explicit timeout/cancel state first,
-		// then typed errors / Node codes / provider status, else capability seam.
+		// Classification is deterministic: the deadline/cancellation state wins
+		// even when the aborted stream surfaces an AbortError afterwards; then
+		// typed errors / Node codes / provider status, else capability seam.
 		const caught = toAiraFailureEvidence(error, "child run failed");
-		const evidence: AiraFailureEvidence = timedOut
-			? {
-					timedOut: true,
-					message: `child timed out after ${timeoutMs}ms`,
-					component: "child-run",
-					operation: "timeout",
-				}
-			: cancelled
-				? {
-						cancelled: true,
-						message: "child cancelled",
-						component: "child-run",
-						operation: "cancel",
-						taskStatus: "attempted",
-					}
-				: {
-						...caught,
-						origin: caught.origin ?? "capability",
-						component: caught.component ?? "child-provider",
-						operation: caught.operation ?? "stream",
-						taskStatus: caught.taskStatus ?? "attempted",
-					};
+		const evidence: AiraFailureEvidence = childAbortEvidence(deadline, timeoutMs) ?? {
+			...caught,
+			origin: caught.origin ?? "capability",
+			component: caught.component ?? "child-provider",
+			operation: caught.operation ?? "stream",
+			taskStatus: caught.taskStatus ?? "attempted",
+		};
 		const failure = classifyAiraChildFailure(evidence);
 		return {
 			ok: false,
@@ -419,10 +411,34 @@ export async function runAiraChild(
 			toolBudgetExtensions,
 		};
 	} finally {
-		if (timeoutTimer) {
-			clearTimeout(timeoutTimer);
-		}
+		deadline.dispose();
 	}
+}
+
+/**
+ * Deadline-owned abort evidence. The deadline records whether timeout or
+ * caller cancellation fired first, so a stream that later surfaces an
+ * AbortError cannot reclassify a timeout as cancellation.
+ */
+function childAbortEvidence(deadline: AiraRunDeadline, timeoutMs: number): AiraFailureEvidence | undefined {
+	if (deadline.kind === "timeout") {
+		return {
+			timedOut: true,
+			message: `child timed out after ${timeoutMs}ms`,
+			component: "child-run",
+			operation: "timeout",
+		};
+	}
+	if (deadline.kind === "cancelled") {
+		return {
+			cancelled: true,
+			message: "child cancelled",
+			component: "child-run",
+			operation: "cancel",
+			taskStatus: "attempted",
+		};
+	}
+	return undefined;
 }
 
 /**
@@ -451,23 +467,6 @@ function childProviderFailureEvidence(assistant: AssistantMessage, signal?: Abor
 	};
 }
 
-function callStream(
-	streamFn: StreamFn,
-	model: Model<any>,
-	systemPrompt: string,
-	messages: Message[],
-	tools: AgentTool[],
-	options: SimpleStreamOptions,
-	signal?: AbortSignal,
-	events?: (event: AiraChildEvent) => void,
-): Promise<AssistantMessage> {
-	const maybePromise = streamFn(model, { systemPrompt, messages, tools }, { ...options, signal });
-	return (maybePromise instanceof Promise ? maybePromise : Promise.resolve(maybePromise)).then((stream) => {
-		void consumeStreamEvents(stream, events);
-		return stream.result();
-	});
-}
-
 /**
  * Consume the stream's event queue into the Agent Inspector sink WITHOUT
  * touching `stream.result()`: the EventStream resolves its final result
@@ -477,7 +476,7 @@ function callStream(
  * the buffer event count proportional to model blocks, not tokens.
  */
 async function consumeStreamEvents(
-	stream: AiraStreamLike,
+	stream: AiraModelStream,
 	events: ((event: AiraChildEvent) => void) | undefined,
 ): Promise<void> {
 	if (!events) {
@@ -568,43 +567,6 @@ function toolCallArgsText(toolCall: ToolCall): string {
 	}
 }
 
-function raceWithTimeout<T>(promise: Promise<T>, timeout: Promise<never>, signal?: AbortSignal): Promise<T> {
-	return new Promise<T>((resolve, reject) => {
-		let settled = false;
-		const onAbort = () => {
-			settle(() => reject(new Error("child cancelled")));
-		};
-		const settle = (action: () => void): void => {
-			if (!settled) {
-				settled = true;
-				signal?.removeEventListener("abort", onAbort);
-				action();
-			}
-		};
-		if (signal?.aborted) {
-			onAbort();
-			return;
-		}
-		signal?.addEventListener("abort", onAbort, { once: true });
-		promise.then(
-			(value) => settle(() => resolve(value)),
-			(error) => settle(() => reject(error instanceof Error ? error : new Error(String(error)))),
-		);
-		timeout.then(
-			() => undefined,
-			(error) => settle(() => reject(error instanceof Error ? error : new Error(String(error)))),
-		);
-	});
-}
-
-function hasToolCalls(message: AssistantMessage): boolean {
-	return message.content.some((block) => (block as { type?: string }).type === "toolCall");
-}
-
-function toolCallsOf(message: AssistantMessage): ToolCall[] {
-	return message.content.filter((block): block is ToolCall => (block as { type?: string }).type === "toolCall");
-}
-
 async function executeChildTool(
 	tools: AgentTool[],
 	call: ToolCall,
@@ -622,10 +584,7 @@ async function executeChildTool(
 	try {
 		const params = tool.prepareArguments ? tool.prepareArguments(call.arguments) : call.arguments;
 		const result = await tool.execute(call.id, params, signal);
-		const isError = result.content.some(
-			(block) =>
-				(block as { type?: string }).type === "text" && (block as { text?: string }).text?.startsWith("Error"),
-		);
+		const isError = toolResultIsError(result.content);
 		const text = result.content
 			.filter((block): block is { type: "text"; text: string } => (block as { type?: string }).type === "text")
 			.map((block) => block.text)
@@ -653,30 +612,6 @@ function toolPath(call: ToolCall): string | undefined {
 	return typeof path === "string" && path.length > 0 ? path : undefined;
 }
 
-function toolResultMessage(call: ToolCall, content: ToolResultMessage["content"], isError: boolean): ToolResultMessage {
-	return {
-		role: "toolResult",
-		toolCallId: call.id,
-		toolName: call.name,
-		content,
-		isError,
-		timestamp: Date.now(),
-	};
-}
-
-/** Minimal structural view of the stream the runner iterates for capture. */
-type AiraStreamLike = AsyncIterable<AssistantMessageEvent> & {
-	result(): Promise<AssistantMessage>;
-};
-
-function contentText(message: AssistantMessage): string {
-	return message.content
-		.filter((block): block is { type: "text"; text: string } => (block as { type?: string }).type === "text")
-		.map((block) => block.text)
-		.join("\n")
-		.trim();
-}
-
 /** Extract the structured result JSON from the child's final text. */
 export function parseChildResult(text: string): Record<string, unknown> | undefined {
 	const trimmed = text.trim();
@@ -696,55 +631,6 @@ export function parseChildResult(text: string): Record<string, unknown> | undefi
 		}
 	}
 	return undefined;
-}
-
-/**
- * Return the LAST balanced top-level `{...}` region of `text`, respecting
- * string literals and escapes so braces inside strings do not break balance.
- * This isolates the final result object from earlier JSON examples in prose,
- * unlike slicing from the first `{` to the last `}` (which spans both and
- * yields invalid JSON). Returns undefined when a trailing object was opened
- * but never closed, so a truncated payload is not misread as an earlier
- * narration example.
- */
-function lastBalancedObject(text: string): string | undefined {
-	let depth = 0;
-	let start = -1;
-	let last: string | undefined;
-	let inString = false;
-	let escaped = false;
-	for (let index = 0; index < text.length; index += 1) {
-		const char = text[index];
-		if (inString) {
-			if (escaped) {
-				escaped = false;
-			} else if (char === "\\") {
-				escaped = true;
-			} else if (char === '"') {
-				inString = false;
-			}
-			continue;
-		}
-		if (char === '"') {
-			inString = true;
-			continue;
-		}
-		if (char === "{") {
-			if (depth === 0) start = index;
-			depth += 1;
-			continue;
-		}
-		if (char === "}" && depth > 0) {
-			depth -= 1;
-			if (depth === 0 && start >= 0) {
-				last = text.slice(start, index + 1);
-				start = -1;
-			}
-		}
-	}
-	// An opened-but-unclosed object means the trailing (likely final) result was
-	// truncated; do not fall back to an earlier balanced object in the prose.
-	return depth > 0 ? undefined : last;
 }
 
 /** One bounded, secret-sanitized diagnostic excerpt. */

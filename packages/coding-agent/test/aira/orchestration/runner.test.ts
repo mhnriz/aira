@@ -8,6 +8,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { AgentTool } from "@earendil-works/pi-agent-core";
 import {
 	fauxAssistantMessage,
 	fauxText,
@@ -279,6 +280,65 @@ describe("Aira child runner (Phase 9)", () => {
 		expect(outcome.ok).toBe(false);
 		if (!outcome.ok) {
 			expect(outcome.driverError).toContain("timed out");
+		}
+	});
+
+	it("deadline timeout aborts the in-flight child stream and stays classified as timeout", async () => {
+		const root = makeProjectDir();
+		const { runtime, setResponses } = fauxRuntime();
+		let observed: AbortSignal | undefined;
+		setResponses([
+			(_context: unknown, options: { signal?: AbortSignal } | undefined) => {
+				observed = options?.signal;
+				return new Promise<never>((_resolve, reject) => {
+					options?.signal?.addEventListener("abort", () => reject(new Error("Request was aborted")), {
+						once: true,
+					});
+				}) as never;
+			},
+		]);
+		const outcome = await runAiraChild(runtime, {
+			cwd: root,
+			prompt: "TASK",
+			systemPrompt: "",
+			tools: readOnlyTools(root),
+			timeoutMs: 60,
+		});
+		expect(observed?.aborted).toBe(true);
+		expect(outcome.ok).toBe(false);
+		if (!outcome.ok) {
+			expect(outcome.error?.kind).toBe("timeout");
+		}
+	});
+
+	it("a hanging tool cannot extend the run beyond the deadline and receives the aborted signal", async () => {
+		const root = makeProjectDir();
+		const { runtime, setResponses } = fauxRuntime();
+		let toolSignal: AbortSignal | undefined;
+		const hangingTool = {
+			name: "hang",
+			label: "hang",
+			description: "never resolves",
+			parameters: { type: "object", properties: {} },
+			execute: (_id: string, _params: unknown, signal?: AbortSignal) => {
+				toolSignal = signal;
+				return new Promise(() => {}) as never;
+			},
+		} as unknown as AgentTool;
+		setResponses([fauxAssistantMessage([fauxToolCall("hang", {})])]);
+		const startedAt = Date.now();
+		const outcome = await runAiraChild(runtime, {
+			cwd: root,
+			prompt: "TASK",
+			systemPrompt: "",
+			tools: [hangingTool],
+			timeoutMs: 60,
+		});
+		expect(Date.now() - startedAt).toBeLessThan(2000);
+		expect(toolSignal?.aborted).toBe(true);
+		expect(outcome.ok).toBe(false);
+		if (!outcome.ok) {
+			expect(outcome.error?.kind).toBe("timeout");
 		}
 	});
 

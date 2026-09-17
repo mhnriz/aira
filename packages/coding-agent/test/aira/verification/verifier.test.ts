@@ -106,6 +106,7 @@ describe("Aira fresh-context verifier runner (Phase 8)", () => {
 		expect(outcome.ok).toBe(false);
 		if (!outcome.ok) {
 			expect(outcome.driverError).toContain("no valid structured verdict");
+			expect(outcome.failureKind).toBe("invalid-verdict");
 		}
 	});
 
@@ -167,6 +168,7 @@ describe("Aira fresh-context verifier runner (Phase 8)", () => {
 		expect(outcome.ok).toBe(false);
 		if (!outcome.ok) {
 			expect(outcome.driverError).toContain("provider exploded");
+			expect(outcome.failureKind).toBe("provider");
 		}
 	});
 
@@ -182,6 +184,7 @@ describe("Aira fresh-context verifier runner (Phase 8)", () => {
 		expect(outcome.ok).toBe(false);
 		if (!outcome.ok) {
 			expect(outcome.driverError).toContain("tool budget");
+			expect(outcome.failureKind).toBe("tool-budget");
 		}
 	});
 
@@ -219,6 +222,37 @@ describe("Aira fresh-context verifier runner (Phase 8)", () => {
 		expect(outcome.ok).toBe(false);
 		if (!outcome.ok) {
 			expect(outcome.driverError).toContain("cancelled");
+			expect(outcome.failureKind).toBe("cancelled");
 		}
+	});
+
+	it("deadline timeout aborts the in-flight stream and stays classified as timeout", async () => {
+		const root = makeProjectDir();
+		const { runtime, setResponses } = fauxRuntime();
+		let observed: AbortSignal | undefined;
+		setResponses([
+			(_context: unknown, options: { signal?: AbortSignal } | undefined) => {
+				observed = options?.signal;
+				return new Promise<never>((_resolve, reject) => {
+					options?.signal?.addEventListener("abort", () => reject(new Error("Request was aborted")), {
+						once: true,
+					});
+				}) as never;
+			},
+		]);
+
+		const outcome = await runAiraVerifier(runtime, { cwd: root, envelope: "x", timeoutMs: 40 });
+
+		expect(observed?.aborted).toBe(true);
+		expect(outcome.ok).toBe(false);
+		if (!outcome.ok) {
+			expect(outcome.failureKind).toBe("timeout");
+			expect(outcome.driverError).toContain("timed out");
+		}
+	});
+
+	it("extracts the final verdict object when prose precedes an earlier JSON example", () => {
+		const parsed = parseVerifierVerdict(`Example: {"verdict":"fail"}\n${PASS_VERDICT}`);
+		expect(parsed?.verdict).toBe("pass");
 	});
 });

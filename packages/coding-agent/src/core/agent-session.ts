@@ -1066,7 +1066,9 @@ export class AgentSession {
 		}
 		if (this._airaVerification) {
 			this._telemetryUnsubscribers.push(
-				this._airaVerification.subscribe((status) => this.telemetry.observeVerificationState(status.status)),
+				this._airaVerification.subscribe((status) =>
+					this.telemetry.observeVerificationState(status.status, status.lastFailureKind),
+				),
 			);
 		}
 	}

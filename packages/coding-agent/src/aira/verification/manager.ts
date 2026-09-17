@@ -28,6 +28,7 @@ import type {
 	AiraVerificationStatus,
 	AiraVerificationStatusState,
 	AiraVerificationVerdict,
+	AiraVerifierFailureKind,
 } from "./types.ts";
 import { initialAiraVerificationStatus } from "./types.ts";
 import type { AiraVerifierOutcome, AiraVerifierRuntime } from "./verifier.ts";
@@ -400,6 +401,7 @@ export class AiraVerificationManager implements AiraVerificationHandle {
 			...this.snapshot,
 			status: "preparing",
 			lastError: undefined,
+			lastFailureKind: undefined,
 			lastSkipReason: undefined,
 			startedAt,
 			updatedAt: startedAt,
@@ -425,7 +427,7 @@ export class AiraVerificationManager implements AiraVerificationHandle {
 		try {
 			const runtime = await this.options.runtime?.();
 			if (!runtime?.model) {
-				this.failRun("verifier model unavailable (no model/auth configured)");
+				this.failRun("verifier model unavailable (no model/auth configured)", "configuration");
 				this.inFlight = false;
 				return { ok: false, outcome: "failed", reason: "verifier model unavailable" };
 			}
@@ -453,7 +455,7 @@ export class AiraVerificationManager implements AiraVerificationHandle {
 			this.abort = undefined;
 			const completedAt = Date.now();
 			if (!outcome.ok) {
-				this.failRun(outcome.driverError);
+				this.failRun(outcome.driverError, outcome.failureKind);
 				this.inFlight = false;
 				return { ok: false, outcome: "failed", reason: outcome.driverError };
 			}
@@ -494,6 +496,7 @@ export class AiraVerificationManager implements AiraVerificationHandle {
 				highestFinding: highestFinding(result.findings),
 				missingEvidence: result.missingEvidence,
 				lastError: undefined,
+				lastFailureKind: undefined,
 				completedAt,
 				updatedAt: completedAt,
 			};
@@ -501,18 +504,19 @@ export class AiraVerificationManager implements AiraVerificationHandle {
 			return { ok: true, outcome: "ran", result };
 		} catch (error) {
 			this.abort = undefined;
-			this.failRun(error instanceof Error ? error.message : String(error));
+			this.failRun(error instanceof Error ? error.message : String(error), "internal");
 			return { ok: false, outcome: "failed", reason: error instanceof Error ? error.message : String(error) };
 		} finally {
 			this.inFlight = false;
 		}
 	}
 
-	private failRun(reason: string): void {
+	private failRun(reason: string, failureKind: AiraVerifierFailureKind): void {
 		this.snapshot = {
 			...this.snapshot,
 			status: "inconclusive",
 			lastError: reason,
+			lastFailureKind: failureKind,
 			completedAt: Date.now(),
 			updatedAt: Date.now(),
 		};

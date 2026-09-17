@@ -2,6 +2,28 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Aira**: Structured verifier failure categories (`timeout`, `cancelled`,
+  `provider`, `tool-budget`, `invalid-verdict`, `configuration`, `internal`) on
+  verifier outcomes and verification status, surfaced in session telemetry as
+  `validation.verifierOutcomes` (schema 1.5.0).
+
+### Changed
+
+- **Aira**: Extracted the shared run deadline and model-call primitives used by
+  the child runner and verifier. The verifier verdict parser now reuses the
+  child runner's balanced-object JSON extraction, and verifier unknown-tool
+  results match the runner's `Error:` convention.
+
+### Fixed
+
+- **Aira**: Child and verifier run deadlines now abort the active model stream
+  and tool execution instead of only abandoning the await. Timeout remains
+  classified as timeout when the aborted operation later surfaces an
+  AbortError, cancellation stays distinguishable, and completed runs clear
+  their deadline timers/listeners.
+
 ## [0.1.8] - 2026-09-17
 
 ### New Features

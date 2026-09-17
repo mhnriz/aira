@@ -29,6 +29,20 @@ export type AiraVerificationStatusState =
 	| "failed" // verdict FAIL
 	| "inconclusive"; // verdict INCONCLUSIVE or verifier driver failure
 
+/**
+ * Why the verifier driver failed to produce a verdict. Kept separate from the
+ * child-run failure taxonomy because the verifier's only seams are the model
+ * stream, read-only tools, and verdict parsing.
+ */
+export type AiraVerifierFailureKind =
+	| "timeout"
+	| "cancelled"
+	| "provider"
+	| "tool-budget"
+	| "invalid-verdict"
+	| "configuration"
+	| "internal";
+
 /** Requirement origin: directly stated vs. necessary for the objective. */
 export type AiraRequirementKind = "explicit" | "inferred";
 
@@ -137,6 +151,8 @@ export interface AiraVerificationStatus {
 	missingEvidence: string[];
 	/** Verifier driver failure (model/auth/unavailable), when the last run failed to run. */
 	lastError?: string;
+	/** Structured category for {@link lastError}; cleared when a run succeeds. */
+	lastFailureKind?: AiraVerifierFailureKind;
 	/** Why the last eligible automatic trigger skipped a run (trivial/dedupe), when applicable. */
 	lastSkipReason?: string;
 	/** Host-side verifier tool budget telemetry for the last run. */
