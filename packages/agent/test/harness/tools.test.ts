@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { NodeExecutionEnv } from "../../src/harness/env/nodejs.ts";
 import { type BashToolDetails, createBashTool } from "../../src/harness/tools/bash.ts";
 import { createEditTool } from "../../src/harness/tools/edit.ts";
+import { detectSupportedImageMimeType } from "../../src/harness/tools/image.ts";
 import { createReadTool } from "../../src/harness/tools/read.ts";
 import { createWriteTool } from "../../src/harness/tools/write.ts";
 import {
@@ -133,6 +134,10 @@ function createTinyBmp(): Uint8Array {
 
 describe("AgentHarness tools", () => {
 	describe("read", () => {
+		it.each(["GIF87a", "GIF89a"])("detects the complete %s signature", (signature) => {
+			expect(detectSupportedImageMimeType(Buffer.from(signature, "ascii"))).toBe("image/gif");
+		});
+
 		it("reads text with offsets, limits, and continuation notices", async () => {
 			const context = createContext();
 			getOrThrow(
