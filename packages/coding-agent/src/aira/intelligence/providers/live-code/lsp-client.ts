@@ -216,23 +216,25 @@ export class LspClient {
 		this.write(JSON.stringify({ jsonrpc: "2.0", method, params }));
 	}
 
-	/** Open a document (full content) and bump its version. */
-	async didOpen(path: string, languageId: string, text: string): Promise<void> {
+	/** Open a document (full content) and bump its version. Returns the version sent to the server. */
+	async didOpen(path: string, languageId: string, text: string): Promise<number> {
 		const version = (this.documentVersions.get(path) ?? 0) + 1;
 		this.documentVersions.set(path, version);
 		this.notify("textDocument/didOpen", {
 			textDocument: { uri: this.fileUri(path), languageId, version, text },
 		});
+		return version;
 	}
 
-	/** Full-document sync for an already-open document. */
-	async didChange(path: string, text: string): Promise<void> {
+	/** Full-document sync for an already-open document. Returns the version sent to the server. */
+	async didChange(path: string, text: string): Promise<number> {
 		const version = (this.documentVersions.get(path) ?? 0) + 1;
 		this.documentVersions.set(path, version);
 		this.notify("textDocument/didChange", {
 			textDocument: { uri: this.fileUri(path), version },
 			contentChanges: [{ text }],
 		});
+		return version;
 	}
 
 	/** Close a document. */

@@ -46,6 +46,7 @@ function createStubRuntime(): AiraIntelligenceHandle {
 			{
 				path: "src/probe.ts",
 				status: "ready",
+				freshness: "findings",
 				diagnostics: [
 					{
 						line: 1,
@@ -194,6 +195,7 @@ describe("Aira intelligence tool presentation", () => {
 				{
 					path: "aira-diagnostic-probe.ts",
 					status: "ready",
+					freshness: "findings",
 					diagnostics: [
 						{
 							line: 1,
@@ -239,6 +241,7 @@ describe("Aira intelligence tool presentation", () => {
 				{
 					path: "agent-session.ts",
 					status: "ready",
+					freshness: "findings",
 					diagnostics: [
 						{
 							line: 14,
@@ -262,6 +265,7 @@ describe("Aira intelligence tool presentation", () => {
 				{
 					path: "sdk.ts",
 					status: "ready",
+					freshness: "findings",
 					diagnostics: [
 						{
 							line: 44,
@@ -274,7 +278,7 @@ describe("Aira intelligence tool presentation", () => {
 					],
 					truncated: false,
 				},
-				{ path: "clean.ts", status: "ready", diagnostics: [], truncated: false },
+				{ path: "clean.ts", status: "ready", freshness: "clean", diagnostics: [], truncated: false },
 			],
 			totals: { errors: 2, warnings: 1, other: 0 },
 			truncated: false,
@@ -315,7 +319,7 @@ describe("Aira intelligence tool presentation", () => {
 		const details: AiraDiagnosticsResult = {
 			status: "ready",
 			scope: "explicit",
-			files: [{ path: "sdk.ts", status: "ready", diagnostics, truncated: false }],
+			files: [{ path: "sdk.ts", status: "ready", freshness: "findings", diagnostics, truncated: false }],
 			totals: { errors: 5, warnings: 0, other: 0 },
 			truncated: false,
 		};
@@ -339,7 +343,7 @@ describe("Aira intelligence tool presentation", () => {
 		const details: AiraDiagnosticsResult = {
 			status: "ready",
 			scope: "explicit",
-			files: [{ path: "sdk.ts", status: "ready", diagnostics: [], truncated: false }],
+			files: [{ path: "sdk.ts", status: "ready", freshness: "clean", diagnostics: [], truncated: false }],
 			totals: { errors: 0, warnings: 0, other: 0 },
 			truncated: false,
 		};
@@ -359,6 +363,33 @@ describe("Aira intelligence tool presentation", () => {
 		expect(lines.length).toBe(1);
 	});
 
+	test("diagnostics: multiple files with only pending publications are not reported clean", async () => {
+		const details: AiraDiagnosticsResult = {
+			status: "ready",
+			scope: "explicit",
+			files: [
+				{ path: "sdk.ts", status: "ready", freshness: "clean", diagnostics: [], truncated: false },
+				{ path: "lsp.ts", status: "no-publish", freshness: "pending", diagnostics: [], truncated: false },
+			],
+			totals: { errors: 0, warnings: 0, other: 0 },
+			truncated: false,
+		};
+		const definitions = decorateAiraIntelligenceRenderers(
+			createAiraIntelligenceToolDefinitions({ runtime: createStubRuntime() }),
+		);
+		const { lines } = renderTool(
+			"aira_diagnostics",
+			{ paths: ["sdk.ts", "lsp.ts"] },
+			resultOf(details),
+			definitions.aira_diagnostics,
+		);
+
+		expect(lines[0]).toContain("2 files");
+		expect(lines[0]).toContain("1 pending");
+		expect(lines[0]).not.toContain("no issues");
+		expect(lines.join("\n")).toContain("no publish");
+	});
+
 	test("diagnostics: invalid path is an explicit error state", async () => {
 		const details: AiraDiagnosticsResult = {
 			status: "ready",
@@ -367,6 +398,7 @@ describe("Aira intelligence tool presentation", () => {
 				{
 					path: "src/missing.ts",
 					status: "invalid-path",
+					freshness: "unavailable",
 					diagnostics: [],
 					truncated: false,
 					reason: "path does not exist",
@@ -398,6 +430,7 @@ describe("Aira intelligence tool presentation", () => {
 				{
 					path: "sdk.ts",
 					status: "server-unavailable",
+					freshness: "unavailable",
 					diagnostics: [],
 					truncated: false,
 					reason: "language server is not installed",
@@ -483,7 +516,7 @@ describe("Aira intelligence tool presentation", () => {
 		const details: AiraDiagnosticsResult = {
 			status: "ready",
 			scope: "explicit",
-			files: [{ path: "sdk.ts", status: "ready", diagnostics: [], truncated: true }],
+			files: [{ path: "sdk.ts", status: "ready", freshness: "clean", diagnostics: [], truncated: true }],
 			totals: { errors: 0, warnings: 0, other: 0 },
 			truncated: true,
 		};
@@ -915,6 +948,7 @@ describe("Aira intelligence tool presentation", () => {
 				{
 					path: "sdk.ts",
 					status: "ready",
+					freshness: "findings",
 					diagnostics: [
 						{
 							line: 44,

@@ -25,6 +25,7 @@ import { type AiraFindingSeverity, AiraFindingsStore, type AiraFreshnessVerdict 
 import type {
 	LiveCodeDiagnosticEntry,
 	LiveCodeDiagnosticsFileStatus,
+	LiveCodeDiagnosticsFreshness,
 	LiveCodeDiagnosticsQueryResult,
 	LiveCodeSemanticOperation,
 	LiveCodeSemanticResult,
@@ -137,6 +138,8 @@ export interface AiraDiagnosticsFileResult {
 	/** Project-relative path. */
 	path: string;
 	status: LiveCodeDiagnosticsFileStatus | "invalid-path";
+	/** Whether the diagnostics reflect the current document version. */
+	freshness: LiveCodeDiagnosticsFreshness;
 	diagnostics: LiveCodeDiagnosticEntry[];
 	truncated: boolean;
 	reason?: string;
@@ -519,6 +522,7 @@ export class IntelligenceCoordinator implements AiraIntelligenceHandle {
 					files.push({
 						path: input,
 						status: "invalid-path",
+						freshness: "unavailable",
 						diagnostics: [],
 						truncated: false,
 						reason: resolved.reason,

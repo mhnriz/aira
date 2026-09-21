@@ -202,7 +202,6 @@ const FILE_STATUS_LABEL: Record<string, string> = {
 function renderDiagnostics(theme: Theme, details: AiraDiagnosticsResult, expanded: boolean): string {
 	const files = Array.isArray(details.files) ? details.files : [];
 	const invalidFiles = files.filter((file) => file.status === "invalid-path");
-	const rowStatus: CompactStatus = details.status === "degraded" || invalidFiles.length > 0 ? "error" : "success";
 	const unavailableReason =
 		details.status === "unavailable" || details.status === "cancelled" || details.status === "degraded"
 			? details.reason
@@ -216,6 +215,13 @@ function renderDiagnostics(theme: Theme, details: AiraDiagnosticsResult, expande
 			(typeof totals.warnings === "number" ? totals.warnings : 0) +
 			(typeof totals.other === "number" ? totals.other : 0) >
 		0;
+	const pendingFiles = files.filter((file) => file.freshness === "pending" || file.freshness === "stale").length;
+	const rowStatus: CompactStatus =
+		details.status === "degraded" || invalidFiles.length > 0
+			? "error"
+			: pendingFiles > 0 && !hasIssues
+				? "warning"
+				: "success";
 
 	if (details.status === "no-targets") {
 		lines.push(
@@ -308,6 +314,10 @@ function renderDiagnostics(theme: Theme, details: AiraDiagnosticsResult, expande
 	const excerpt: string[] = [theme.fg("muted", plural(files.length, "file"))];
 	if (hasIssues) {
 		excerpt.push(...diagnosticsTotalsParts(theme, totals));
+	} else if (pendingFiles > 0) {
+		// No findings yet does not mean clean: some files have no authoritative
+		// publication for their current version.
+		excerpt.push(theme.fg("muted", `${pendingFiles} pending`));
 	} else {
 		excerpt.push(theme.fg("success", "no issues"));
 	}

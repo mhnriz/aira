@@ -136,6 +136,7 @@ describe(
 			expect(result.status).toBe("ready");
 			const file = result.files.find((entry) => entry.path === "src/probe.ts");
 			expect(file?.status).toBe("ready");
+			expect(file?.freshness).toBe("findings");
 			const error = file?.diagnostics.find((entry) => entry.severity === "error");
 			expect(error).toBeDefined();
 			expect(error?.message).toContain("not assignable");
@@ -155,6 +156,7 @@ describe(
 			const fixed = await queryDiagnosticsUntil(handle, "src/probe.ts", (diagnostics) => diagnostics.length === 0);
 			const fixedFile = fixed.files.find((entry) => entry.path === "src/probe.ts");
 			expect(fixedFile?.status).toBe("ready");
+			expect(fixedFile?.freshness).toBe("clean");
 			expect(fixedFile?.diagnostics).toEqual([]);
 			expect(fixed.totals.errors + fixed.totals.warnings).toBe(0);
 			expect(state.intelligence?.findings.errors).toBe(0);

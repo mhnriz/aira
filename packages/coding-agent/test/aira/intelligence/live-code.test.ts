@@ -560,6 +560,7 @@ describe("live-code provider (mock language server)", () => {
 			expect(result.files).toHaveLength(2);
 			const badFile = result.files.find((f) => f.path === bad);
 			expect(badFile?.status).toBe("ready");
+			expect(badFile?.freshness).toBe("findings");
 			expect(badFile?.diagnostics[0]).toMatchObject({
 				line: 1,
 				character: 1,
@@ -572,6 +573,7 @@ describe("live-code provider (mock language server)", () => {
 			// A publish arrived and the file is clean: ready with an empty list,
 			// never confused with a missing publish.
 			expect(cleanFile?.status).toBe("ready");
+			expect(cleanFile?.freshness).toBe("clean");
 			expect(cleanFile?.diagnostics).toEqual([]);
 			expect(result.totals).toEqual({ errors: 1, warnings: 0, other: 0 });
 			// One cold start serves both files.
@@ -589,6 +591,7 @@ describe("live-code provider (mock language server)", () => {
 			const result = await provider.requestDiagnostics([silent], { waitMs: 150 });
 			expect(result.status).toBe("ready");
 			expect(result.files[0]?.status).toBe("no-publish");
+			expect(result.files[0]?.freshness).toBe("pending");
 			expect(result.files[0]?.diagnostics).toEqual([]);
 			expect(result.totals).toEqual({ errors: 0, warnings: 0, other: 0 });
 			await provider.dispose();
@@ -608,6 +611,7 @@ describe("live-code provider (mock language server)", () => {
 			writeFileSync(file, "export function bad() { /* fixed */ }");
 			const second = await provider.requestDiagnostics([file]);
 			expect(second.files[0]?.status).toBe("ready");
+			expect(second.files[0]?.freshness).toBe("clean");
 			expect(second.files[0]?.diagnostics).toEqual([]);
 			expect(second.totals.errors).toBe(0);
 			await provider.dispose();
@@ -625,11 +629,11 @@ describe("live-code provider (mock language server)", () => {
 			const { provider } = providerFor(root);
 			const result = await provider.requestDiagnostics([tsFile, textFile, missing]);
 			expect(result.status).toBe("ready");
-			expect(result.files.map((f) => [f.path, f.status]).sort()).toEqual(
+			expect(result.files.map((f) => [f.path, f.status, f.freshness]).sort()).toEqual(
 				[
-					[tsFile, "ready"],
-					[textFile, "unsupported-language"],
-					[missing, "unreadable"],
+					[tsFile, "ready", "clean"],
+					[textFile, "unsupported-language", "unavailable"],
+					[missing, "unreadable", "unavailable"],
 				].sort(),
 			);
 			await provider.dispose();
@@ -640,6 +644,7 @@ describe("live-code provider (mock language server)", () => {
 			const crashedResult = await crashed.requestDiagnostics([tsFile]);
 			expect(crashedResult.status).toBe("ready");
 			expect(crashedResult.files[0]?.status).toBe("server-unavailable");
+			expect(crashedResult.files[0]?.freshness).toBe("unavailable");
 			expect(crashedResult.files[0]?.diagnostics).toEqual([]);
 			expect(crashedResult.totals.errors).toBe(0);
 			expect(crashed.statusInfo().crashCount).toBeGreaterThanOrEqual(1);
@@ -670,6 +675,140 @@ describe("live-code provider (mock language server)", () => {
 				expect(file.truncated).toBe(true);
 			}
 			expect(result.totals.errors).toBe(15);
+			await provider.dispose();
+		});
+
+		it("ignores a stale empty publication instead of clearing current findings", async () => {
+			const root = makeRoot("query-stale-empty");
+			const file = join(root, "src", "tray.ts");
+			mkdirSync(join(root, "src"), { recursive: true });
+			writeFileSync(file, "export function bad() { ERROR_MARKER }");
+
+			const { provider } = providerFor(root);
+			const first = await provider.requestDiagnostics([file]);
+			expect(first.files[0]?.freshness).toBe("findings");
+			expect(first.files[0]?.diagnostics).toHaveLength(1);
+
+			// The next edit makes the server publish only an empty set for the
+			// previous version. It must not clear the accepted findings nor report
+			// the newer document as clean.
+			writeFileSync(file, "export function bad() { ERROR_MARKER } /* STALE_EMPTY_ONLY_MARKER */");
+			const second = await provider.requestDiagnostics([file], { waitMs: 250 });
+			expect(second.files[0]?.status).toBe("no-publish");
+			expect(second.files[0]?.freshness).toBe("stale");
+			expect(second.files[0]?.diagnostics).toHaveLength(1);
+			expect(second.files[0]?.diagnostics[0]?.message).toContain("ERROR_MARKER");
+			await provider.dispose();
+		});
+
+		it("ignores a stale non-empty publication in favor of the current version", async () => {
+			const root = makeRoot("query-stale-findings");
+			const file = join(root, "src", "tray.ts");
+			mkdirSync(join(root, "src"), { recursive: true });
+			writeFileSync(file, "export function bad() { ERROR_MARKER }");
+
+			const { provider } = providerFor(root);
+			await provider.requestDiagnostics([file]);
+
+			writeFileSync(file, "export function bad() { STALE_FINDINGS_MARKER ERROR_MARKER }");
+			const result = await provider.requestDiagnostics([file]);
+			expect(result.files[0]?.status).toBe("ready");
+			expect(result.files[0]?.freshness).toBe("findings");
+			expect(result.files[0]?.diagnostics).toHaveLength(1);
+			expect(result.files[0]?.diagnostics[0]?.message).toContain("ERROR_MARKER");
+			expect(result.files[0]?.diagnostics.some((d) => d.message.includes("stale"))).toBe(false);
+			await provider.dispose();
+		});
+
+		it("does not let a non-authoritative transient empty establish clean", async () => {
+			const root = makeRoot("query-transient");
+			const file = join(root, "src", "tray.ts");
+			mkdirSync(join(root, "src"), { recursive: true });
+			writeFileSync(file, "export function bad() { STALE_EMPTY_MARKER ERROR_MARKER }");
+
+			const { provider } = providerFor(root);
+			const result = await provider.requestDiagnostics([file]);
+			expect(result.files[0]?.status).toBe("ready");
+			expect(result.files[0]?.freshness).toBe("findings");
+			expect(result.files[0]?.diagnostics).toHaveLength(1);
+			await provider.dispose();
+		});
+
+		it("replaces previous findings with the current-version publication", async () => {
+			const root = makeRoot("query-replace");
+			const file = join(root, "src", "tray.ts");
+			mkdirSync(join(root, "src"), { recursive: true });
+			writeFileSync(file, "export function bad() { ERROR_MARKER }");
+
+			const { findings, provider } = providerFor(root);
+			await provider.requestDiagnostics([file]);
+			expect(findings.forPath(file)[0]?.code).toBe("mock-err");
+			expect(findings.forPath(file)[0]?.version).toBe(1);
+
+			writeFileSync(file, "export function bad() { SECOND_ERROR_MARKER }");
+			const result = await provider.requestDiagnostics([file]);
+			expect(result.files[0]?.freshness).toBe("findings");
+			expect(result.files[0]?.diagnostics).toHaveLength(1);
+			expect(result.files[0]?.diagnostics[0]?.code).toBe("mock-err-2");
+			expect(findings.forPath(file)).toHaveLength(1);
+			expect(findings.forPath(file)[0]?.version).toBe(2);
+			await provider.dispose();
+		});
+
+		it("moves diagnostics back to pending after an edit with no publication", async () => {
+			const root = makeRoot("query-edit-pending");
+			const file = join(root, "src", "tray.ts");
+			mkdirSync(join(root, "src"), { recursive: true });
+			writeFileSync(file, "export function bad() { ERROR_MARKER }");
+
+			const { provider } = providerFor(root);
+			await provider.requestDiagnostics([file]);
+
+			writeFileSync(file, "export function bad() { SILENT_MARKER }");
+			const result = await provider.requestDiagnostics([file], { waitMs: 150 });
+			expect(result.files[0]?.status).toBe("no-publish");
+			expect(result.files[0]?.freshness).toBe("pending");
+			// The previous findings are preserved in the store, just not current.
+			expect(result.files[0]?.diagnostics).toHaveLength(1);
+			await provider.dispose();
+		});
+
+		it("accepts versionless publications as current", async () => {
+			const root = makeRoot("query-versionless");
+			const bad = join(root, "src", "bad.ts");
+			const clean = join(root, "src", "clean.ts");
+			mkdirSync(join(root, "src"), { recursive: true });
+			writeFileSync(bad, "export function bad() { ERROR_MARKER }");
+			writeFileSync(clean, "export function clean() {}");
+
+			const { findings, provider } = providerFor(root, { serverArgs: ["--versionless"] });
+			const result = await provider.requestDiagnostics([bad, clean]);
+			const badFile = result.files.find((f) => f.path === bad);
+			const cleanFile = result.files.find((f) => f.path === clean);
+			expect(badFile?.status).toBe("ready");
+			expect(badFile?.freshness).toBe("findings");
+			expect(cleanFile?.status).toBe("ready");
+			expect(cleanFile?.freshness).toBe("clean");
+			// Versionless servers cannot supply a version; the finding is accepted
+			// without one rather than treated as stale.
+			expect(findings.forPath(bad)[0]?.version).toBeUndefined();
+			await provider.dispose();
+		});
+
+		it("does not accumulate findings across repeated publications", async () => {
+			const root = makeRoot("query-repeat");
+			const file = join(root, "src", "tray.ts");
+			mkdirSync(join(root, "src"), { recursive: true });
+			writeFileSync(file, "export function bad() { ERROR_MARKER }");
+
+			const { findings, provider } = providerFor(root);
+			const first = await provider.requestDiagnostics([file]);
+			const second = await provider.requestDiagnostics([file]);
+			const third = await provider.requestDiagnostics([file]);
+			expect(first.files[0]?.diagnostics).toHaveLength(1);
+			expect(second.files[0]?.diagnostics).toHaveLength(1);
+			expect(third.files[0]?.diagnostics).toHaveLength(1);
+			expect(findings.forPath(file)).toHaveLength(1);
 			await provider.dispose();
 		});
 

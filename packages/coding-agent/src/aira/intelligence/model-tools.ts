@@ -88,10 +88,10 @@ function createDefinitions(runtimeForTools: AiraIntelligenceHandle) {
 			name: "aira_diagnostics",
 			label: "aira_diagnostics",
 			description:
-				"Query live language-server diagnostics for specific or changed project files: severity, code, message, and 1-based line/character per finding, plus error/warning totals. Cold-starts the language server on demand; only the scoped files are diagnosed, never the whole repository. Per-file status is truthful: `ready` with an empty list means the file is clean, `no-publish` means the server produced nothing within the bounded budget, `server-unavailable` means the server could not start, `unsupported-language`/`invalid-path`/`unreadable` name the scope problem. Never runs compilers or builds.",
+				"Query live language-server diagnostics for specific or changed project files: severity, code, message, and 1-based line/character per finding, plus error/warning totals. Cold-starts the language server on demand; only the scoped files are diagnosed, never the whole repository. Per-file status is truthful: `ready` with an empty list means the file is clean, `no-publish` means the server produced nothing within the bounded budget, `server-unavailable` means the server could not start, `unsupported-language`/`invalid-path`/`unreadable` name the scope problem. Each file also reports `freshness`: `clean`/`findings` for an authoritative publication of the current document version, `pending` when none has landed yet, `stale` when only older-version publications arrived, and `unavailable` when the server or scope failed. When `freshness` is `pending`/`stale`, any `diagnostics` shown are preserved from an earlier version and are not authoritative. Never runs compilers or builds.",
 			promptSnippet: "Query live LSP diagnostics for changed or specific files",
 			promptGuidelines: [
-				"Use aira_diagnostics after edits and before claiming a file is clean; distinguish `ready` (clean) from `no-publish`/`server-unavailable` before concluding.",
+				"Use aira_diagnostics after edits and before claiming a file is clean; treat only `freshness: clean`/`findings` as current and never treat `pending`/`stale` as clean.",
 			],
 			parameters: diagnosticsSchema,
 			async execute(_toolCallId: string, params: DiagnosticsParams, signal?: AbortSignal) {

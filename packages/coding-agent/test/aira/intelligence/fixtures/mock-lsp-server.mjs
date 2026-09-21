@@ -6,6 +6,13 @@
  * - on didOpen/didChange, publishes an error diagnostic for any document
  *   whose content contains `ERROR_MARKER`, otherwise publishes an empty
  *   set after a short delay;
+ * - content markers exercise publication ordering:
+ *     `STALE_EMPTY_MARKER`      emit an empty set for version-1, then the
+ *                               current-version diagnostics;
+ *     `STALE_EMPTY_ONLY_MARKER` emit only an empty set for version-1;
+ *     `STALE_FINDINGS_MARKER`   emit a distinct stale diagnostic for
+ *                               version-1, then the current diagnostics;
+ *     `SILENT_MARKER`           publish nothing for this document;
  * - answers textDocument/definition, textDocument/references, and
  *   textDocument/documentSymbol with deterministic canned results;
  * - honors shutdown/exit.
@@ -13,6 +20,7 @@
  * Modes (argv):
  *   --crash-on-initialize  exit(3) before the handshake completes
  *   --crash-after-open     exit(4) when a document opens
+ *   --versionless          omit `version` from publishDiagnostics
  */
 let buffer = Buffer.alloc(0);
 
@@ -93,8 +101,19 @@ function handleNotification(method, params) {
 	if (method === "textDocument/didOpen" || method === "textDocument/didChange") {
 		const doc = params.textDocument;
 		const text = (params.contentChanges?.[0]?.text ?? doc.text) ?? "";
+		if (text.includes("SILENT_MARKER") || noPublish) {
+			return;
+		}
 		const diagnostics = [];
-		if (text.includes("ERROR_MARKER")) {
+		if (text.includes("SECOND_ERROR_MARKER")) {
+			diagnostics.push({
+				range: { start: { line: 0, character: 0 }, end: { line: 0, character: 4 } },
+				severity: 1,
+				code: "mock-err-2",
+				source: "mock-lsp",
+				message: "mock error: SECOND_ERROR_MARKER present",
+			});
+		} else if (text.includes("ERROR_MARKER")) {
 			diagnostics.push({
 				range: { start: { line: 0, character: 0 }, end: { line: 0, character: 4 } },
 				severity: 1,
@@ -114,8 +133,35 @@ function handleNotification(method, params) {
 				});
 			}
 		}
-		if (!noPublish) {
-			setTimeout(() => publishDiagnostics(doc.uri, doc.version, diagnostics), 40);
+		const currentVersion = doc.version;
+		const staleVersion = typeof currentVersion === "number" ? currentVersion - 1 : undefined;
+		const emit = (version, dx) => {
+			setTimeout(() => publishDiagnostics(doc.uri, versionless ? undefined : version, dx), 40);
+		};
+		const staleDiagnostics = text.includes("STALE_FINDINGS_MARKER")
+			? [
+					{
+						range: { start: { line: 0, character: 0 }, end: { line: 0, character: 4 } },
+						severity: 1,
+						code: "mock-stale-err",
+						source: "mock-lsp",
+						message: "mock stale diagnostic",
+					},
+				]
+			: [];
+		// A stale publication (older document version) is emitted first so a
+		// version-blind client would resolve on it; a version-aware client must
+		// ignore it and wait for the current-version publication.
+		if (text.includes("STALE_EMPTY_ONLY_MARKER")) {
+			emit(staleVersion, []);
+		} else if (text.includes("STALE_EMPTY_MARKER")) {
+			emit(staleVersion, []);
+			emit(currentVersion, diagnostics);
+		} else if (text.includes("STALE_FINDINGS_MARKER")) {
+			emit(staleVersion, staleDiagnostics);
+			emit(currentVersion, diagnostics);
+		} else {
+			emit(currentVersion, diagnostics);
 		}
 	}
 }
@@ -125,6 +171,7 @@ const crashAfterOpen = process.argv.includes("--crash-after-open");
 const manyReferences = process.argv.includes("--many-references");
 const delayNavigation = process.argv.includes("--delay-navigation");
 const noPublish = process.argv.includes("--no-publish");
+const versionless = process.argv.includes("--versionless");
 const manyDiagnostics = process.argv.includes("--many-diagnostics");
 // Never respond to initialize (the client's handshake request times out).
 const ignoreInitialize = process.argv.includes("--ignore-initialize");

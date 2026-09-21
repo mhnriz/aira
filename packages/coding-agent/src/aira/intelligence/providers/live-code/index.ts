@@ -124,9 +124,11 @@ export interface LiveCodeDiagnosticEntry {
 
 /**
  * Per-file outcomes are truthful: `ready` with an empty list means the server
- * published and the file is clean; `no-publish` means the server produced
- * nothing inside the bounded budget; `server-unavailable` means it could not
- * be started. Never fabricated.
+ * published authoritative diagnostics for the current document version and the
+ * file is clean; `no-publish` means no authoritative publication landed inside
+ * the bounded budget; `server-unavailable` means it could not be started. A
+ * publication for an older document version is never treated as authoritative.
+ * Never fabricated.
  */
 export type LiveCodeDiagnosticsFileStatus =
 	| "ready"
@@ -137,10 +139,32 @@ export type LiveCodeDiagnosticsFileStatus =
 	| "cancelled"
 	| "degraded";
 
+/**
+ * Freshness of the diagnostics held for a file at query time.
+ * - `pending`: no authoritative publication for the current document version yet.
+ * - `clean`: the current version was diagnosed with zero findings.
+ * - `findings`: the current version was diagnosed with findings.
+ * - `stale`: only older-version publications arrived; any preserved findings are stale.
+ * - `unavailable`: the language server could not provide diagnostics.
+ */
+export type LiveCodeDiagnosticsFreshness = "pending" | "clean" | "findings" | "stale" | "unavailable";
+
+/** Per-document diagnostic publication bookkeeping. */
+interface DiagnosticsPublicationState {
+	/** Document version most recently synced to the language server. */
+	syncedVersion: number;
+	/** Diagnostic count accepted for `syncedVersion`; undefined until an authoritative publish. */
+	acceptedCount?: number;
+	/** Host timestamp of the most recent ignored stale publication. */
+	staleAt?: number;
+}
+
 export interface LiveCodeDiagnosticsFileResult {
 	/** Absolute path (coordinator relativizes for the model surface). */
 	path: string;
 	status: LiveCodeDiagnosticsFileStatus;
+	/** Whether the reported diagnostics reflect the current document version. */
+	freshness: LiveCodeDiagnosticsFreshness;
 	diagnostics: LiveCodeDiagnosticEntry[];
 	truncated: boolean;
 	reason?: string;
@@ -202,8 +226,8 @@ export class LiveCodeProvider {
 	private readonly openDocuments = new Map<string, string>(); // path -> language
 	private readonly openOrder: string[] = [];
 	private readonly pendingDiagnostics = new Map<string, { timer: NodeJS.Timeout; waiters: Set<() => void> }>();
-	/** When each path last received a publishDiagnostics (truthful ready/no-publish split). */
-	private readonly diagnosticsPublishedAt = new Map<string, number>();
+	/** Per-path document-version bookkeeping for authoritative diagnostics. */
+	private readonly diagnosticPublications = new Map<string, DiagnosticsPublicationState>();
 	private readonly idleTimers = new Map<string, NodeJS.Timeout>();
 	private lastActivityAt = new Map<string, number>();
 	private crashedAt = new Map<string, number>();
@@ -324,7 +348,8 @@ export class LiveCodeProvider {
 			spec,
 			this.projectRoot,
 			{
-				onDiagnostics: ({ uri, diagnostics }) => this.ingestDiagnostics(uri, language, diagnostics),
+				onDiagnostics: ({ uri, diagnostics, version }) =>
+					this.ingestDiagnostics(uri, language, diagnostics, version),
 				onLog: () => undefined,
 				onStatusChange: (status, error) => {
 					const available = status === "running" || status === "starting";
@@ -392,15 +417,34 @@ export class LiveCodeProvider {
 		}
 		if (this.openDocuments.has(path)) {
 			signal?.throwIfAborted();
-			await client.didChange(path, text);
+			const version = await client.didChange(path, text);
+			this.markSynced(path, version);
 		} else {
 			signal?.throwIfAborted();
-			await client.didOpen(path, language, text);
+			const version = await client.didOpen(path, language, text);
 			this.openDocuments.set(path, language);
 			this.openOrder.push(path);
 			this.evictDocuments(client);
+			this.markSynced(path, version);
 		}
 		return { client, language };
+	}
+
+	/**
+	 * Record that the document is now at `version`. Any previously accepted
+	 * publication belongs to an older version and is no longer current, so the
+	 * findings store keeps it but the query reports `pending`/`stale` until an
+	 * authoritative publication for this version arrives.
+	 */
+	private markSynced(path: string, version: number): void {
+		const state = this.diagnosticPublications.get(path);
+		if (state) {
+			state.syncedVersion = version;
+			state.acceptedCount = undefined;
+			state.staleAt = undefined;
+			return;
+		}
+		this.diagnosticPublications.set(path, { syncedVersion: version });
 	}
 
 	private evictDocuments(client: LspClient): void {
@@ -589,6 +633,7 @@ export class LiveCodeProvider {
 				files.push({
 					path,
 					status: "unsupported-language",
+					freshness: "unavailable",
 					diagnostics: [],
 					truncated: false,
 					reason: "no registered language server for this file type",
@@ -597,7 +642,7 @@ export class LiveCodeProvider {
 			}
 			const text = await readFile(path, "utf8").catch(() => undefined);
 			if (text === undefined) {
-				files.push({ path, status: "unreadable", diagnostics: [], truncated: false });
+				files.push({ path, status: "unreadable", freshness: "unavailable", diagnostics: [], truncated: false });
 				continue;
 			}
 			const synced = await this.syncFile(path, signal, text);
@@ -608,6 +653,7 @@ export class LiveCodeProvider {
 				files.push({
 					path,
 					status: "server-unavailable",
+					freshness: "unavailable",
 					diagnostics: [],
 					truncated: false,
 					reason: this.unavailableReason(path),
@@ -628,7 +674,9 @@ export class LiveCodeProvider {
 
 		const totals = { errors: 0, warnings: 0, other: 0 };
 		for (const path of syncedPaths) {
-			const published = (this.diagnosticsPublishedAt.get(path) ?? 0) >= startedAt;
+			const state = this.diagnosticPublications.get(path);
+			const authoritative = state?.acceptedCount !== undefined;
+			const stale = (state?.staleAt ?? 0) >= startedAt;
 			const found = this.findings.forPath(path);
 			const entries = found.slice(0, maxPerFile).map((finding) => diagnosticsEntry(finding));
 			for (const entry of entries) {
@@ -636,9 +684,17 @@ export class LiveCodeProvider {
 				else if (entry.severity === "warning") totals.warnings += 1;
 				else totals.other += 1;
 			}
+			const freshness: LiveCodeDiagnosticsFreshness = authoritative
+				? (state?.acceptedCount ?? 0) > 0
+					? "findings"
+					: "clean"
+				: stale
+					? "stale"
+					: "pending";
 			files.push({
 				path,
-				status: published ? "ready" : "no-publish",
+				status: authoritative ? "ready" : "no-publish",
+				freshness,
 				diagnostics: entries,
 				truncated: found.length > maxPerFile,
 			});
@@ -822,13 +878,24 @@ export class LiveCodeProvider {
 		}
 	}
 
-	private ingestDiagnostics(uri: string, language: string, diagnostics: LspDiagnostic[]): void {
+	private ingestDiagnostics(uri: string, language: string, diagnostics: LspDiagnostic[], version?: number): void {
 		const path = uriToPath(uri);
 		if (!path) {
 			return;
 		}
-		this.diagnosticsPublishedAt.set(path, Date.now());
-		const collectedAt = this.diagnosticsPublishedAt.get(path) ?? Date.now();
+		const now = Date.now();
+		const state = this.diagnosticPublications.get(path);
+		if (version !== undefined && state && version < state.syncedVersion) {
+			// The publication describes an older document version. It must not
+			// clear or replace findings for the version we actually synced.
+			state.staleAt = now;
+			return;
+		}
+		if (state) {
+			state.acceptedCount = diagnostics.length;
+		} else {
+			this.diagnosticPublications.set(path, { syncedVersion: version ?? 0, acceptedCount: diagnostics.length });
+		}
 		this.findings.replaceForPath(
 			path,
 			diagnostics.map((diagnostic) => ({
@@ -843,18 +910,24 @@ export class LiveCodeProvider {
 					start: { line: diagnostic.range.start.line, character: diagnostic.range.start.character },
 					end: { line: diagnostic.range.end.line, character: diagnostic.range.end.character },
 				},
-				version: undefined,
+				version,
 			})),
-			collectedAt,
+			now,
 		);
+		this.resolveDiagnosticsWaiters(path);
+	}
+
+	/** Resolve waiters blocked on the first authoritative publication for `path`. */
+	private resolveDiagnosticsWaiters(path: string): void {
 		const latch = this.pendingDiagnostics.get(path);
-		if (latch) {
-			for (const waiter of latch.waiters) {
-				waiter();
-			}
-			clearTimeout(latch.timer);
-			this.pendingDiagnostics.delete(path);
+		if (!latch) {
+			return;
 		}
+		for (const waiter of latch.waiters) {
+			waiter();
+		}
+		clearTimeout(latch.timer);
+		this.pendingDiagnostics.delete(path);
 	}
 
 	private touch(serverKey: string): void {
@@ -924,7 +997,7 @@ export class LiveCodeProvider {
 			}
 		}
 		this.pendingDiagnostics.clear();
-		this.diagnosticsPublishedAt.clear();
+		this.diagnosticPublications.clear();
 		await Promise.all([...this.clients.keys()].map((key) => this.shutdownServer(key)));
 	}
 
