@@ -105,11 +105,13 @@ export class RepositoryProvider {
 			const { files } = await walkRepositoryFiles(this.root, { maxFiles: this.maxFiles });
 			const known = new Map(this.relationships.files().map((f) => [f.path, f]));
 			const seen = new Set<string>();
+			const changed: RepositoryFileIndex[] = [];
 			for (const relativePath of files) {
 				seen.add(relativePath);
 				const existing = known.get(relativePath);
 				if (existing) {
-					// Cheap reuse: same mtime+size means identical evidence.
+					// Cheap reuse: same mtime+size means identical evidence, so the
+					// file is already correct in the index and is skipped entirely.
 					let current: Awaited<ReturnType<typeof stat>> | undefined;
 					try {
 						current = await stat(this.abs(relativePath));
@@ -117,18 +119,20 @@ export class RepositoryProvider {
 						current = undefined;
 					}
 					if (current && current.mtimeMs === existing.mtimeMs && current.size === existing.sizeBytes) {
-						this.relationships.upsert(existing);
 						continue;
 					}
 				}
 				const scanned = await scanRepositoryFile(this.root, relativePath);
 				if (scanned) {
-					this.relationships.upsert(scanned);
+					changed.push(scanned);
 				}
 			}
-			const stale = this.relationships.files().filter((f) => !seen.has(f.path));
-			for (const file of stale) {
-				this.relationships.remove(file.path);
+			const stale = [...known.keys()].filter((path) => !seen.has(path));
+			if (this.relationships.size === 0) {
+				// Cold index: build every structure from the scan in a single batch.
+				this.relationships.rebuild(changed);
+			} else {
+				this.relationships.applyChanges(changed, stale);
 			}
 			this.filesIndexed = this.relationships.size;
 			this.lastScanAt = Date.now();

@@ -50,7 +50,13 @@ export class RepositoryRelationships {
 	private readonly counterpartsOf = new Map<string, string[]>();
 	private readonly lexical = new RepositoryLexicalIndex();
 
-	/** Replace the whole index with a fresh scan result. */
+	/**
+	 * Replace the whole index with a fresh scan result. All structures are
+	 * built in one pass: import/counterpart resolution first (it depends on the
+	 * final set of known paths), then the lexical postings, then the reverse
+	 * import edges. Per-file work is O(files), never O(files^2): a full rebuild
+	 * must not re-run the global pass for each file.
+	 */
 	rebuild(files: RepositoryFileIndex[]): void {
 		this.byPath.clear();
 		this.importsOf.clear();
@@ -61,36 +67,64 @@ export class RepositoryRelationships {
 			this.byPath.set(file.path, file);
 		}
 		for (const file of files) {
-			this.indexFile(file.path);
+			this.reindexRelations(file.path);
+			this.lexical.index(file.path, file);
+		}
+		this.rebuildImportedBy();
+	}
+
+	/**
+	 * Apply a batch of per-file changes, rebuilding cross-file structures once.
+	 *
+	 * Import targets and counterpart edges resolve against the set of known
+	 * paths, so adding or removing any path invalidates every file's resolution
+	 * and needs a single pass over all files. Pure content changes only affect
+	 * the changed files themselves, and unchanged files are never re-indexed.
+	 */
+	applyChanges(upserts: RepositoryFileIndex[], deletedPaths: string[]): void {
+		if (upserts.length === 0 && deletedPaths.length === 0) {
+			return;
+		}
+		let structural = deletedPaths.length > 0;
+		for (const file of upserts) {
+			if (!this.byPath.has(file.path)) {
+				structural = true;
+			}
+		}
+		for (const path of deletedPaths) {
+			this.byPath.delete(path);
+			this.importsOf.delete(path);
+			this.importedBy.delete(path);
+			this.counterpartsOf.delete(path);
+			this.lexical.remove(path);
+		}
+		for (const file of upserts) {
+			this.byPath.set(file.path, file);
+		}
+		if (structural) {
+			for (const path of this.byPath.keys()) {
+				this.reindexRelations(path);
+			}
+		} else {
+			for (const file of upserts) {
+				this.reindexRelations(file.path);
+			}
+		}
+		for (const file of upserts) {
+			this.lexical.remove(file.path);
+			this.lexical.index(file.path, file);
 		}
 		this.rebuildImportedBy();
 	}
 
 	/** Incrementally update one file's evidence (post-edit / post-scan). */
 	upsert(file: RepositoryFileIndex): void {
-		const existed = this.byPath.has(file.path);
-		this.byPath.set(file.path, file);
-		this.indexFile(file.path);
-		if (!existed) {
-			// A new file can become the target of existing imports/counterparts.
-			for (const other of this.byPath.values()) {
-				if (other.path !== file.path) {
-					this.indexFile(other.path);
-				}
-			}
-		}
-		// importedBy is cross-file state; recompute it wholesale (bounded).
-		this.rebuildImportedBy();
+		this.applyChanges([file], []);
 	}
 
 	/** Remove a file's evidence (deleted). */
 	remove(path: string): void {
-		this.byPath.delete(path);
-		this.importsOf.delete(path);
-		this.importedBy.delete(path);
-		this.counterpartsOf.delete(path);
-		this.lexical.remove(path);
-		this.rebuildImportedBy();
+		this.applyChanges([], [path]);
 	}
 
 	/** Per-file index lookup. */
@@ -130,10 +164,15 @@ export class RepositoryRelationships {
 		return this.lexical.discover(query, (path) => this.byPath.get(path)?.symbols ?? [], options?.limit ?? 8);
 	}
 
-	private indexFile(path: string): void {
+	/**
+	 * Resolve one file's import targets and source/test counterpart edges.
+	 * Lexical postings are intentionally separate: they depend only on the
+	 * file's own evidence, so they must not be rebuilt on every relationship
+	 * pass.
+	 */
+	private reindexRelations(path: string): void {
 		this.importsOf.delete(path);
 		this.counterpartsOf.delete(path);
-		this.lexical.remove(path);
 		const file = this.byPath.get(path);
 		if (!file) {
 			return;
@@ -157,8 +196,6 @@ export class RepositoryRelationships {
 				this.counterpartsOf.set(path, list);
 			}
 		}
-
-		this.lexical.index(path, file);
 	}
 
 	/** Recompute the cross-file imported-by edges from the per-file import targets. */
