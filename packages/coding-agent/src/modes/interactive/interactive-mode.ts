@@ -939,7 +939,6 @@ export class InteractiveMode {
 			getFocused: () => this.workbenchFocused(),
 			getInspectedRunId: () => this.inspector?.inspectedRunId,
 			requestRender: () => this.ui.requestRender(),
-			invalidate: () => this.ui.invalidate(),
 			layoutChanged: () => this.onWorkbenchLayoutChanged(),
 		});
 		this.workbench.attach();

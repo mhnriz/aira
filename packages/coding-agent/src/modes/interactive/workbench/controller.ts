@@ -27,6 +27,7 @@ import type { AiraSessionState } from "../../../aira/state.ts";
 import { getAiraSessionState } from "../../../aira/state.ts";
 import { loadWorkbenchCheckpoints } from "../../../aira/ui/checkpoints.ts";
 import { projectWorkbench } from "../../../aira/ui/projection.ts";
+import { workbenchProjectionEquals } from "../../../aira/ui/projection-identity.ts";
 import type {
 	WorkbenchCheckpoint,
 	WorkbenchFileRow,
@@ -58,7 +59,6 @@ export interface WorkbenchControllerOptions {
 	/** Run id whose transcript the Agent Inspector is viewing (UI state only). */
 	getInspectedRunId: () => string | undefined;
 	requestRender: () => void;
-	invalidate: () => void;
 	/** Host rebuilds the fullscreen layout root (layoutChanged). */
 	layoutChanged: () => void;
 }
@@ -94,6 +94,11 @@ export class WorkbenchController {
 	private gitRefreshTimer: ReturnType<typeof setTimeout> | undefined;
 	private gitRefreshVersion = 0;
 	private lastChangeCount: number | undefined;
+
+	// Last rail surface we painted (panels + title/focus/height/width inputs).
+	// Used to skip reconcile work when a stream tick changed nothing visible.
+	private lastProjection: WorkbenchProjection | undefined;
+	private lastSurfaceSignature: string | undefined;
 
 	// Renderer bindings.
 	private tui: TUI | undefined;
@@ -297,8 +302,23 @@ export class WorkbenchController {
 		if (this.disposed) return;
 		this.syncVisibility();
 		const projection = this.buildProjection();
-		this.component.setProjection(projection);
-		this.options.invalidate();
+
+		// The rail renders panels plus a live title strip, and its overlay width
+		// and effective height come from the host. Compare the rendered surface,
+		// not object identity, so token-granular context changes in
+		// `projection.footer` never dirty the rail.
+		const projectionChanged = !workbenchProjectionEquals(this.lastProjection, projection);
+		if (projectionChanged) {
+			this.lastProjection = projection;
+			this.component.setProjection(projection);
+		}
+
+		const surfaceSignature = `${this.options.getFocused() ? 1 : 0}:${this.options.getTranscriptFollowing() ? 1 : 0}:${this.railHeight()}:${this.sidebarWidthFor(this.tui?.terminal.columns ?? 0)}`;
+		if (!projectionChanged && surfaceSignature === this.lastSurfaceSignature) return;
+		this.lastSurfaceSignature = surfaceSignature;
+		// The rail components are stateless (render reads the current projection),
+		// so a frame request is sufficient. Never globally invalidate the UI here:
+		// that reprocessed unrelated transcript Markdown on every stream tick.
 		this.options.requestRender();
 	}
 
@@ -359,6 +379,8 @@ export class WorkbenchController {
 			this.attachRegularRail(tui);
 		}
 		this.lastVisibleNow = undefined;
+		this.lastProjection = undefined;
+		this.lastSurfaceSignature = undefined;
 		this.reconcile();
 	}
 
@@ -370,6 +392,8 @@ export class WorkbenchController {
 		this.overlayHide();
 		this.tui = undefined;
 		this.lastVisibleNow = undefined;
+		this.lastProjection = undefined;
+		this.lastSurfaceSignature = undefined;
 	}
 
 	private attachRegularRail(tui: AiraTuiMainScreen): void {

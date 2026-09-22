@@ -65,7 +65,6 @@ function createController(): {
 		getFocused: () => false,
 		getInspectedRunId: () => undefined,
 		requestRender: () => {},
-		invalidate: () => {},
 		layoutChanged,
 	});
 	controller.bindTui({ mode: "fullscreen", terminal } as never);

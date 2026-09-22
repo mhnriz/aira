@@ -56,7 +56,6 @@ function createController(
 		getFocused: () => false,
 		getInspectedRunId: () => undefined,
 		requestRender: vi.fn(),
-		invalidate: vi.fn(),
 		layoutChanged: vi.fn(),
 		...overrides,
 	};
