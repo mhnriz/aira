@@ -101,6 +101,11 @@ function extractKittyImageIds(line: string): number[] {
 	return parseKittyImageHeader(line)?.ids ?? [];
 }
 
+/** True when `line` carries at least one Kitty image id. */
+function hasKittyImageIds(line: string): boolean {
+	return (parseKittyImageHeader(line)?.ids.length ?? 0) > 0;
+}
+
 function extractKittyImageRows(line: string): number {
 	return parseKittyImageHeader(line)?.rows ?? 1;
 }
@@ -122,6 +127,7 @@ export interface TuiMainScreenRenderState {
 /** TUI implementation that renders into the terminal's main screen and scrollback. */
 export class TuiMainScreen extends TuiBase implements TUI {
 	readonly mode = "regular" as const;
+	private previousRawLines: string[] = [];
 	private previousLines: string[] = [];
 	private previousKittyImageIds = new Set<number>();
 	private previousWidth = 0;
@@ -145,6 +151,9 @@ export class TuiMainScreen extends TuiBase implements TUI {
 
 	restoreRenderState(state: TuiMainScreenRenderState): void {
 		this.previousLines = state.previousLines.map((line) => (isImageLine(line) ? "" : line));
+		// The captured lines are not paired with raw lines anymore, so drop the
+		// reuse baseline and re-normalize on the next frame.
+		this.previousRawLines = [];
 		this.previousKittyImageIds = new Set();
 		this.previousWidth = state.previousWidth;
 		this.previousHeight = state.previousHeight;
@@ -156,6 +165,7 @@ export class TuiMainScreen extends TuiBase implements TUI {
 
 	protected override resetRenderState(): void {
 		this.previousLines = [];
+		this.previousRawLines = [];
 		this.previousWidth = -1;
 		this.previousHeight = -1;
 		this.cursorRow = 0;
@@ -204,6 +214,19 @@ export class TuiMainScreen extends TuiBase implements TUI {
 			reservedRows++;
 		}
 		return reservedRows;
+	}
+
+	/**
+	 * Whether any line in [first, last] carries a Kitty image id. Bounded to the
+	 * changed range so the no-image fast path never scans the whole transcript.
+	 */
+	private hasKittyImageIdsInRange(lines: string[], first: number, last: number): boolean {
+		const start = Math.max(0, first);
+		const end = Math.min(last, lines.length - 1);
+		for (let i = start; i <= end; i++) {
+			if (hasKittyImageIds(lines[i] ?? "")) return true;
+		}
+		return false;
 	}
 
 	private expandChangedRangeForKittyImages(
@@ -270,7 +293,10 @@ export class TuiMainScreen extends TuiBase implements TUI {
 		// Extract cursor position before applying line resets (marker must be found first)
 		const cursorPos = this.extractCursorPosition(newLines, height);
 
-		newLines = this.applyLineResets(newLines);
+		// `rawLines` is the un-normalized frame; `newLines` becomes the normalized frame.
+		// Unchanged lines reuse the previous normalized string instead of re-allocating.
+		const rawLines = newLines;
+		newLines = this.applyLineResetsReusing(rawLines, this.previousRawLines, this.previousLines);
 
 		// Helper to clear scrollback and viewport and render all new lines
 		const fullRender = (clear: boolean): void => {
@@ -312,6 +338,7 @@ export class TuiMainScreen extends TuiBase implements TUI {
 			this.previousViewportTop = Math.max(0, bufferLength - height);
 			this.positionHardwareCursor(cursorPos, newLines.length);
 			this.previousLines = newLines;
+			this.previousRawLines = rawLines;
 			this.previousKittyImageIds = this.collectKittyImageIds(newLines);
 			this.previousWidth = width;
 			this.previousHeight = height;
@@ -380,10 +407,23 @@ export class TuiMainScreen extends TuiBase implements TUI {
 			}
 			lastChanged = newLines.length - 1;
 		}
+		let reusePreviousKittyImageIds = false;
 		if (firstChanged !== -1) {
-			const expandedRange = this.expandChangedRangeForKittyImages(firstChanged, lastChanged, newLines);
-			firstChanged = expandedRange.firstChanged;
-			lastChanged = expandedRange.lastChanged;
+			// Fast path: the Kitty passes below only have work to do when an image
+			// exists. If the previous transcript had no Kitty image (previousKittyImageIds
+			// is empty) and the changed range introduces none, every line outside
+			// [firstChanged, lastChanged] is byte-identical to the previous frame, so no
+			// image can exist anywhere and all three passes would be no-ops.
+			const previousHadKittyImages = this.previousKittyImageIds.size > 0;
+			const changedRangeHasKittyImages =
+				previousHadKittyImages || this.hasKittyImageIdsInRange(newLines, firstChanged, lastChanged);
+			if (changedRangeHasKittyImages) {
+				const expandedRange = this.expandChangedRangeForKittyImages(firstChanged, lastChanged, newLines);
+				firstChanged = expandedRange.firstChanged;
+				lastChanged = expandedRange.lastChanged;
+			} else {
+				reusePreviousKittyImageIds = true;
+			}
 		}
 		const appendStart = appendedLines && firstChanged === this.previousLines.length && firstChanged > 0;
 
@@ -438,7 +478,10 @@ export class TuiMainScreen extends TuiBase implements TUI {
 			}
 			this.positionHardwareCursor(cursorPos, newLines.length);
 			this.previousLines = newLines;
-			this.previousKittyImageIds = this.collectKittyImageIds(newLines);
+			this.previousRawLines = rawLines;
+			if (!reusePreviousKittyImageIds) {
+				this.previousKittyImageIds = this.collectKittyImageIds(newLines);
+			}
 			this.previousWidth = width;
 			this.previousHeight = height;
 			this.previousViewportTop = prevViewportTop;
@@ -609,7 +652,10 @@ export class TuiMainScreen extends TuiBase implements TUI {
 		this.positionHardwareCursor(cursorPos, newLines.length);
 
 		this.previousLines = newLines;
-		this.previousKittyImageIds = this.collectKittyImageIds(newLines);
+		this.previousRawLines = rawLines;
+		if (!reusePreviousKittyImageIds) {
+			this.previousKittyImageIds = this.collectKittyImageIds(newLines);
+		}
 		this.previousWidth = width;
 		this.previousHeight = height;
 	}

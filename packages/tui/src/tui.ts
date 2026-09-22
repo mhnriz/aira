@@ -1181,6 +1181,36 @@ export abstract class TuiBase extends Container implements TUI {
 		return lines;
 	}
 
+	/**
+	 * Normalize rendered lines for terminal output, reusing the normalized string
+	 * from the previous frame for every line whose raw content is unchanged.
+	 *
+	 * `previousRawLines[i]` must be the raw (un-normalized) line that produced
+	 * `previousNormalizedLines[i]`; both arrays must be index-aligned. Reuse is
+	 * only allowed when the raw line is identical, so a reused entry is always
+	 * the normalization of the new raw line. This is the incremental equivalent
+	 * of {@link applyLineResets}: it neither mutates `lines` nor allocates per
+	 * unchanged line, and it produces the same array contents.
+	 */
+	protected applyLineResetsReusing(
+		lines: string[],
+		previousRawLines: string[],
+		previousNormalizedLines: string[],
+	): string[] {
+		const reset = SEGMENT_RESET;
+		const reusable = Math.min(lines.length, previousRawLines.length, previousNormalizedLines.length);
+		const result: string[] = new Array(lines.length);
+		for (let i = 0; i < lines.length; i++) {
+			const line = lines[i];
+			if (i < reusable && line === previousRawLines[i]) {
+				result[i] = previousNormalizedLines[i];
+				continue;
+			}
+			result[i] = isImageLine(line) ? line : normalizeTerminalOutput(line) + reset;
+		}
+		return result;
+	}
+
 	private compositeLineAt(
 		baseLine: string,
 		overlayLine: string,

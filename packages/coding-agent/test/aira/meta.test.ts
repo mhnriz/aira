@@ -21,8 +21,8 @@ describe("Aira product metadata", () => {
 
 	it("versions Aira independently from Pi", () => {
 		expect(AIRA_PRODUCT_TITLE).toBe("Aira");
-		// Plain SemVer core with optional build metadata (e.g. 0.1.6+hotfix.1).
-		expect(AIRA_VERSION).toMatch(/^\d+\.\d+\.\d+(?:\+[0-9A-Za-z.-]+)?$/);
+		// SemVer core with optional prerelease (e.g. 0.1.9-dev.6) and build metadata (e.g. 0.1.6+hotfix.1).
+		expect(AIRA_VERSION).toMatch(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/);
 		expect(`${AIRA_PRODUCT_TITLE} ${AIRA_VERSION}`).not.toBe(`Pi ${AIRA_PI_BASE_VERSION}`);
 	});
 
