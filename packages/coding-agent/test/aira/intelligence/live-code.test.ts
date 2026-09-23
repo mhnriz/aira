@@ -1,10 +1,10 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import { AiraFindingsStore } from "../../../src/aira/intelligence/findings.ts";
-import { LiveCodeProvider } from "../../../src/aira/intelligence/providers/live-code/index.ts";
+import { fileUriToPath, LiveCodeProvider } from "../../../src/aira/intelligence/providers/live-code/index.ts";
 import { convertCharacterOffset } from "../../../src/aira/intelligence/providers/live-code/lsp-client.ts";
 import {
 	commandOnPath,
@@ -828,5 +828,80 @@ describe("live-code provider (mock language server)", () => {
 			expect(result.status).toBe("cancelled");
 			expect(result.files).toEqual([]);
 		});
+	});
+});
+
+describe("LSP file URI decoding", () => {
+	it("decodes Windows drive-letter URIs without duplicating the drive or re-encoding", () => {
+		const decoded = fileUriToPath("file:///D:/IROPO_basler_C%23/iropo/src/Iropo.Vision/Program.cs", true);
+		expect(decoded).toBe("D:\\IROPO_basler_C#\\iropo\\src\\Iropo.Vision\\Program.cs");
+		// The previous `pathToFileURL(url.pathname).pathname` round-trip produced
+		// a leading slash, a duplicated drive, and `%2523`.
+		expect(decoded).not.toContain("%");
+		expect(decoded?.startsWith("/")).toBe(false);
+		expect(decoded?.match(/D:/g)).toHaveLength(1);
+	});
+
+	it("decodes ordinary drive-letter URIs", () => {
+		expect(fileUriToPath("file:///D:/proj/src/a.ts", true)).toBe("D:\\proj\\src\\a.ts");
+		expect(fileUriToPath("file:///C:/Users/me/a.ts", true)).toBe("C:\\Users\\me\\a.ts");
+	});
+
+	it("decodes # and percent-encoded characters in place", () => {
+		expect(fileUriToPath("file:///D:/IROPO_basler_C%23/iropo/x.cs", true)).toBe("D:\\IROPO_basler_C#\\iropo\\x.cs");
+		expect(fileUriToPath("file:///D:/My%20Project/a.ts", true)).toBe("D:\\My Project\\a.ts");
+		expect(fileUriToPath("file:///D:/100%25/complete/a.ts", true)).toBe("D:\\100%\\complete\\a.ts");
+	});
+
+	it("decodes POSIX URIs and keeps special characters literal", () => {
+		expect(fileUriToPath("file:///Users/me/proj/src/a.ts", false)).toBe("/Users/me/proj/src/a.ts");
+		expect(fileUriToPath("file:///Users/me/a%23b/c%20d/e%25f.ts", false)).toBe("/Users/me/a#b/c d/e%f.ts");
+	});
+
+	it("round-trips filesystem paths through pathToFileURL and fileUriToPath", () => {
+		const file = join(tmpdir(), "aira uri decode", "a#b c%d.ts");
+		expect(fileUriToPath(pathToFileURL(file).href)).toBe(file);
+	});
+
+	it("returns undefined for non-file and malformed URIs", () => {
+		expect(fileUriToPath("https://example.com/a.ts", false)).toBeUndefined();
+		expect(fileUriToPath("not a uri", false)).toBeUndefined();
+	});
+});
+
+describe("diagnostic path identity", () => {
+	it("stores findings under the decoded absolute filesystem path", async () => {
+		const root = makeRoot("identity");
+		const dir = join(root, "IROPO_basler_C#", "My Project");
+		const file = join(dir, "tray.ts");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(file, "export function bad() { ERROR_MARKER }");
+
+		const { findings, provider } = providerFor(root);
+		await provider.requestDiagnosticsForFile(file);
+
+		expect(findings.forPath(file)).toHaveLength(1);
+		expect(findings.all()[0]?.path).toBe(file);
+		expect(findings.paths).toEqual([file]);
+		await provider.dispose();
+	});
+});
+
+describe("semantic navigation paths", () => {
+	it("returns decoded relative paths for navigation locations", async () => {
+		const root = makeRoot("nav-decode");
+		const dir = join(root, "My Project#1");
+		const file = join(dir, "target.ts");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(file, "export function target() {}");
+
+		const { provider } = providerFor(root, { serverArgs: ["--definition-path", file] });
+		const definition = await provider.semanticQuery({ operation: "definition", path: file, symbol: "target" });
+		expect(definition.status).toBe("ready");
+		if (definition.status === "ready") {
+			expect(definition.locations[0]?.uri).toBe(pathToFileURL(file).href);
+			expect(definition.locations[0]?.path).toBe("My Project#1/target.ts");
+		}
+		await provider.dispose();
 	});
 });

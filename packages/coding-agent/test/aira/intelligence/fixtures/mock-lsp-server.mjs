@@ -22,6 +22,8 @@
  *   --crash-after-open     exit(4) when a document opens
  *   --versionless          omit `version` from publishDiagnostics
  */
+import { pathToFileURL } from "node:url";
+
 let buffer = Buffer.alloc(0);
 
 const CANNED_DEFINITION = {
@@ -74,7 +76,10 @@ function handleRequest(id, method, _params) {
 		return;
 	}
 	if (method === "textDocument/definition") {
-		const respond = () => sendResult(id, CANNED_DEFINITION);
+		const result = definitionPath
+			? { uri: pathToFileURL(definitionPath).href, range: CANNED_DEFINITION.range }
+			: CANNED_DEFINITION;
+		const respond = () => sendResult(id, result);
 		if (delayNavigation) setTimeout(respond, 500);
 		else respond();
 		return;
@@ -173,6 +178,9 @@ const delayNavigation = process.argv.includes("--delay-navigation");
 const noPublish = process.argv.includes("--no-publish");
 const versionless = process.argv.includes("--versionless");
 const manyDiagnostics = process.argv.includes("--many-diagnostics");
+// Return a definition URI for this filesystem path instead of the canned URI.
+const definitionPathIndex = process.argv.indexOf("--definition-path");
+const definitionPath = definitionPathIndex >= 0 ? process.argv[definitionPathIndex + 1] : undefined;
 // Never respond to initialize (the client's handshake request times out).
 const ignoreInitialize = process.argv.includes("--ignore-initialize");
 // Write this process's pid to a file so tests can assert the child was killed.

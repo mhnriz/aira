@@ -20,7 +20,7 @@
  */
 import { readFile } from "node:fs/promises";
 import { extname, relative } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import type { AiraFinding, AiraFindingSeverity, AiraFindingsStore } from "../../findings.ts";
 import {
 	convertCharacterOffset,
@@ -869,17 +869,16 @@ export class LiveCodeProvider {
 	}
 
 	private displayPath(uri: string): string {
-		try {
-			const absolute = new URL(uri).pathname;
-			const displayed = relative(this.projectRoot, absolute).replace(/\\/g, "/");
-			return displayed && !displayed.startsWith("..") ? displayed : absolute;
-		} catch {
+		const absolute = fileUriToPath(uri);
+		if (absolute === undefined) {
 			return uri;
 		}
+		const displayed = relative(this.projectRoot, absolute).replace(/\\/g, "/");
+		return displayed && !displayed.startsWith("..") ? displayed : absolute;
 	}
 
 	private ingestDiagnostics(uri: string, language: string, diagnostics: LspDiagnostic[], version?: number): void {
-		const path = uriToPath(uri);
+		const path = fileUriToPath(uri);
 		if (!path) {
 			return;
 		}
@@ -1077,13 +1076,23 @@ export class LiveCodeProvider {
 	}
 }
 
-function uriToPath(uri: string): string | undefined {
+/**
+ * Decode an LSP `file:` URI into an absolute filesystem path.
+ *
+ * `fileURLToPath` is the exact inverse of the outgoing `pathToFileURL`
+ * conversions used elsewhere in this module: it restores the drive letter,
+ * removes the leading slash Node adds before a drive, and percent-decodes
+ * `%23` -> `#`, `%20` -> space, `%25` -> `%`. `windows` is exposed so the
+ * drive-letter behavior can be regression-tested on any host; production
+ * callers rely on the platform default.
+ */
+export function fileUriToPath(uri: string, windows = process.platform === "win32"): string | undefined {
 	try {
 		const url = new URL(uri);
 		if (url.protocol !== "file:") {
 			return undefined;
 		}
-		return pathToFileURL(url.pathname).pathname;
+		return fileURLToPath(url, { windows });
 	} catch {
 		return undefined;
 	}
