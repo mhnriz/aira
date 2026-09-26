@@ -66,6 +66,7 @@ type _AiModelFieldsAccountedFor = Assert<
 		| "reasoning"
 		| "thinkingLevelMap"
 		| "input"
+		| "inputLimits"
 		| "cost"
 		| "promptCache"
 		| "contextWindow"
