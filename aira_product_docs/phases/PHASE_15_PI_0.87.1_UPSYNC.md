@@ -203,7 +203,7 @@ Cumulative totals rows 1-99: DIRECT=15, REIMPLEMENT=17, SKIP=67, TOTAL=99
 
 ## Slice 4 (rows 100-132, in progress)
 
-Rows 100-116 below; rows 117-132 follow in the next update.
+Rows 100-116 below; rows 117-132 in the slice 4b table at the end of this section.
 
 | # | Upstream SHA | Date | Subject | Disposition | Local SHA | Notes |
 |---|---|---|---|---|---|---|
@@ -227,10 +227,78 @@ Rows 100-116 below; rows 117-132 follow in the next update.
 
 Slice 4a totals (rows 100-116): DIRECT=2, REIMPLEMENT=3, SKIP=12, TOTAL=17
 
-Pending: rows 117-132. Proposed corrections (awaiting approval):
+## Slice 4b (rows 117-132)
 
-- Row 117 `4658534986` REIMPLEMENT -> SKIP: rewrites the Anthropic thinking-drop notice, which exists in the Pi 0.85.1 base but was not carried into Aira's interactive mode; no `Anthropic dropped` code or diagnostics test exists in Aira history.
-- Row 126 `13784598d2` REIMPLEMENT -> SKIP: same absent notice family (`maybeShowAssistantDiagnostics` / thinking_drop notices).
+| # | Upstream SHA | Date | Subject | Disposition | Local SHA | Notes |
+|---|---|---|---|---|---|---|
+| 117 | `4658534986` | 2026-09-17 | fix(coding-agent): shorten Anthropic thinking drop notices | SKIP | `` | [UI / DEFERRED_PROVIDER_FEATURE_FOLLOWUP] follow-up UI rewrite of the thinking-drop notice introduced by `4e69b0c28`; the managed mid-conversation-effort / thinking-binding base feature is not active in Aira (see correction below) |
+| 118 | `3955b27a1d` | 2026-09-17 | fix(ai): preserve Vercel AI Gateway unsigned thinking | REIMPLEMENT | `14c952f9e` | [CATALOG] every Vercel AI Gateway model tagged `allowEmptySignature`; generator + regression test; data hydrated through generate-models.ts |
+| 119 | `a8b3dd1998` | 2026-09-17 | fix(coding-agent): fail signal-terminated shell commands | DIRECT | `5b2dc1ea8` | signal-terminated commands exit non-zero; 3-way merge conflicts only in changelog |
+| 120 | `7811394112` | 2026-09-17 | docs(coding-agent): update changelog | SKIP | `` | [CHG] changelog-only note |
+| 121 | `16292398af` | 2026-09-17 | fix(coding-agent): send forced system prompts without recording them | SKIP | `` | [ARCH] Phase 0B row-97 follow-up: Pi forced SystemMessage/TranscriptContext plumbing absent from Aira; previously approved |
+| 122 | `46c9de402b` | 2026-09-17 | feat(coding-agent): add event handler unsubscribe (#9630) | DIRECT | `e0b8a623a` | extension `on()` returns an unsubscribe function; all 29 event signatures converted; 3-way merge conflicts only in changelog |
+| 123 | `c4289b20eb` | 2026-09-18 | fix(chord): keep tracked paths correct across structural mutation | SKIP | `` | [ARCH] Pi chord/durable runtime absent from Aira |
+| 124 | `328926b30e` | 2026-09-18 | docs(chord): describe tracker ownership and aliasing as they behave | SKIP | `` | [ARCH] Pi chord/durable runtime absent from Aira |
+| 125 | `ea9e093516` | 2026-09-18 | fix(ai): update tests for current model catalogs | REIMPLEMENT | `0700bc9a4` | [CATALOG] Aira already matched the post-commit Mistral lookup and z.ai effort metadata through earlier catalog rows; added the missing international z.ai GLM-5.2 highspeed zero-cost assertion |
+| 126 | `13784598d2` | 2026-09-18 | fix(coding-agent): suppress repeated Anthropic thinking drop notices | SKIP | `` | [UI / DEFERRED_PROVIDER_FEATURE_FOLLOWUP] same family as row 117; no active behavior to de-duplicate |
+| 127 | `bb0f4aa602` | 2026-09-18 | fix(ai): preserve DeepSeek V4 effort metadata | REIMPLEMENT | `80080e38d` | [CATALOG] guard the hardcoded DeepSeek V4 map behind `thinkingLevelMap === undefined` so OpenRouter reasoning metadata and opencode-go models.dev effort options survive; generator + tests; data hydrated |
+| 128 | `661619e872` | 2026-09-18 | fix(ai): scope bodyless overflow errors to Cerebras | DIRECT | `df6be81ec` | Cerebras provider guard on the bodyless-overflow pattern; source blob identical, changelog kept by Aira |
+| 129 | `fe219d7f8d` | 2026-09-18 | feat(coding-agent): format bash tool durations to support hours, minutes, seconds (#9742) | REIMPLEMENT | `85c1573ba` | [REL] `formatDuration` ported into Aira's `core/tools/bash.ts`; test exercises the expanded ToolExecutionComponent |
+| 130 | `cf8d5fac30` | 2026-09-18 | feat(agent): add Pico storage foundation | SKIP | `` | [ARCH] Pi pico storage; absent from Aira |
+| 131 | `eed5263cdd` | 2026-09-18 | Merge remote-tracking branch 'origin/main' into HEAD | SKIP | `` | [MRG] merge commit; constituents accounted for |
+| 132 | `5901446094` | 2026-09-18 | fix(tui): reduce fuzzy search latency | DIRECT | `35dbc56ff` | native `indexOf` fuzzy scan; verbatim port, changelog kept by Aira |
+
+Slice 4b totals (rows 117-132): DIRECT=4, REIMPLEMENT=4, SKIP=8, TOTAL=16
+
+Slice 4 combined totals (rows 100-132): DIRECT=6, REIMPLEMENT=7, SKIP=20, TOTAL=33
+
+Cumulative totals rows 1-132: DIRECT=21, REIMPLEMENT=24, SKIP=87, TOTAL=132
+
+### Slice 4b notes
+
+- Rows 117/126 approved correction: REIMPLEMENT -> SKIP, class
+  `UI / DEFERRED_PROVIDER_FEATURE_FOLLOWUP`. Do not record the reason as
+  "Aira does not contain the notice"; the authoritative behavioral reason is
+  that the notices are follow-up fixes to the Anthropic managed
+  mid-conversation-effort / thinking-binding behavior introduced upstream by
+  `4e69b0c28` (with follow-up `0fdec07ba`), and that base feature is not
+  active in Aira. Aira does not define `supportsMidConvoEffort`, does not
+  generate that compatibility flag for Anthropic models, does not use the
+  Anthropic beta messages API, does not send thinking `block_binding` with
+  `prefix_mismatch_behavior: "drop_block"`, does not request the
+  `thinking-binding-controls` beta, does not capture Anthropic
+  `input_transformations`, does not emit `thinking_dropped` diagnostics,
+  does not persist `providerThinkingLevel`, and does not consume those
+  diagnostics in the coding-agent UI. The specific server-side
+  drop-and-report condition handled by rows 117/126 therefore cannot be
+  intentionally triggered by Aira's current Anthropic request path. Aira
+  instead retains its existing client-side signed-thinking mismatch
+  avoidance behavior. Rows 117/126 have no active Aira behavior to modify;
+  no implementation commits were created for either row.
+
+### Historical clarification: `4e69b0c28`
+
+The previous Pi 0.85.1 sync summarized `4e69b0c28`
+(`feat(ai): preserve Anthropic per-turn thinking effort`) under
+`SUPERSEDED_BY_AIRA`. That label overstates actual behavioral parity. The
+more accurate interpretation is a DEFERRED provider/settings slice: Aira
+owns related reasoning/mismatch behavior, but the upstream
+`supportsMidConvoEffort` / Anthropic thinking-binding / `thinking_dropped`
+diagnostic path was NOT ported, and the diagnostic sub-feature was not
+separately tracked as a parity gap. This clarification is recorded only in
+this ledger; git history and the Phase 14 preparation document are not
+rewritten.
+
+### Future reference: Anthropic managed mid-conversation effort family
+
+`4e69b0c28`, `0fdec07ba`, `4658534986`, `13784598d2`.
+
+If Aira later adopts Anthropic managed mid-conversation effort, evaluate the
+family together rather than independently porting the two UI follow-ups. The
+feature can be validated without live Anthropic API spend using the existing
+fake-client/SSE fixture infrastructure in
+`packages/ai/test/anthropic-sse-parsing.test.ts`. Do not implement that
+feature during the current Pi upsync.
 
 Aira-owned (non-upstream) branch commit on this slice: `008a7a77c` `fix(aira): preserve visible messages across context compaction`. It is not counted in upstream DIRECT/REIMPLEMENT totals.
 
