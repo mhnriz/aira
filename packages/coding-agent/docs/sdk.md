@@ -233,7 +233,7 @@ await session.steer("New instruction");
 await session.followUp("After you're done, also do this");
 ```
 
-Both `steer()` and `followUp()` expand file-based prompt templates but error on extension commands (extension commands cannot be queued).
+Both `steer()` and `followUp()` expand file-based prompt templates but error on extension commands (extension commands cannot be queued). They return `"queued"` if the input was queued (including after an extension transformed it), or `"handled"` if an extension consumed it.
 
 ### Agent and AgentState
 

@@ -344,6 +344,12 @@ export interface ExtensionBindings {
 	onError?: ExtensionErrorListener;
 }
 
+/** How an input was accepted: consumed without a run, or queued for the current run. */
+export type QueuedInputDisposition = "handled" | "queued";
+
+/** How prompt() accepted an input: consumed, queued, or starting a new run. */
+export type PromptDisposition = QueuedInputDisposition | "started";
+
 /** Options for AgentSession.prompt() */
 export interface PromptOptions {
 	/** Whether to dispatch extension commands and expand skill commands and prompt templates (default: true) */
@@ -355,7 +361,7 @@ export interface PromptOptions {
 	/** Source of input for extension input event handlers. Defaults to "interactive". */
 	source?: InputSource;
 	/** Internal hook used by RPC mode to observe prompt preflight acceptance or rejection. */
-	preflightResult?: (success: boolean) => void;
+	preflightResult?: (disposition: PromptDisposition) => void;
 }
 
 /** Options for model/thinking mutations. */
@@ -2044,188 +2050,176 @@ export class AgentSession {
 	async prompt(text: string, options?: PromptOptions): Promise<void> {
 		const expandPromptTemplates = options?.expandPromptTemplates ?? true;
 		const preflightResult = options?.preflightResult;
-		let messages: AgentMessage[] | undefined;
 
-		try {
-			// Handle extension commands first (execute immediately, even during streaming)
-			// Extension commands manage their own LLM interaction via pi.sendMessage()
-			if (expandPromptTemplates && text.startsWith("/")) {
-				const handled = await this._tryExecuteExtensionCommand(text);
-				if (handled) {
-					// Extension command executed, no prompt to send
-					preflightResult?.(true);
-					return;
-				}
-			}
-
-			if (this._compactionAbortController !== undefined) {
-				throw new Error(
-					"Cannot submit a prompt while compaction is in progress. Wait for compaction to finish and retry.",
-				);
-			}
-
-			// Emit input event for extension interception (before skill/template expansion)
-			const processedInput = await this._runInputHandlers(
-				text,
-				options?.images,
-				options?.source ?? "interactive",
-				this.isStreaming ? options?.streamingBehavior : undefined,
-			);
-			if (!processedInput) {
-				preflightResult?.(true);
+		// Handle extension commands first (execute immediately, even during streaming)
+		// Extension commands manage their own LLM interaction via pi.sendMessage()
+		if (expandPromptTemplates && text.startsWith("/")) {
+			const handled = await this._tryExecuteExtensionCommand(text);
+			if (handled) {
+				// Extension command executed, no prompt to send
+				preflightResult?.("handled");
 				return;
 			}
-			const { text: currentText, images: currentImages } = processedInput;
-
-			// Expand skill commands (/skill:name args) and prompt templates (/template args)
-			let expandedText = currentText;
-			if (expandPromptTemplates) {
-				expandedText = this._expandSkillCommand(expandedText);
-				expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
-			}
-
-			// If streaming, queue via steer() or followUp() based on option
-			if (this.isStreaming) {
-				if (!options?.streamingBehavior) {
-					throw new Error(
-						"Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message.",
-					);
-				}
-				if (options.streamingBehavior === "followUp") {
-					await this._queueFollowUp(expandedText, currentImages);
-				} else {
-					await this._queueSteer(expandedText, currentImages);
-				}
-				preflightResult?.(true);
-				return;
-			}
-
-			// Flush any pending bash messages before the new prompt
-			this._flushPendingBashMessages();
-			this._flushPendingCustomMessages();
-
-			// Validate model
-			if (!this.model) {
-				throw new Error(formatNoModelSelectedMessage());
-			}
-
-			const hasConfiguredAuth =
-				this._modelRuntime.hasConfiguredAuth(this.model.provider) ||
-				(await this._modelRuntime.checkAuth(this.model.provider)) !== undefined;
-			if (!hasConfiguredAuth) {
-				const isOAuth = this._modelRuntime.isUsingOAuth(this.model.provider);
-				if (isOAuth) {
-					throw new Error(
-						`Authentication failed for "${this.model.provider}". ` +
-							`Credentials may have expired or network is unavailable. ` +
-							`Run '/login ${this.model.provider}' to re-authenticate.`,
-					);
-				}
-				throw new Error(formatNoApiKeyFoundMessage(this.model.provider));
-			}
-
-			// Check if we need to compact before sending (catches aborted responses).
-			// The user's new prompt is sent below, so do not call agent.continue() here.
-			const lastAssistant = this._findLastAssistantMessage();
-			if (lastAssistant) {
-				await this._checkCompaction(lastAssistant, false);
-			}
-
-			// Ensure the first model request can receive the one-time intelligence
-			// discovery guidance when this project is eligible. Later prompts reuse
-			// the coordinator's existing once-per-session context gate.
-			await this._airaIntelligenceActivation;
-
-			// Emit before_agent_start before normalizing images so extension-driven model
-			// selection determines the resize profile used for the request and history.
-			const result = await this._extensionRunner.emitBeforeAgentStart(
-				expandedText,
-				currentImages,
-				this._baseSystemPrompt,
-				this._baseSystemPromptOptions,
-			);
-			const normalized = await this._normalizePromptImages(currentImages);
-			const userText =
-				normalized.hints.length > 0 ? `${expandedText}\n\n${normalized.hints.join("\n")}` : expandedText;
-
-			// Build messages only after hooks and image normalization have completed.
-			messages = [];
-			const userContent: (TextContent | ImageContent)[] = [{ type: "text", text: userText }];
-			userContent.push(...normalized.images);
-			messages.push({
-				role: "user",
-				content: userContent,
-				timestamp: Date.now(),
-			});
-
-			// Inject any pending "nextTurn" messages as context alongside the user message
-			for (const msg of this._pendingNextTurnMessages) {
-				messages.push(msg);
-			}
-			this._pendingNextTurnMessages = [];
-
-			// Add all custom messages from extensions
-			if (result?.messages) {
-				for (const msg of result.messages) {
-					messages.push({
-						role: "custom",
-						customType: msg.customType,
-						// Untyped extensions can pass null/missing content; normalize at ingestion.
-						content: msg.content ?? [],
-						display: msg.display,
-						details: msg.details,
-						timestamp: Date.now(),
-					});
-				}
-			}
-			// Aira intelligence seam (Phase 5): ambient context — compact,
-			// bounded, identical-content-skipped. Missing intelligence yields
-			// undefined here and the message never enters the conversation.
-			const airaContext = this._airaIntelligence?.providePromptContext(expandedText);
-			if (airaContext !== undefined) {
-				messages.push({
-					role: "custom",
-					customType: AIRA_INTELLIGENCE_CONTEXT_TYPE,
-					content: airaContext,
-					display: false,
-					timestamp: Date.now(),
-				});
-			}
-			// Aira browser seam (Phase 7): bounded ambient browser evidence —
-			// off/auto/on policy, hard budget, unchanged-content dedupe. AUTO
-			// commonly injects zero tokens; the snapshot stays UI-visible either
-			// way (state.browser is token-free).
-			const airaBrowserContext = this._airaBrowser?.providePromptContext(expandedText);
-			if (airaBrowserContext !== undefined) {
-				messages.push({
-					role: "custom",
-					customType: AIRA_BROWSER_CONTEXT_TYPE,
-					content: airaBrowserContext,
-					display: false,
-					timestamp: Date.now(),
-				});
-			}
-			// Apply extension-modified system prompt, or reset to base
-			const promptBase = result?.systemPrompt ?? this._baseSystemPrompt;
-			// Runtime mode is host-owned control metadata. It is appended after
-			// extension prompt customization so every inference sees the current
-			// mode without changing the user's composer message.
-			this._activeRecoveryHint = this._airaTasks?.consumeRecoveryHint?.();
-			this._systemPromptOverride = `${promptBase}\n\n${buildAiraRuntimeControlEnvelope(
-				this._airaSessionState.mode,
-				this._activeRecoveryHint,
-			)}`;
-			this.agent.state.systemPrompt = this._systemPromptOverride;
-		} catch (error) {
-			preflightResult?.(false);
-			throw error;
 		}
 
-		if (!messages) {
+		if (this._compactionAbortController !== undefined) {
+			throw new Error(
+				"Cannot submit a prompt while compaction is in progress. Wait for compaction to finish and retry.",
+			);
+		}
+
+		// Emit input event for extension interception (before skill/template expansion)
+		const processedInput = await this._runInputHandlers(
+			text,
+			options?.images,
+			options?.source ?? "interactive",
+			this.isStreaming ? options?.streamingBehavior : undefined,
+		);
+		if (!processedInput) {
+			preflightResult?.("handled");
+			return;
+		}
+		const { text: currentText, images: currentImages } = processedInput;
+
+		// Expand skill commands (/skill:name args) and prompt templates (/template args)
+		let expandedText = currentText;
+		if (expandPromptTemplates) {
+			expandedText = this._expandSkillCommand(expandedText);
+			expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
+		}
+
+		// If streaming, queue via steer() or followUp() based on option
+		if (this.isStreaming) {
+			if (!options?.streamingBehavior) {
+				throw new Error(
+					"Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message.",
+				);
+			}
+			if (options.streamingBehavior === "followUp") {
+				await this._queueFollowUp(expandedText, currentImages);
+			} else {
+				await this._queueSteer(expandedText, currentImages);
+			}
+			preflightResult?.("queued");
 			return;
 		}
 
-		preflightResult?.(true);
+		// Flush any pending bash messages before the new prompt
+		this._flushPendingBashMessages();
+		this._flushPendingCustomMessages();
+
+		// Validate model
+		if (!this.model) {
+			throw new Error(formatNoModelSelectedMessage());
+		}
+
+		const hasConfiguredAuth =
+			this._modelRuntime.hasConfiguredAuth(this.model.provider) ||
+			(await this._modelRuntime.checkAuth(this.model.provider)) !== undefined;
+		if (!hasConfiguredAuth) {
+			const isOAuth = this._modelRuntime.isUsingOAuth(this.model.provider);
+			if (isOAuth) {
+				throw new Error(
+					`Authentication failed for "${this.model.provider}". ` +
+						`Credentials may have expired or network is unavailable. ` +
+						`Run '/login ${this.model.provider}' to re-authenticate.`,
+				);
+			}
+			throw new Error(formatNoApiKeyFoundMessage(this.model.provider));
+		}
+
+		// Check if we need to compact before sending (catches aborted responses).
+		// The user's new prompt is sent below, so do not call agent.continue() here.
+		const lastAssistant = this._findLastAssistantMessage();
+		if (lastAssistant) {
+			await this._checkCompaction(lastAssistant, false);
+		}
+
+		// Ensure the first model request can receive the one-time intelligence
+		// discovery guidance when this project is eligible. Later prompts reuse
+		// the coordinator's existing once-per-session context gate.
+		await this._airaIntelligenceActivation;
+
+		// Emit before_agent_start before normalizing images so extension-driven model
+		// selection determines the resize profile used for the request and history.
+		const result = await this._extensionRunner.emitBeforeAgentStart(
+			expandedText,
+			currentImages,
+			this._baseSystemPrompt,
+			this._baseSystemPromptOptions,
+		);
+		const normalized = await this._normalizePromptImages(currentImages);
+		const userText = normalized.hints.length > 0 ? `${expandedText}\n\n${normalized.hints.join("\n")}` : expandedText;
+
+		// Build messages only after hooks and image normalization have completed.
+		const messages: AgentMessage[] = [];
+		const userContent: (TextContent | ImageContent)[] = [{ type: "text", text: userText }];
+		userContent.push(...normalized.images);
+		messages.push({
+			role: "user",
+			content: userContent,
+			timestamp: Date.now(),
+		});
+
+		// Inject any pending "nextTurn" messages as context alongside the user message
+		for (const msg of this._pendingNextTurnMessages) {
+			messages.push(msg);
+		}
+		this._pendingNextTurnMessages = [];
+
+		// Add all custom messages from extensions
+		if (result?.messages) {
+			for (const msg of result.messages) {
+				messages.push({
+					role: "custom",
+					customType: msg.customType,
+					// Untyped extensions can pass null/missing content; normalize at ingestion.
+					content: msg.content ?? [],
+					display: msg.display,
+					details: msg.details,
+					timestamp: Date.now(),
+				});
+			}
+		}
+		// Aira intelligence seam (Phase 5): ambient context — compact,
+		// bounded, identical-content-skipped. Missing intelligence yields
+		// undefined here and the message never enters the conversation.
+		const airaContext = this._airaIntelligence?.providePromptContext(expandedText);
+		if (airaContext !== undefined) {
+			messages.push({
+				role: "custom",
+				customType: AIRA_INTELLIGENCE_CONTEXT_TYPE,
+				content: airaContext,
+				display: false,
+				timestamp: Date.now(),
+			});
+		}
+		// Aira browser seam (Phase 7): bounded ambient browser evidence —
+		// off/auto/on policy, hard budget, unchanged-content dedupe. AUTO
+		// commonly injects zero tokens; the snapshot stays UI-visible either
+		// way (state.browser is token-free).
+		const airaBrowserContext = this._airaBrowser?.providePromptContext(expandedText);
+		if (airaBrowserContext !== undefined) {
+			messages.push({
+				role: "custom",
+				customType: AIRA_BROWSER_CONTEXT_TYPE,
+				content: airaBrowserContext,
+				display: false,
+				timestamp: Date.now(),
+			});
+		}
+		// Apply extension-modified system prompt, or reset to base
+		const promptBase = result?.systemPrompt ?? this._baseSystemPrompt;
+		// Runtime mode is host-owned control metadata. It is appended after
+		// extension prompt customization so every inference sees the current
+		// mode without changing the user's composer message.
+		this._activeRecoveryHint = this._airaTasks?.consumeRecoveryHint?.();
+		this._systemPromptOverride = `${promptBase}\n\n${buildAiraRuntimeControlEnvelope(
+			this._airaSessionState.mode,
+			this._activeRecoveryHint,
+		)}`;
+		this.agent.state.systemPrompt = this._systemPromptOverride;
+		preflightResult?.("started");
 		await this._runAgentPrompt(messages);
 	}
 
@@ -2294,7 +2288,7 @@ export class AgentSession {
 		images: ImageContent[] | undefined,
 		behavior: "steer" | "followUp",
 		source: InputSource,
-	): Promise<void> {
+	): Promise<QueuedInputDisposition> {
 		if (text.startsWith("/")) {
 			this._throwIfExtensionCommand(text);
 		}
@@ -2305,7 +2299,7 @@ export class AgentSession {
 			source,
 			this.isStreaming ? behavior : undefined,
 		);
-		if (!processedInput) return;
+		if (!processedInput) return "handled";
 
 		let expandedText = this._expandSkillCommand(processedInput.text);
 		expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
@@ -2315,6 +2309,7 @@ export class AgentSession {
 		} else {
 			await this._queueFollowUp(expandedText, processedInput.images);
 		}
+		return "queued";
 	}
 
 	/**
@@ -2326,8 +2321,12 @@ export class AgentSession {
 	 * @param options Input source; defaults to interactive
 	 * @throws Error if text is an extension command
 	 */
-	async steer(text: string, images?: ImageContent[], options?: { source?: InputSource }): Promise<void> {
-		await this._queueUserInput(text, images, "steer", options?.source ?? "interactive");
+	async steer(
+		text: string,
+		images?: ImageContent[],
+		options?: { source?: InputSource },
+	): Promise<QueuedInputDisposition> {
+		return this._queueUserInput(text, images, "steer", options?.source ?? "interactive");
 	}
 
 	/**
@@ -2338,8 +2337,12 @@ export class AgentSession {
 	 * @param options Input source; defaults to interactive
 	 * @throws Error if text is an extension command
 	 */
-	async followUp(text: string, images?: ImageContent[], options?: { source?: InputSource }): Promise<void> {
-		await this._queueUserInput(text, images, "followUp", options?.source ?? "interactive");
+	async followUp(
+		text: string,
+		images?: ImageContent[],
+		options?: { source?: InputSource },
+	): Promise<QueuedInputDisposition> {
+		return this._queueUserInput(text, images, "followUp", options?.source ?? "interactive");
 	}
 
 	/**
