@@ -88,6 +88,75 @@ describe("TuiAltScreen", () => {
 		tui.stop();
 	});
 
+	it("keeps the jump-to-end indicator centered when the scrollbar visibility changes", async () => {
+		// Regression test for #9136: scrollbar visibility must not move the indicator.
+		const terminal = new VirtualTerminal(80, 6);
+		const label = " ↓ Jump to latest message · End ";
+		const tui = new TuiAltScreen(terminal, undefined, undefined, {
+			scrollToEndIndicator: () => label,
+		});
+		const transcript = new ScrollView(
+			new Text(Array.from({ length: 20 }, (_, index) => `line ${index + 1}`).join("\n"), 0, 0),
+			{ follow: "end", primary: true, scrollbar: "always" },
+		);
+		tui.setLayoutRoot(transcript);
+		tui.start();
+		try {
+			await terminal.waitForRender();
+			transcript.scrollBy(-5);
+			await terminal.waitForRender();
+			assert.strictEqual(transcript.isScrollbarVisible, true);
+			assert.strictEqual(transcript.isFollowingEnd, false);
+			const visibleColumn = terminal.getViewport()[5].indexOf(label);
+
+			transcript.setScrollbar("hidden");
+			await terminal.waitForRender();
+			assert.strictEqual(transcript.isScrollbarVisible, false);
+			const hiddenColumn = terminal.getViewport()[5].indexOf(label);
+
+			transcript.setScrollbar("always");
+			await terminal.waitForRender();
+			assert.strictEqual(transcript.isScrollbarVisible, true);
+			const revealedColumn = terminal.getViewport()[5].indexOf(label);
+
+			assert.deepStrictEqual([visibleColumn, hiddenColumn, revealedColumn], [24, 24, 24]);
+		} finally {
+			tui.stop();
+		}
+	});
+
+	it("leaves the scrollbar visible and clickable when the jump-to-end indicator spans the transcript", async () => {
+		// Regression coverage for #9136: centering must not paint or capture clicks over the scrollbar.
+		const terminal = new VirtualTerminal(30, 6);
+		const tui = new TuiAltScreen(terminal, undefined, undefined, {
+			scrollToEndIndicator: () => "↓".repeat(30),
+		});
+		const transcript = new ScrollView(
+			new Text(Array.from({ length: 12 }, (_, index) => `line ${index + 1}`).join("\n"), 0, 0),
+			{ follow: "end", primary: true, scrollbar: "always" },
+		);
+		tui.setLayoutRoot(
+			new VStack([
+				{ component: transcript, basis: 0, grow: 1, minSize: 1 },
+				{ component: new Text("editor\nfooter", 0, 0), basis: "auto", minSize: 1 },
+			]),
+		);
+		tui.start();
+		await terminal.waitForRender();
+
+		terminal.sendInput("\x1b[<64;1;1M");
+		await terminal.waitForRender();
+		assert.strictEqual(transcript.isFollowingEnd, false);
+
+		// The indicator must not paint the scrollbar's last column.
+		assert.strictEqual(terminal.getViewport()[3], `${"↓".repeat(29)} `);
+		terminal.sendInput("\x1b[<0;30;4M");
+		terminal.sendInput("\x1b[<0;30;4m");
+		await terminal.waitForRender();
+		assert.strictEqual(transcript.isFollowingEnd, false);
+		tui.stop();
+	});
+
 	it("keeps an explicit dock fixed while the transcript scrolls", async () => {
 		const terminal = new VirtualTerminal(20, 6);
 		const tui = new TuiAltScreen(terminal);
