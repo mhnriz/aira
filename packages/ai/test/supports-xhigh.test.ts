@@ -66,7 +66,7 @@ describe("getSupportedThinkingLevels", () => {
 	});
 
 	// gpt-6-astra is not part of Aira's openai-codex catalog, so it is not listed here.
-	it.each(["gpt-5.5", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] as const)(
+	it.each(["gpt-5.5", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-6-luna", "gpt-6-sol"] as const)(
 		"includes xhigh for openai-codex %s models",
 		(modelId) => {
 			const model = getModel("openai-codex", modelId);
@@ -75,7 +75,7 @@ describe("getSupportedThinkingLevels", () => {
 		},
 	);
 
-	it.each(["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] as const)(
+	it.each(["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-6-sol", "gpt-6-luna"] as const)(
 		"includes xhigh and max for OpenAI %s models",
 		(modelId) => {
 			const model = getModel("openai", modelId);
@@ -83,6 +83,37 @@ describe("getSupportedThinkingLevels", () => {
 			expect(getSupportedThinkingLevels(model!)).toEqual(["off", "low", "medium", "high", "xhigh", "max"]);
 		},
 	);
+
+	it.each([
+		["gpt-6-sol", { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 }],
+		["gpt-6-luna", { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125 }],
+	] as const)("includes official metadata for OpenAI and Codex %s", (modelId, cost) => {
+		for (const provider of ["openai", "openai-codex"] as const) {
+			const model = getModel(provider, modelId);
+			expect(model).toMatchObject({
+				input: ["text", "image"],
+				cost: {
+					...cost,
+					tiers: [
+						{
+							inputTokensAbove: 272000,
+							input: cost.input * 2,
+							output: cost.output * 1.5,
+							cacheRead: cost.cacheRead * 2,
+							cacheWrite: cost.cacheWrite * 2,
+						},
+					],
+				},
+				contextWindow: 272000,
+				maxTokens: 128000,
+				compat: {
+					supportsAdditionalTools: true,
+					supportsOpenAIGrammarTools: true,
+					supportsToolSearch: true,
+				},
+			});
+		}
+	});
 
 	it("includes only medium/high/xhigh for OpenAI GPT-5.5 Pro", () => {
 		const model = getModel("openai", "gpt-5.5-pro");
