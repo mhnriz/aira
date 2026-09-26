@@ -12,7 +12,15 @@
  *     `STALE_EMPTY_ONLY_MARKER` emit only an empty set for version-1;
  *     `STALE_FINDINGS_MARKER`   emit a distinct stale diagnostic for
  *                               version-1, then the current diagnostics;
+ *     `LATE_PUBLISH_MARKER`     emit the current diagnostics after a long
+ *                               delay (600ms) plus a `mock-late-err` code,
+ *                               simulating a publication that outlives a
+ *                               delete/evict/reopen;
  *     `SILENT_MARKER`           publish nothing for this document;
+ *
+ * Args:
+ *   `--force-version <n>`  publish every diagnostic set with version `n`
+ *                          regardless of the document's real version;
  * - answers textDocument/definition, textDocument/references, and
  *   textDocument/documentSymbol with deterministic canned results;
  * - honors shutdown/exit.
@@ -127,6 +135,15 @@ function handleNotification(method, params) {
 				message: "mock error: ERROR_MARKER present",
 			});
 		}
+		if (text.includes("LATE_PUBLISH_MARKER")) {
+			diagnostics.push({
+				range: { start: { line: 0, character: 0 }, end: { line: 0, character: 4 } },
+				severity: 1,
+				code: "mock-late-err",
+				source: "mock-lsp",
+				message: "mock error: LATE_PUBLISH_MARKER present",
+			});
+		}
 		if (manyDiagnostics) {
 			for (let i = 0; i < 60; i += 1) {
 				diagnostics.push({
@@ -140,8 +157,10 @@ function handleNotification(method, params) {
 		}
 		const currentVersion = doc.version;
 		const staleVersion = typeof currentVersion === "number" ? currentVersion - 1 : undefined;
+		const emitDelay = text.includes("LATE_PUBLISH_MARKER") ? 600 : 40;
 		const emit = (version, dx) => {
-			setTimeout(() => publishDiagnostics(doc.uri, versionless ? undefined : version, dx), 40);
+			const publishedVersion = forceVersion ?? (versionless ? undefined : version);
+			setTimeout(() => publishDiagnostics(doc.uri, publishedVersion, dx), emitDelay);
 		};
 		const staleDiagnostics = text.includes("STALE_FINDINGS_MARKER")
 			? [
@@ -177,6 +196,9 @@ const manyReferences = process.argv.includes("--many-references");
 const delayNavigation = process.argv.includes("--delay-navigation");
 const noPublish = process.argv.includes("--no-publish");
 const versionless = process.argv.includes("--versionless");
+// Publish every diagnostic set with a fixed version (see `--force-version`).
+const forceVersionIndex = process.argv.indexOf("--force-version");
+const forceVersion = forceVersionIndex >= 0 ? Number(process.argv[forceVersionIndex + 1]) : undefined;
 const manyDiagnostics = process.argv.includes("--many-diagnostics");
 // Return a definition URI for this filesystem path instead of the canned URI.
 const definitionPathIndex = process.argv.indexOf("--definition-path");

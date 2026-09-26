@@ -18,6 +18,7 @@ import { statSync } from "node:fs";
 import { realpath } from "node:fs/promises";
 import { relative, resolve as resolvePath } from "node:path";
 import type { Agent, AgentEvent } from "@earendil-works/pi-agent-core";
+import { isAiraCapabilityReadOnly } from "../capabilities.ts";
 import type { AiraSessionState } from "../state.ts";
 import { decideIntelligenceActivation, type IntelligenceActivation, isConservativeActivation } from "./activation.ts";
 import { buildIntelligenceContext } from "./context.ts";
@@ -609,20 +610,81 @@ export class IntelligenceCoordinator implements AiraIntelligenceHandle {
 		if (event.type === "turn_start") {
 			this.turn += 1;
 			this.findings.setTurn(this.turn);
+			// Reconcile between turns so deletions performed outside a tracked
+			// tool (external editors, background processes) are noticed too.
+			this.reconcileDeletedFindings();
 			return;
 		}
 		if (event.type === "tool_execution_start" && (event.toolName === "edit" || event.toolName === "write")) {
 			// Remember the target path; `tool_execution_end` carries no args.
 			const path = toolPath(event.args);
 			if (path) {
-				this.pendingEdits.set(event.toolCallId, path);
+				this.pendingEdits.set(event.toolCallId, this.resolveToolPath(path));
 			}
 			return;
 		}
-		if (event.type === "tool_execution_end" && (event.toolName === "edit" || event.toolName === "write")) {
-			this.onToolExecuted(event.toolCallId, event.isError);
+		if (event.type === "tool_execution_end") {
+			if (event.toolName === "edit" || event.toolName === "write") {
+				this.onToolExecuted(event.toolCallId, event.isError);
+				return;
+			}
+			// Shell and other mutating tools can delete files without naming them.
+			// Reconciliation is keyed on known findings paths, never on shell text.
+			if (!isAiraCapabilityReadOnly(event.toolName)) {
+				this.reconcileDeletedFindings();
+			}
 		}
 	};
+
+	/** Resolve a tool-supplied path against the project root to the canonical finding key. */
+	private resolveToolPath(rawPath: string): string {
+		const root = this.repository?.projectRoot;
+		return root ? resolvePath(root, rawPath) : resolvePath(rawPath);
+	}
+
+	/**
+	 * Reconcile known diagnostic paths against filesystem state. Only a
+	 * confirmed missing file (ENOENT/ENOTDIR) invalidates a path; inaccessible
+	 * or transient stat failures are left untouched. Diagnostic paths are
+	 * bounded by the findings store, so this is not a repo-wide sweep. Returns
+	 * the number of paths invalidated.
+	 */
+	private reconcileDeletedFindings(): number {
+		if (!this.liveCode) {
+			return 0;
+		}
+		let invalidated = 0;
+		let freshnessChanged = false;
+		for (const path of this.findings.paths) {
+			const state = probeFileState(path);
+			if (state.kind === "missing") {
+				// The file is gone: drop its findings and tombstone its LSP document
+				// lifecycle so a delayed publication cannot revive it.
+				this.findings.clearPath(path);
+				this.liveCode.noteFileDeleted(path);
+				invalidated += 1;
+				freshnessChanged = true;
+				continue;
+			}
+			if (state.kind !== "present") {
+				continue;
+			}
+			// A file deleted and recreated inside one tool call still exists at this
+			// boundary, so it is not a confirmed deletion. Refresh its findings
+			// against the new mtime so the pre-recreation diagnostics are marked
+			// stale instead of remaining current.
+			const wasStale = this.findings.forPath(path).every((finding) => finding.freshness === "stale");
+			const refreshed = this.findings.forPath(path, state.mtimeMs);
+			const isStale = refreshed.length > 0 && refreshed.every((finding) => finding.freshness === "stale");
+			if (wasStale !== isStale) {
+				freshnessChanged = true;
+			}
+		}
+		if (freshnessChanged) {
+			this.publishStatus();
+		}
+		return invalidated;
+	}
 
 	private onToolExecuted(toolCallId: string, isError: boolean): void {
 		const path = this.pendingEdits.get(toolCallId);
@@ -780,12 +842,30 @@ function basenameSafe(path: string | undefined): string | undefined {
 	return parts.at(-1);
 }
 
-function fileMtimeMs(path: string): number | undefined {
+/**
+ * Filesystem state of a known diagnostic path.
+ *
+ * `missing` is a confirmed deletion (ENOENT/ENOTDIR); `unknown` covers
+ * permission errors and transient I/O failures, which must never be treated
+ * as deletions.
+ */
+type AiraFileState = { kind: "present"; mtimeMs: number } | { kind: "missing" } | { kind: "unknown" };
+
+export function probeFileState(path: string): AiraFileState {
 	try {
-		return statSync(path).mtimeMs;
-	} catch {
-		return undefined;
+		return { kind: "present", mtimeMs: statSync(path).mtimeMs };
+	} catch (error) {
+		const code = (error as NodeJS.ErrnoException).code;
+		if (code === "ENOENT" || code === "ENOTDIR") {
+			return { kind: "missing" };
+		}
+		return { kind: "unknown" };
 	}
+}
+
+function fileMtimeMs(path: string): number | undefined {
+	const state = probeFileState(path);
+	return state.kind === "present" ? state.mtimeMs : undefined;
 }
 
 function toolPath(args: unknown): string | undefined {

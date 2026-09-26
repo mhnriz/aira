@@ -157,6 +157,12 @@ interface DiagnosticsPublicationState {
 	acceptedCount?: number;
 	/** Host timestamp of the most recent ignored stale publication. */
 	staleAt?: number;
+	/**
+	 * Set after a confirmed file deletion. `syncedVersion` is retained as the
+	 * version floor so a late publication from the pre-deletion lifecycle stays
+	 * below the version a reopened document will use.
+	 */
+	tombstoned?: boolean;
 }
 
 export interface LiveCodeDiagnosticsFileResult {
@@ -309,6 +315,12 @@ export class LiveCodeProvider {
 		return repositoryLanguage ? serverForLanguage(repositoryLanguage) : undefined;
 	}
 
+	/** The client for a file's server, when one has been spawned. */
+	private clientForPath(path: string): LspClient | undefined {
+		const definition = this.definitionForFile(path);
+		return definition ? this.clients.get(definition.id) : undefined;
+	}
+
 	/**
 	 * Ensure a client exists for a file's server (spawning lazily when the
 	 * server is installed). Returns the client or undefined (unsupported
@@ -421,7 +433,12 @@ export class LiveCodeProvider {
 			this.markSynced(path, version);
 		} else {
 			signal?.throwIfAborted();
-			const version = await client.didOpen(path, language, text);
+			const version = await client.didOpen(
+				path,
+				language,
+				text,
+				this.diagnosticPublications.get(path)?.syncedVersion ?? 0,
+			);
 			this.openDocuments.set(path, language);
 			this.openOrder.push(path);
 			this.evictDocuments(client);
@@ -442,6 +459,7 @@ export class LiveCodeProvider {
 			state.syncedVersion = version;
 			state.acceptedCount = undefined;
 			state.staleAt = undefined;
+			state.tombstoned = false;
 			return;
 		}
 		this.diagnosticPublications.set(path, { syncedVersion: version });
@@ -478,6 +496,43 @@ export class LiveCodeProvider {
 			return;
 		}
 		await this.waitForDiagnostics(path, waitMs ?? this.diagnosticWaitMs);
+	}
+
+	/**
+	 * Confirmed-deletion hook. Drops the path's active findings, closes its
+	 * document, and tombstones its publication lifecycle so any late publication
+	 * from the deleted document is rejected. `syncedVersion` is retained as a
+	 * version floor: when the path is later recreated and reopened, the new
+	 * document starts above the old lifecycle, so stale publications cannot
+	 * resurrect old findings.
+	 */
+	noteFileDeleted(path: string): void {
+		const state = this.diagnosticPublications.get(path);
+		this.diagnosticPublications.set(path, {
+			syncedVersion: state?.syncedVersion ?? 0,
+			tombstoned: true,
+		});
+		this.findings.clearPath(path);
+		if (this.openDocuments.has(path)) {
+			this.closeDocument(path, this.clientForPath(path));
+		}
+		// A diagnostics query waiting on this file can never receive a current
+		// publication, so unblock it instead of making it wait out its budget.
+		this.resolveDiagnosticsWaiters(path);
+	}
+
+	/** Close an open document and drop it from the provider's open tracking. */
+	private closeDocument(path: string, client: LspClient | undefined): void {
+		this.openDocuments.delete(path);
+		const index = this.openOrder.indexOf(path);
+		if (index >= 0) {
+			this.openOrder.splice(index, 1);
+		}
+		if (client && client.status === "running") {
+			void client.didClose(path).catch(() => {
+				// Deletion close is best-effort.
+			});
+		}
 	}
 
 	/**
@@ -884,6 +939,15 @@ export class LiveCodeProvider {
 		}
 		const now = Date.now();
 		const state = this.diagnosticPublications.get(path);
+		if (state?.tombstoned) {
+			// The file was deleted; no publication can describe a current lifecycle
+			// until a new document is opened for it.
+			return;
+		}
+		// Versionless publications are accepted for compatibility. The protocol
+		// carries no document session id, so after a recreation a versionless
+		// publication from the deleted lifecycle cannot be distinguished from a
+		// fresh one; only versioned publications can be lifecycle-attributed.
 		if (version !== undefined && state && version < state.syncedVersion) {
 			// The publication describes an older document version. It must not
 			// clear or replace findings for the version we actually synced.

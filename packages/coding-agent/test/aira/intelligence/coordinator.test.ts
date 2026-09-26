@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,7 +9,11 @@ import {
 	AIRA_CODE_INTELLIGENCE_DISCOVERY_GUIDANCE,
 	buildIntelligenceContext,
 } from "../../../src/aira/intelligence/context.ts";
-import { type AiraIntelligenceHandle, createAiraIntelligence } from "../../../src/aira/intelligence/coordinator.ts";
+import {
+	type AiraIntelligenceHandle,
+	createAiraIntelligence,
+	probeFileState,
+} from "../../../src/aira/intelligence/coordinator.ts";
 import { AiraFindingsStore } from "../../../src/aira/intelligence/findings.ts";
 import { RepositoryProvider } from "../../../src/aira/intelligence/providers/repository/index.ts";
 import { type AiraProjectProfile, resolveAiraProjectInto } from "../../../src/aira/project/index.ts";
@@ -538,5 +542,178 @@ describe("intelligence coordinator", () => {
 			expect(result.status).toBe("cancelled");
 			expect(result.files).toEqual([]);
 		});
+	});
+});
+
+describe("deleted-file diagnostics lifecycle", () => {
+	const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+	async function activate(root: string, extra: Record<string, unknown> = {}) {
+		const state = projectState(root);
+		const handle = createAiraIntelligence(state, undefined, {
+			cacheDir: join(tmpdir(), `aira-reconcile-${Date.now()}-${Math.random().toString(36).slice(2)}`),
+			liveCodeOptions,
+			...extra,
+		});
+		activeHarnesses.push({ state, handle });
+		await handle.activate();
+		await handle.waitUntilSettled();
+		return { state, handle };
+	}
+
+	it("removes a deleted file's findings on a shell tool boundary and preserves others", async () => {
+		const root = makeProject("reconcile-shell");
+		const tray = join(root, "src", "tray.ts");
+		const other = join(root, "src", "other.ts");
+		writeFileSync(tray, "export function stabilizeTray() { ERROR_MARKER }");
+		writeFileSync(other, "export function other() { SECOND_ERROR_MARKER }");
+		const { state, handle } = await activate(root);
+
+		const before = await handle.diagnostics({ paths: ["src/tray.ts", "src/other.ts"] });
+		expect(before.totals.errors).toBe(2);
+		expect(state.intelligence?.findings.errors).toBe(2);
+
+		rmSync(tray);
+		handle.applyAgentEvent({
+			type: "tool_execution_end",
+			toolCallId: "tc-rm",
+			toolName: "bash",
+			result: {},
+			isError: false,
+		});
+
+		expect(state.intelligence?.findings.errors).toBe(1);
+		const context = handle.providePromptContext("inspect the tray");
+		expect(context).toContain(other);
+		expect(context).not.toContain(tray);
+	});
+
+	it("removes a deleted file's findings on the next turn boundary", async () => {
+		const root = makeProject("reconcile-turn");
+		const tray = join(root, "src", "tray.ts");
+		writeFileSync(tray, "export function stabilizeTray() { ERROR_MARKER }");
+		const { state, handle } = await activate(root);
+
+		await handle.diagnostics({ paths: ["src/tray.ts"] });
+		expect(state.intelligence?.findings.errors).toBe(1);
+
+		// An external deletion is noticed when the next turn begins.
+		rmSync(tray);
+		handle.applyAgentEvent({ type: "turn_start" });
+		expect(state.intelligence?.findings.errors).toBe(0);
+	});
+
+	it("marks a file deleted and recreated within one shell call stale at the boundary", async () => {
+		const root = makeProject("reconcile-rapid");
+		const tray = join(root, "src", "tray.ts");
+		writeFileSync(tray, "export function stabilizeTray() { ERROR_MARKER }");
+		const { state, handle } = await activate(root);
+
+		await handle.diagnostics({ paths: ["src/tray.ts"] });
+		expect(state.intelligence?.findings.errors).toBe(1);
+
+		// Delete and recreate inside one shell call, so the reconciliation boundary
+		// never observes a missing file. The pre-recreation finding must not keep
+		// advertising itself as current.
+		await sleep(80);
+		rmSync(tray);
+		writeFileSync(tray, "export function stabilizeTray() {}\n");
+		handle.applyAgentEvent({
+			type: "tool_execution_end",
+			toolCallId: "tc-rapid",
+			toolName: "bash",
+			result: {},
+			isError: false,
+		});
+
+		expect(state.intelligence?.findings.errors).toBe(0);
+	});
+
+	it("resolves a relative edit path to the absolute finding key", async () => {
+		const root = makeProject("reconcile-relative");
+		const tray = join(root, "src", "tray.ts");
+		writeFileSync(tray, "export function stabilizeTray() { ERROR_MARKER }");
+		const { state, handle } = await activate(root, { postEditDebounceMs: 40 });
+
+		await handle.diagnostics({ paths: ["src/tray.ts"] });
+		expect(state.intelligence?.findings.errors).toBe(1);
+
+		// The file is gone, so the post-edit sync cannot re-add the finding; only
+		// resolving the relative tool path clears the absolute store key.
+		rmSync(tray);
+		handle.applyAgentEvent({
+			type: "tool_execution_start",
+			toolCallId: "tc-edit",
+			toolName: "edit",
+			args: { path: "src/tray.ts" },
+		});
+		handle.applyAgentEvent({
+			type: "tool_execution_end",
+			toolCallId: "tc-edit",
+			toolName: "edit",
+			result: {},
+			isError: false,
+		});
+		await sleep(400);
+		expect(state.intelligence?.findings.errors).toBe(0);
+	});
+
+	it("does not reconcile on streamed message events", async () => {
+		const root = makeProject("reconcile-stream");
+		const tray = join(root, "src", "tray.ts");
+		writeFileSync(tray, "export function stabilizeTray() { ERROR_MARKER }");
+		const { state, handle } = await activate(root);
+
+		await handle.diagnostics({ paths: ["src/tray.ts"] });
+		expect(state.intelligence?.findings.errors).toBe(1);
+
+		rmSync(tray);
+		const streamed = {
+			type: "message_update",
+			message: { role: "assistant", content: [] },
+			assistantMessageEvent: { type: "text_delta", delta: "partial" },
+		} as unknown as Parameters<AiraIntelligenceHandle["applyAgentEvent"]>[0];
+		handle.applyAgentEvent(streamed);
+		handle.applyAgentEvent(streamed);
+		// Streamed tokens must not trigger a filesystem sweep.
+		expect(state.intelligence?.findings.errors).toBe(1);
+
+		handle.applyAgentEvent({ type: "turn_start" });
+		expect(state.intelligence?.findings.errors).toBe(0);
+	});
+
+	it("classifies confirmed-deletion filesystem states", () => {
+		const root = makeProject("probe-states");
+		const present = join(root, "src", "present.ts");
+		writeFileSync(present, "export function present() {}");
+		expect(probeFileState(present).kind).toBe("present");
+		expect(probeFileState(join(root, "src", "missing.ts")).kind).toBe("missing");
+		// A path through a regular file is ENOTDIR, a confirmed missing path.
+		expect(probeFileState(join(present, "child.ts")).kind).toBe("missing");
+	});
+
+	it("treats transient or inaccessible stat failures as unknown, not deleted", () => {
+		if (process.platform === "win32") {
+			return;
+		}
+		const root = makeProject("probe-unknown");
+		const loop = join(root, "loop");
+		symlinkSync("loop", loop);
+		expect(probeFileState(loop).kind).toBe("unknown");
+	});
+
+	it("reconciles a bounded set of finding paths in linear time", () => {
+		const root = makeProject("probe-cost");
+		const paths: string[] = [];
+		for (let index = 0; index < 300; index += 1) {
+			const path = join(root, "src", `f${index}.ts`);
+			writeFileSync(path, "export function f() {}");
+			paths.push(path);
+		}
+		const started = performance.now();
+		const states = paths.map((path) => probeFileState(path));
+		const elapsed = performance.now() - started;
+		expect(states.every((state) => state.kind === "present")).toBe(true);
+		expect(elapsed).toBeLessThan(2000);
 	});
 });

@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -165,6 +165,61 @@ describe(
 			expect(state.intelligence?.liveCode.spawnCount).toBe(1);
 			expect(state.intelligence?.liveCode.crashCount).toBe(0);
 		});
+
+		it(
+			"clears a real deleted file's diagnostics at a tool boundary without waiting for the server",
+			{ timeout: 60_000 },
+			async () => {
+				const root = makeProbeProject("deleted");
+				const probe = join(root, "src", "probe.ts");
+				const state = projectState(root);
+				const handle = createAiraIntelligence(state, undefined, {
+					cacheDir: join(tmpdir(), "probe-cache-deleted"),
+					diagnosticsQueryWaitMs: 20_000,
+				});
+				activeHarnesses.push({ state, handle });
+				await handle.activate();
+				await handle.waitUntilSettled();
+
+				const before = await queryDiagnosticsUntil(handle, "src/probe.ts", (diagnostics) =>
+					diagnostics.some((entry) => entry.severity === "error"),
+				);
+				expect(before.totals.errors).toBeGreaterThanOrEqual(1);
+				expect(state.intelligence?.findings.errors).toBeGreaterThanOrEqual(1);
+
+				// Delete the file and signal a shell-tool boundary. The finding must
+				// disappear immediately, not after the language server notices.
+				rmSync(probe);
+				handle.applyAgentEvent({
+					type: "tool_execution_end",
+					toolCallId: "tc-delete",
+					toolName: "bash",
+					result: {},
+					isError: false,
+				});
+				expect(state.intelligence?.findings.errors).toBe(0);
+
+				// A direct query for the deleted file is truthful and non-clean.
+				const deleted = await handle.diagnostics({ paths: ["src/probe.ts"] });
+				const deletedFile = deleted.files.find((entry) => entry.path === "src/probe.ts");
+				expect(deletedFile?.freshness).toBe("unavailable");
+
+				// Any publication the server had queued must not resurrect the finding.
+				await new Promise((resolve) => setTimeout(resolve, 1500));
+				expect(state.intelligence?.findings.errors).toBe(0);
+
+				// Recreating the file starts a fresh lifecycle; querying it is truthful.
+				writeFileSync(probe, 'export const airaDiagnosticProbe: string = "ok";\n');
+				const recreated = await queryDiagnosticsUntil(
+					handle,
+					"src/probe.ts",
+					(diagnostics) => diagnostics.length === 0,
+				);
+				const recreatedFile = recreated.files.find((entry) => entry.path === "src/probe.ts");
+				expect(recreatedFile?.freshness).toBe("clean");
+				expect(recreated.totals.errors).toBe(0);
+			},
+		);
 
 		it(
 			"dogfood: the real diagnostics payload renders polished in the conversation",

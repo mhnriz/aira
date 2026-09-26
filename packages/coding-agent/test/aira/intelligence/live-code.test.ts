@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -678,6 +678,23 @@ describe("live-code provider (mock language server)", () => {
 			await provider.dispose();
 		});
 
+		it("keeps publications for documents evicted during a multi-file query", async () => {
+			const root = makeRoot("query-multi-evict");
+			const files = ["a", "b", "c"].map((name) => join(root, "src", `${name}.ts`));
+			mkdirSync(join(root, "src"), { recursive: true });
+			for (const file of files) {
+				writeFileSync(file, "export function f() { ERROR_MARKER }");
+			}
+
+			// A small open-document cap forces eviction mid-query; the publish for
+			// the evicted document must still be accepted for the query result.
+			const { findings, provider } = providerFor(root, { extra: { maxOpenDocuments: 2 } });
+			const result = await provider.requestDiagnostics(files);
+			expect(result.totals.errors).toBe(3);
+			expect(findings.paths).toHaveLength(3);
+			await provider.dispose();
+		});
+
 		it("ignores a stale empty publication instead of clearing current findings", async () => {
 			const root = makeRoot("query-stale-empty");
 			const file = join(root, "src", "tray.ts");
@@ -828,6 +845,135 @@ describe("live-code provider (mock language server)", () => {
 			expect(result.status).toBe("cancelled");
 			expect(result.files).toEqual([]);
 		});
+	});
+});
+
+describe("deleted-file diagnostics lifecycle", () => {
+	const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+	it("drops findings immediately and rejects a delayed publication for a deleted file", async () => {
+		const root = makeRoot("deleted-late");
+		const file = join(root, "src", "tray.ts");
+		mkdirSync(join(root, "src"), { recursive: true });
+		writeFileSync(file, "export function bad() { LATE_PUBLISH_MARKER ERROR_MARKER }");
+
+		const { findings, provider } = providerFor(root);
+		await provider.requestDiagnosticsForFile(file, 50);
+		// The publication is scheduled for +600ms and has not arrived yet.
+		expect(findings.forPath(file)).toEqual([]);
+
+		provider.noteFileDeleted(file);
+		expect(findings.forPath(file)).toEqual([]);
+
+		await sleep(800);
+		// The delayed publication from the deleted document must not resurrect it.
+		expect(findings.forPath(file)).toEqual([]);
+		await provider.dispose();
+	});
+
+	it("starts a fresh lifecycle on recreation and rejects the old publication", async () => {
+		const root = makeRoot("deleted-recreate");
+		const file = join(root, "src", "tray.ts");
+		mkdirSync(join(root, "src"), { recursive: true });
+		writeFileSync(file, "export function bad() { LATE_PUBLISH_MARKER ERROR_MARKER }");
+
+		const { findings, provider } = providerFor(root);
+		await provider.requestDiagnosticsForFile(file, 50);
+		provider.noteFileDeleted(file);
+
+		// Recreate and reopen: the new document starts above the tombstoned version
+		// barrier and accepts fresh diagnostics.
+		writeFileSync(file, "export function bad() { ERROR_MARKER }");
+		await provider.requestDiagnosticsForFile(file, 400);
+		expect(findings.forPath(file).map((f) => f.code)).toEqual(["mock-err"]);
+		// The recreated document must sit above the deleted lifecycle's version.
+		expect(findings.forPath(file)[0]?.version).toBeGreaterThan(1);
+
+		// The old lifecycle's delayed publication (version 1) arrives now and must
+		// be rejected in favor of the recreated document.
+		await sleep(800);
+		expect(findings.forPath(file).map((f) => f.code)).toEqual(["mock-err"]);
+		await provider.dispose();
+	});
+
+	it("does not lower the publication version barrier across eviction and reopen", async () => {
+		const root = makeRoot("evict-reopen");
+		const a = join(root, "src", "a.ts");
+		const b = join(root, "src", "b.ts");
+		mkdirSync(join(root, "src"), { recursive: true });
+		writeFileSync(a, "export function aaa() { SILENT_MARKER }");
+		writeFileSync(b, "export function bbb() {}");
+
+		// Every publication is forced to version 1. With the retained version
+		// barrier, the reopened document sits at version 2 and rejects it; a
+		// barrier lowered to 1 on reopen would accept it as current.
+		const { findings, provider } = providerFor(root, {
+			extra: { maxOpenDocuments: 1 },
+			serverArgs: ["--force-version", "1"],
+		});
+		await provider.requestDiagnosticsForFile(a, 50);
+		writeFileSync(a, "export function aaa() { ERROR_MARKER }");
+		// Opening B evicts A; reopening A must re-raise the barrier.
+		await provider.requestDiagnosticsForFile(b, 200);
+		await provider.requestDiagnosticsForFile(a, 300);
+
+		expect(findings.forPath(a)).toEqual([]);
+		await provider.dispose();
+	});
+
+	it("does not clear findings belonging to other files", async () => {
+		const root = makeRoot("deleted-others");
+		const a = join(root, "src", "a.ts");
+		const b = join(root, "src", "b.ts");
+		mkdirSync(join(root, "src"), { recursive: true });
+		writeFileSync(a, "export function aaa() { ERROR_MARKER }");
+		writeFileSync(b, "export function bbb() { SECOND_ERROR_MARKER }");
+
+		const { findings, provider } = providerFor(root);
+		await provider.requestDiagnostics([a, b]);
+		expect(findings.forPath(b)).toHaveLength(1);
+
+		rmSync(a);
+		provider.noteFileDeleted(a);
+		expect(findings.forPath(a)).toEqual([]);
+		expect(findings.forPath(b).map((f) => f.code)).toEqual(["mock-err-2"]);
+		await provider.dispose();
+	});
+
+	it("reports a deleted file as unavailable rather than clean", async () => {
+		const root = makeRoot("deleted-query");
+		const file = join(root, "src", "tray.ts");
+		mkdirSync(join(root, "src"), { recursive: true });
+		writeFileSync(file, "export function bad() { ERROR_MARKER }");
+
+		const { findings, provider } = providerFor(root);
+		await provider.requestDiagnosticsForFile(file, 400);
+		expect(findings.forPath(file)).toHaveLength(1);
+
+		rmSync(file);
+		provider.noteFileDeleted(file);
+		expect(findings.forPath(file)).toEqual([]);
+
+		const result = await provider.requestDiagnostics([file]);
+		expect(result.files[0]?.status).toBe("unreadable");
+		expect(result.files[0]?.freshness).toBe("unavailable");
+		expect(result.files[0]?.diagnostics).toEqual([]);
+		await provider.dispose();
+	});
+
+	it("rejects versionless publications for a tombstoned file", async () => {
+		const root = makeRoot("deleted-versionless");
+		const file = join(root, "src", "tray.ts");
+		mkdirSync(join(root, "src"), { recursive: true });
+		writeFileSync(file, "export function bad() { LATE_PUBLISH_MARKER ERROR_MARKER }");
+
+		const { findings, provider } = providerFor(root, { serverArgs: ["--versionless"] });
+		await provider.requestDiagnosticsForFile(file, 50);
+		provider.noteFileDeleted(file);
+
+		await sleep(800);
+		expect(findings.forPath(file)).toEqual([]);
+		await provider.dispose();
 	});
 });
 

@@ -216,9 +216,15 @@ export class LspClient {
 		this.write(JSON.stringify({ jsonrpc: "2.0", method, params }));
 	}
 
-	/** Open a document (full content) and bump its version. Returns the version sent to the server. */
-	async didOpen(path: string, languageId: string, text: string): Promise<number> {
-		const version = (this.documentVersions.get(path) ?? 0) + 1;
+	/**
+	 * Open a document (full content) and bump its version. Returns the version
+	 * sent to the server. `minVersion` raises the version floor so a reopened
+	 * document continues above the closed document's last version; this keeps
+	 * versions monotonic across eviction/reopen and lets late publications from
+	 * the previous lifecycle be rejected.
+	 */
+	async didOpen(path: string, languageId: string, text: string, minVersion = 0): Promise<number> {
+		const version = Math.max(this.documentVersions.get(path) ?? 0, minVersion) + 1;
 		this.documentVersions.set(path, version);
 		this.notify("textDocument/didOpen", {
 			textDocument: { uri: this.fileUri(path), languageId, version, text },
