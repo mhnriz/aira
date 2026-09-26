@@ -148,3 +148,55 @@ Cumulative totals rows 1-66: DIRECT=12, REIMPLEMENT=11, SKIP=43, TOTAL=66
 - Rows 61/64 are the DeepSeek test-ID revert pair (net zero) and rows 66/80 the broken-test revert pair; neither side was ported.
 - Model catalog rows were executed through `packages/ai/scripts/generate-models.ts`; provider data is gitignored and was hydrated, never hand-edited.
 - Known deterministic failure: `model-registry.test.ts` stale `anthropic/claude-opus-4` expectations (pre-existing since Phase 1; fixed by a later audited upstream row outside this slice).
+
+## Slice 3 (rows 67-99)
+
+| # | Upstream SHA | Date | Subject | Disposition | Local SHA | Notes |
+|---|---|---|---|---|---|---|
+| 67 | `4819cc877e` | 2026-09-11 | docs(agent): add approved pico implementation handoff | SKIP | `` | [ARCH] Pi pico implementation handoff doc; architecture absent from Aira |
+| 68 | `f467cf7068` | 2026-09-12 | feat(agent): add pico compile-time foundation | SKIP | `` | [ARCH] Pi pico storage/session work; absent from Aira |
+| 69 | `7a2647f32a` | 2026-09-12 | docs(agent): define pico state tasks and tool boundaries | SKIP | `` | [ARCH] Pi pico storage/session work; absent from Aira |
+| 70 | `d11c4b7281` | 2026-09-12 | docs(agent): simplify pico scheduling and core task model | SKIP | `` | [ARCH] Pi pico runtime work; absent from Aira |
+| 71 | `1915b35a9b` | 2026-09-12 | feat(agent): refine pico core task capabilities | SKIP | `` | [ARCH] Pi pico runtime work; absent from Aira |
+| 72 | `df484f2775` | 2026-09-12 | feat(agent): add pico memory storage foundation | SKIP | `` | [ARCH] Pi pico runtime work; absent from Aira |
+| 73 | `99a3948c4c` | 2026-09-13 | docs(agent): define pico v2 kernel contract | SKIP | `` | [ARCH] Pi pico runtime work; absent from Aira |
+| 74 | `51f3090790` | 2026-09-13 | feat(agent): align pico foundation with v2 contract | SKIP | `` | [ARCH] Pi pico runtime work; absent from Aira |
+| 75 | `a9930d2857` | 2026-09-13 | docs(agent): correct pico v2 foundation contracts | SKIP | `` | [ARCH] Pi pico runtime work; absent from Aira |
+| 76 | `fd3b009d9f` | 2026-09-13 | docs(agent): add pico3 view/events, plugins and hardening handoff | SKIP | `` | [ARCH] Pi pico runtime work; absent from Aira |
+| 77 | `09b031600d` | 2026-09-13 | docs(agent): pico3 review decisions: revision, visibility, memos, waiting, reload | SKIP | `` | [ARCH] Pi pico runtime work; absent from Aira |
+| 78 | `9b2aff2c5b` | 2026-09-13 | docs(agent): pico3: forbid AsyncLocalStorage; nested-line detection via Chord context key | SKIP | `` | [ARCH] Pi pico runtime work; absent from Aira |
+| 79 | `0c7bb7c5c7` | 2026-09-14 | fix(ai): identify Responses error providers | DIRECT | `4521e7ccc` | Responses error provider identification; verbatim port, changelog kept by Aira |
+| 80 | `ceea48f5d5` | 2026-09-14 | Revert "fix(ci): Fix a broken test" | SKIP | `` | [REV] completes the net-zero revert pair with row 66: ceea48f5d5 reverts 71dca871bc; neither side ported |
+| 81 | `46b66c59af` | 2026-09-14 | feat(agent): add hardened pico3 kernel | SKIP | `` | [ARCH] Pi pico runtime work; absent from Aira |
+| 82 | `850f83794d` | 2026-09-14 | Merge remote-tracking branch 'origin/main' into pico | SKIP | `` | [ARCH] Pi pico runtime work; absent from Aira |
+| 83 | `53816d7dcc` | 2026-09-14 | chore: approve contributors from issue #9440 | SKIP | `` | [ARCH] Pi pico runtime work; absent from Aira |
+| 84 | `f9bcd351dc` | 2026-09-14 | docs(ai): document Codex WebSocket cleanup | SKIP | `` | [CHG] changelog-only note |
+| 85 | `56cd5989ea` | 2026-09-15 | docs(agent): replace obsolete Pico prototypes with Pico5 design | SKIP | `` | [ARCH] Pi pico runtime work; absent from Aira |
+| 86 | `8a7b0c03df` | 2026-09-15 | fix(ai): price Bedrock one-hour cache writes | DIRECT | `909e13e88` | Bedrock 1h cache-write pricing; source verbatim. The new test hardcoded then-current models.dev regional prices; upstream corrected it at row 91 (also in this slice) to derive from model.cost |
+| 87 | `ea7f84678c` | 2026-09-15 | Merge remote-tracking branch 'origin/main' into pico | SKIP | `` | [ARCH] Pi pico runtime work; absent from Aira |
+| 88 | `c8e4a5a552` | 2026-09-15 | docs(agent): finalize Pico5 architecture and presentation | SKIP | `` | [ARCH] Pi pico runtime work; absent from Aira |
+| 89 | `d7296c063b` | 2026-09-15 | feat(coding-agent): isolate documentation lift evals (#9635) | SKIP | `` | [ARCH] Pi pico runtime work; absent from Aira |
+| 90 | `b02eef4186` | 2026-09-15 | docs(agent): specify Pico5 harness API | SKIP | `` | [ARCH] Pi pico runtime work; absent from Aira |
+| 91 | `4c2d91339a` | 2026-09-15 | fix(coding-agent): export extension event hook types (#9642) | REIMPLEMENT | `b29c105b9` | [EXT] exports extension hook event/handler types from the package entry point; includes the Bedrock cost-test stabilization |
+| 92 | `3349e1db18` | 2026-09-15 | fix(coding-agent): reject unverified local clipboard writes | REIMPLEMENT | `0ef749a0e` | [CLIP] Aira-native: OSC 52 fallback only for remote sessions; local unverified writes now fail. External clipboard dependency and clipboard-native.ts kept |
+| 93 | `60e7e76bd7` | 2026-09-16 | fix(coding-agent): surface clipboard backend failures | REIMPLEMENT | `50666a065` | [CLIP] Aira-native platform guidance for clipboard failures (Termux/Wayland/X11/no display); no native refactor imported |
+| 94 | `b03a367a4f` | 2026-09-16 | feat(coding-agent): allow configuring Anthropic fallback models | REIMPLEMENT | `0dc4072fa` | [CONFIG] models.json overrides can replace/disable allowedFallbackModels; schema port into Aira model-config |
+| 95 | `9b791a4cc1` | 2026-09-16 | fix(coding-agent): avoid transcript scans for exact session IDs (#9601) | DIRECT | `a317f01f6` | SessionManager.findById header-only lookup; Aira shares the helpers, verbatim port, new header-only assertions pass |
+| 96 | `6671c60476` | 2026-09-16 | fix(ai): send Baseten session affinity headers | REIMPLEMENT | `e0a8acd33` | [CATALOG] Baseten session affinity flag; generator-only change, data hydrated |
+| 97 | `9e05370b29` | 2026-09-16 | Mid conversation system messages (#9548) | SKIP | `` | [ARCH] Phase 0B: Pi SystemMessage/TranscriptContext architecture skipped; not imported. Rows 104/121 follow this decision |
+| 98 | `1247476e6d` | 2026-09-16 | fix(coding-agent): update eval prompt section markers | SKIP | `` | [EVAL] Pi eval prompt section markers; Aira evals remain smoke/extensions only |
+| 99 | `aa50fe778a` | 2026-09-16 | fix(ai): derive Google thinking levels from models.dev | REIMPLEMENT | `9444a38ee` | [CATALOG] Google thinking levels derived from models.dev; mid-conversation effort machinery not imported (aligned with row 97 skip); generator is source of truth |
+
+Slice 3 totals: DIRECT=3, REIMPLEMENT=6, SKIP=24, TOTAL=33
+
+Cumulative totals rows 1-99: DIRECT=15, REIMPLEMENT=17, SKIP=67, TOTAL=99
+
+### Slice 3 notes
+
+- Row 80 is the matching revert of row 66 (`ceea48f5d5` reverts `71dca871bc`); neither side was ported.
+- Row 86 was applied verbatim. Its test hardcoded models.dev regional prices that have since drifted; upstream corrected the test at row 91 (in-slice) to derive the expectation from `model.cost`, and Aira carries that correction.
+- Clipboard rows 92/93 are Aira-native adaptations: OSC 52 is reserved for remote sessions and failures now carry platform guidance. The skipped `caf6dfe731` native/prebuild refactor was not resurrected.
+- Row 97 keeps the Phase 0B SKIP for Pi SystemMessage/TranscriptContext; rows 104/121 follow.
+- Row 99 dropped the mid-conversation effort machinery that upstream carries in the same generator region, aligned with the row 97 skip.
+- gpt-6-astra parity note: no row in 67-99 modifies that model; the open note from Phase 2 stands.
+- Known deterministic failure unchanged: `model-registry.test.ts` stale `anthropic/claude-opus-4` expectations (a later audited upstream row fixes them outside row 99).
