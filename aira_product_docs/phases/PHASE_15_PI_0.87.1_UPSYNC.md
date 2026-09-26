@@ -408,6 +408,14 @@ failure class as the row-106 incident: every staged diff in slice 5 was
 inspected, but this hunk was a deletion inside a function that both sides
 changed. `008a7a77c` remains separately attributable.
 
+A second Aira-owned follow-up, `b3b53f028`
+`fix(coding-agent): make the compaction threshold assertion race-free`,
+adjusts the row 133 suite assertion: Aira can follow the threshold compaction
+with a silent-overflow compaction once the resumed request exceeds the faux
+model window, which raced the last-event assertion under full-suite load. The
+assertion now requires a threshold compaction event while keeping every row
+133 behavior assertion.
+
 #### Known baseline
 
 The three `model-registry.test.ts` failures for stale
