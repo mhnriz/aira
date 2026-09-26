@@ -710,7 +710,7 @@ describe("ModelRegistry", () => {
 			expect(sonnet?.name).toBe("Custom Sonnet Name");
 
 			// Other models should be unchanged
-			const opus = models.find((m) => m.id === "anthropic/claude-opus-4");
+			const opus = models.find((m) => m.id === "anthropic/claude-opus-4.1");
 			expect(opus?.name).not.toBe("Custom Sonnet Name");
 		});
 
@@ -789,7 +789,7 @@ describe("ModelRegistry", () => {
 			expect(sonnet?.samplingParams).toEqual({ top_p: 0.9 });
 
 			// Models without sampling config keep it unset.
-			const opus = models.find((m) => m.id === "anthropic/claude-opus-4");
+			const opus = models.find((m) => m.id === "anthropic/claude-opus-4.1");
 			expect(opus?.samplingParams).toBeUndefined();
 		});
 
@@ -816,7 +816,7 @@ describe("ModelRegistry", () => {
 			expect(registry.getError()).toBeUndefined();
 			expect(openrouter.find((m) => m.id === "custom/cached-model")?.promptCache).toEqual({ short: 120 });
 			expect(openrouter.find((m) => m.id === "anthropic/claude-sonnet-4")?.promptCache).toEqual({ short: 300 });
-			expect(openrouter.find((m) => m.id === "anthropic/claude-opus-4")?.promptCache).toBeUndefined();
+			expect(openrouter.find((m) => m.id === "anthropic/claude-opus-4.1")?.promptCache).toBeUndefined();
 			// Overrides merge per tier with the built-in catalog.
 			expect(registry.find("anthropic", "claude-sonnet-4-6")?.promptCache).toEqual({ short: 300, long: 1800 });
 		});
@@ -904,7 +904,7 @@ describe("ModelRegistry", () => {
 			const registry = await createModelRegistry(authStorage, modelsJsonPath);
 			const models = getModelsForProvider(registry, "openrouter");
 			const sonnet = models.find((model) => model.id === "anthropic/claude-sonnet-4");
-			const opus = models.find((model) => model.id === "anthropic/claude-opus-4");
+			const opus = models.find((model) => model.id === "anthropic/claude-opus-4.1");
 
 			expect((sonnet?.compat as OpenAICompletionsCompat | undefined)?.supportsFinishReason).toBe(false);
 			expect((opus?.compat as OpenAICompletionsCompat | undefined)?.supportsFinishReason).toBe(true);
@@ -939,7 +939,7 @@ describe("ModelRegistry", () => {
 						"anthropic/claude-sonnet-4": {
 							compat: { openRouterRouting: { only: ["amazon-bedrock"] } },
 						},
-						"anthropic/claude-opus-4": {
+						"anthropic/claude-opus-4.1": {
 							compat: { openRouterRouting: { only: ["anthropic"] } },
 						},
 					},
@@ -950,7 +950,7 @@ describe("ModelRegistry", () => {
 			const models = getModelsForProvider(registry, "openrouter");
 
 			const sonnet = models.find((m) => m.id === "anthropic/claude-sonnet-4");
-			const opus = models.find((m) => m.id === "anthropic/claude-opus-4");
+			const opus = models.find((m) => m.id === "anthropic/claude-opus-4.1");
 
 			const sonnetCompat = sonnet?.compat as OpenAICompletionsCompat | undefined;
 			const opusCompat = opus?.compat as OpenAICompletionsCompat | undefined;
@@ -979,7 +979,7 @@ describe("ModelRegistry", () => {
 			expect(sonnet?.name).toBe("Proxied Sonnet");
 
 			// Other models should have the baseUrl but not the name override
-			const opus = models.find((m) => m.id === "anthropic/claude-opus-4");
+			const opus = models.find((m) => m.id === "anthropic/claude-opus-4.1");
 			expect(opus?.baseUrl).toBe("https://my-proxy.example.com/v1");
 			expect(opus?.name).not.toBe("Proxied Sonnet");
 		});
