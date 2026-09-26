@@ -302,3 +302,101 @@ feature during the current Pi upsync.
 
 Aira-owned (non-upstream) branch commit on this slice: `008a7a77c` `fix(aira): preserve visible messages across context compaction`. It is not counted in upstream DIRECT/REIMPLEMENT totals.
 
+## Slice 5 (rows 133-165)
+
+| # | Upstream SHA | Date | Subject | Disposition | Local SHA | Notes |
+|---|---|---|---|---|---|---|
+| 133 | `8bdcd4498a` | 2026-09-18 | fix(coding-agent): compact oversized trailing tool results | REIMPLEMENT | `3d7a97907` | [REL] findCutPoint falls back to the latest valid cut point before oversized trailing tool results; Aira suite test rebased on its #8133 regression shape; see reconciliation below |
+| 134 | `0801601621` | 2026-09-18 | feat(durable): move Pico into dedicated package | SKIP | `` | [ARCH] Pi durable/Pico package absent from Aira |
+| 135 | `cf33309117` | 2026-09-18 | Merge remote-tracking branch 'origin/main' | SKIP | `` | [MRG] merge commit; constituents are rows 132/133, already processed |
+| 136 | `b5ef419d5b` | 2026-09-18 | docs(agent): restore non-Pico5 documentation | SKIP | `` | [ARCH] Pi durable/Pico package absent from Aira |
+| 137 | `1e39862f67` | 2026-09-18 | fix(coding-agent): detect llama.cpp chat-template thinking | REIMPLEMENT | `d1a2b03ab` | [REL] loaded models are probed via /props for enable_thinking; Aira's llama provider has no router-autoload presets, so LlamaServerProps carries only chat_template |
+| 138 | `c1263aa113` | 2026-09-18 | fix: clean up delta lint diagnostics | SKIP | `` | [ARCH] Pi delta/durable tooling absent from Aira |
+| 139 | `59eb4c393c` | 2026-09-18 | fix(coding-agent): clarify copy shortcut description (#9745) | DIRECT | `e979a28b6` | source blobs applied verbatim |
+| 140 | `e4ce7b449f` | 2026-09-18 | fix(ai): update Kimi model catalog source | REIMPLEMENT | `` | [CATALOG] zero delta: Aira's generator already reads `kimi-code-plan-global` after earlier catalog rows; no commit |
+| 141 | `a16ccd9be8` | 2026-09-18 | feat(durable): refine record and query contracts | SKIP | `` | [ARCH] Pi durable package absent from Aira |
+| 142 | `0db5659249` | 2026-09-18 | fix(durable): index memory storage queries | SKIP | `` | [ARCH] Pi durable package absent from Aira |
+| 143 | `734ab3434f` | 2026-09-18 | Merge remote-tracking branch 'origin/main' into HEAD | SKIP | `` | [MRG] merge commit; constituents are rows 137/139, already processed |
+| 144 | `e80cf14011` | 2026-09-19 | docs(durable): simplify document runtime contracts | SKIP | `` | [ARCH] Pi durable package absent from Aira |
+| 145 | `58541ee721` | 2026-09-18 | fix: reduce delta proxy retention and compact cloned objects | SKIP | `` | [ARCH] Pi delta package absent from Aira |
+| 146 | `36b60d2e89` | 2026-09-19 | fix: clean up delta test lint diagnostics | SKIP | `` | [ARCH] Pi delta package absent from Aira |
+| 147 | `3c75b27479` | 2026-09-19 | feat(coding-agent): add bug reporting | SKIP | `` | [ARCH] Pi Radius bug-reporting backend absent from Aira |
+| 148 | `de2de549bc` | 2026-09-19 | fix(coding-agent): close compaction cancellation races | REIMPLEMENT | `9891ad439` | [REL] abort finalizes retry state, auth/summarization observe the signal, extension cancels emit cancellation, auto-compaction owns its abort controller; Aira keeps its `_systemPromptOverride`/`_activeRecoveryHint` reset |
+| 149 | `4d38031fbd` | 2026-09-19 | feat(ai): ship Radius model catalog | REIMPLEMENT | `f79584589` | [CATALOG] public radius.pi.dev catalog as a built-in provider overlay; generated catalogs regenerated through Aira's generator |
+| 150 | `eba619879c` | 2026-09-19 | docs: audit unreleased changelogs | SKIP | `` | [REL] upstream changelog audit; Aira maintains its own changelogs |
+| 151 | `7d5eb0ee3b` | 2026-09-19 | fix(ai): mock Radius in model generation tests | DIRECT | `0b2ba18f8` | **corrected from SKIP**: Aira gained the target test file in an earlier slice, and row 149 made it fail 4/4; one-line Radius mock applies verbatim |
+| 152 | `c596d09d9c` | 2026-09-19 | feat(coding-agent): add prompt cache warming (#9668) | REIMPLEMENT | `7fb71ab6f` | [REL] cache-warmer module, settings mode, usage accounting, interactive status, extension event, model promptCache metadata; Aira adaptations below |
+| 153 | `bfa6862400` | 2026-09-20 | fix(tui): handle CJK punctuation in file autocomplete (#9746) | REIMPLEMENT | `f8f98c039` | CJK punctuation treated as word separators; editor.test.ts keeps Aira's node:test beforeEach/afterEach imports |
+| 154 | `40c256cccb` | 2026-09-19 | feat(coding-agent): defer extension loader dependencies | REIMPLEMENT | `a9fd8c419` | bundled virtual modules extracted; jiti loaded lazily; Aira keeps its local isBundledNode declaration because config.ts does not export it |
+| 155 | `fa0e1f48ac` | 2026-09-19 | fix(tui): improve LaTeX compatibility and layouts | DIRECT | `d94ed302b` | changelog conflict only, Aira CHANGELOG kept |
+| 156 | `b7f7881949` | 2026-09-19 | fix(coding-agent): await terminal remote prompt event | SKIP | `` | [REL] target `src/experimental/client.ts` absent from Aira |
+| 157 | `d7951ec362` | 2026-09-20 | fix(tui): rank skill autocomplete by bare name (#9120) | DIRECT | `a15df0c60` | clean application |
+| 158 | `803f0e906d` | 2026-09-20 | fix(tui): preserve fullscreen images in WezTerm | DIRECT | `90ea74a9f` | changelog conflict only, Aira CHANGELOG kept |
+| 159 | `21b8cc1a4b` | 2026-09-20 | fix(coding-agent): ignore stale tool image conversions (#8743) | REIMPLEMENT | `0a2b5f835` | stale async conversions guarded; Aira test fixture omits the unused TuiMouseEvent import |
+| 160 | `dfbf793b78` | 2026-09-20 | feat(coding-agent): load session picker progressively | DIRECT | `0b92b733c` | changelog conflict only; source auto-merged cleanly |
+| 161 | `dd01f5b240` | 2026-09-20 | fix(coding-agent): speed up recent session discovery | DIRECT | `f611219a2` | clean application |
+| 162 | `12032deb70` | 2026-09-20 | docs: complete unreleased changelog audit | SKIP | `` | [REL] changelog-only; Aira maintains its own changelogs |
+| 163 | `ecac0a9c4e` | 2026-09-20 | Release v0.86.0 | SKIP | `` | [ARCH] upstream release bump for packages absent from Aira and Aira-owned versioning |
+| 164 | `50d766cba2` | 2026-09-20 | Add [Unreleased] section for next cycle | SKIP | `` | [ARCH] companion to row 163; Aira maintains its own changelogs |
+| 165 | `d1230ea200` | 2026-09-20 | fix(coding-agent): preserve multiline bug descriptions | SKIP | `` | [ARCH] part of the Pi bug-reporting feature absent from Aira (see row 147) |
+
+Slice 5 totals (rows 133-165): DIRECT=7, REIMPLEMENT=9, SKIP=17, TOTAL=33
+
+Cumulative totals rows 1-165: DIRECT=28, REIMPLEMENT=33, SKIP=104, TOTAL=165
+
+### Slice 5 notes
+
+#### Row 133 compaction reconciliation against `008a7a77c`
+
+- Upstream behavior: `findCutPoint` no longer leaves the cut at the first
+  message when trailing tool results alone exceed `keepRecentTokens`; it falls
+  back to the latest valid cut point so the assistant tool call preceding the
+  oversized results is kept.
+- Aira fitness: `008a7a77c` protects visible messages in the transient
+  provider projection (`compactAiraModelContext`); row 133 changes only the
+  session-summarization cut in `core/compaction/compaction.ts`. It does not
+  touch `src/aira/context-compaction.ts`, the provider projection seam, or
+  canonical SessionManager writes, and the projection re-applies its
+  active-turn, latest-completed-assistant, and recent-window protection to the
+  post-compaction canonical entries.
+- Tool-result compaction and thinking replay are untouched. Split-turn
+  prefixes remain standard upstream behavior and were already reachable for
+  non-fallback cuts; row 133 only makes the fallback choose the latest valid
+  cut point.
+- The four Aira-owned projection regressions (active-turn report verbatim,
+  latest completed assistant survives, tool results still compact, canonical
+  history unchanged) remain green; `aira/context-compaction.test.ts` and
+  `context-compaction-session.test.ts` pass after the change.
+
+#### Row 151 disposition correction (approved)
+
+SKIP -> DIRECT. The approved rationale ("all conflict targets absent") was
+stale: `packages/ai/test/fireworks-model-generation.test.ts` exists in Aira
+and, after row 149, failed 4/4 without the Radius fetch mock. The one-line
+upstream change applies verbatim; committed with upstream metadata.
+
+#### Row 140 zero-delta note
+
+Aira's generator already reads `data["kimi-code-plan-global"]` from earlier
+catalog rows, so row 140 required no change and produced no commit.
+
+#### Row 152 Aira adaptations
+
+- `cache-warmer.ts` resolves the `PI_CACHE_RETENTION` env override locally
+  because the narrow `@earendil-works/pi-ai/utils/*` package export was part
+  of the intentionally skipped `5507d76` import-topology work.
+- `cache-warmer.test.ts` passes a plain `Context` instead of
+  `normalizeContext` because Aira does not carry the skipped
+  TranscriptContext/SystemMessage family.
+- `settings-manager.test.ts` writes project settings under `.aira`.
+- `packages/server/src/protocol.ts` (Aira-owned) accounts for
+  `Model.promptCache` in its exact-key assertion.
+- Provider data was hydrated through the generator; Aira CHANGELOGs kept.
+
+#### Known baseline
+
+The three `model-registry.test.ts` failures for stale
+`anthropic/claude-opus-4` expectations remain after row 165; no upstream row
+in 133-165 fixes them. Row 152's new prompt-cache catalog assertion passes
+after hydration and does not change that baseline.
+
