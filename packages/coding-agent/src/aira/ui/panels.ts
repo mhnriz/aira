@@ -6,6 +6,7 @@
  * projection never queries internals, runs git, or touches providers.
  */
 
+import type { AiraIntelligenceTopFinding } from "../intelligence/status.ts";
 import type { AiraSessionState } from "../state.ts";
 import type {
 	WorkbenchCheckpoint,
@@ -98,13 +99,35 @@ export function findingPanel(finding: WorkbenchFinding | undefined): WorkbenchPa
 					? "yellow"
 					: "muted";
 	const code = finding.code ? `${finding.code} · ` : "";
+	const rows: WorkbenchRow[] = [];
+	// The location gets its own row beneath the heading. It used to be the panel
+	// hint on the title line, where a long path could consume the whole width and
+	// truncate "CURRENT FINDING" away (spacedRow prioritises the hint).
+	if (finding.detail) {
+		rows.push({ value: finding.detail, role: "muted" });
+	}
+	rows.push({ value: `${code}${finding.label}`, role });
 	return {
 		id: "finding",
 		title: "Current Finding",
 		priority: finding.priority,
-		rows: [{ value: `${code}${finding.label}`, role }],
-		hint: finding.detail ? `${finding.detail} · ${finding.source}` : finding.source,
+		rows,
 	};
+}
+
+/** Visible label for a canonical diagnostic severity. */
+export function findingSeverityLabel(severity: AiraIntelligenceTopFinding["severity"]): string {
+	switch (severity) {
+		case "error":
+			return "error";
+		case "warning":
+			return "warning";
+		case "hint":
+			return "hint";
+		default:
+			// information and other both read as informational.
+			return "info";
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -604,11 +627,20 @@ export function intelligencePanel(state: AiraSessionState): WorkbenchPanel | und
 			const location = `${finding.path ?? "unknown"}${finding.line ? `:${finding.line}` : ""}`;
 			const freshness = finding.freshness === "fresh" ? "" : ` · ${finding.freshness}`;
 			rows.push({
-				label: finding.severity === "error" ? "error" : "warning",
+				label: findingSeverityLabel(finding.severity),
 				value: location,
 				// Stale details are subordinate to current findings; indeterminate
-				// findings stay visually distinct without claiming staleness.
-				role: finding.freshness === "stale" ? "muted" : finding.severity === "error" ? "red" : "yellow",
+				// findings stay visually distinct without claiming staleness. Only
+				// errors and warnings claim a warning colour; information/hint/other
+				// stay neutral so the label and colour agree with the counters.
+				role:
+					finding.freshness === "stale"
+						? "muted"
+						: finding.severity === "error"
+							? "red"
+							: finding.severity === "warning"
+								? "yellow"
+								: "muted",
 				detail: `${finding.code !== undefined ? `${finding.code} · ` : ""}${finding.message}${freshness}`,
 			});
 		}

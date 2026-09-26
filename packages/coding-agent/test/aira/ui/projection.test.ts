@@ -345,6 +345,34 @@ describe("Workbench finding arbitration", () => {
 		disposeFixture(state);
 	});
 
+	it("keeps an informational LSP finding informational instead of warning", () => {
+		const state = sessionFixture();
+		state.intelligence = {
+			...initialAiraIntelligenceStatus(),
+			findings: {
+				total: 1,
+				errors: 0,
+				warnings: 0,
+				stale: 0,
+				top: [
+					{
+						severity: "information",
+						code: "CS8019",
+						message: "Unnecessary using directive.",
+						path: "src/x.ts",
+						line: 12,
+						freshness: "fresh",
+					},
+				],
+			},
+		};
+		const finding = arbitrateCurrentFinding(state);
+		expect(finding?.severity).toBe("info");
+		expect(finding?.code).toBe("CS8019");
+		expect(finding?.detail).toContain("src/x.ts:12");
+		disposeFixture(state);
+	});
+
 	it("returns undefined when nothing actionable exists", () => {
 		const state = sessionFixture();
 		expect(arbitrateCurrentFinding(state)).toBeUndefined();
@@ -469,6 +497,90 @@ describe("Workbench panel projection", () => {
 			"ready · 1612 files · clean",
 			"idle · 3 available",
 		]);
+		disposeFixture(state);
+	});
+
+	it("labels canonical severities without collapsing non-errors to warning", () => {
+		const cases: Array<{
+			severity: "error" | "warning" | "information" | "hint" | "other";
+			label: string;
+		}> = [
+			{ severity: "error", label: "error" },
+			{ severity: "warning", label: "warning" },
+			{ severity: "information", label: "info" },
+			{ severity: "hint", label: "hint" },
+			{ severity: "other", label: "info" },
+		];
+		for (const { severity, label } of cases) {
+			const state = sessionFixture();
+			state.intelligence = {
+				...initialAiraIntelligenceStatus(),
+				active: true,
+				findings: {
+					total: 1,
+					errors: severity === "error" ? 1 : 0,
+					warnings: severity === "warning" ? 1 : 0,
+					stale: 0,
+					top: [
+						{
+							severity,
+							code: "CS8019",
+							message: "Unnecessary using directive.",
+							path: "src/x.ts",
+							line: 12,
+							freshness: "fresh",
+						},
+					],
+				},
+			};
+			const projection = projectWorkbench(defaultInput(state));
+			const panel = projection.panels.find((candidate) => candidate.id === "intelligence");
+			const row = panel?.rows.find((candidate) => candidate.value === "src/x.ts:12");
+			expect(row?.label).toBe(label);
+			disposeFixture(state);
+		}
+	});
+
+	it("keeps an information-only state consistent with 0E 0W and neutral current finding styling", () => {
+		const state = sessionFixture();
+		state.intelligence = {
+			...initialAiraIntelligenceStatus(),
+			active: true,
+			findings: {
+				total: 1,
+				errors: 0,
+				warnings: 0,
+				stale: 0,
+				top: [
+					{
+						severity: "information",
+						code: "CS8019",
+						message: "Unnecessary using directive.",
+						path: "D:\\IROPO_basler_C#\\iropo\\File.cs",
+						line: 12,
+						freshness: "fresh",
+					},
+				],
+			},
+		};
+		const projection = projectWorkbench(defaultInput(state));
+		const panel = projection.panels.find((candidate) => candidate.id === "intelligence");
+		const diagnostics = panel?.rows.find((row) => row.label === "Diagnostics");
+		expect(diagnostics?.value).toBe("0E 0W");
+		expect(diagnostics?.role).toBe("muted");
+		const findingRow = panel?.rows.find((row) => row.value === "D:\\IROPO_basler_C#\\iropo\\File.cs:12");
+		expect(findingRow?.label).toBe("info");
+		expect(findingRow?.role).toBe("muted");
+		expect(panel?.rows.some((row) => row.label === "warning")).toBe(false);
+
+		const current = projection.panels.find((candidate) => candidate.id === "finding");
+		expect(current?.title).toBe("Current Finding");
+		expect(current?.hint).toBeUndefined();
+		expect(current?.rows.map((row) => row.value)).toEqual([
+			"D:\\IROPO_basler_C#\\iropo\\File.cs:12 · fresh",
+			"CS8019 · Unnecessary using directive.",
+		]);
+		expect(current?.rows.at(-1)?.role).toBe("muted");
 		disposeFixture(state);
 	});
 

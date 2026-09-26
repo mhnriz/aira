@@ -1,6 +1,7 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { beforeAll, describe, expect, it } from "vitest";
-import type { WorkbenchProjection } from "../../../src/aira/ui/types.ts";
+import { findingPanel } from "../../../src/aira/ui/panels.ts";
+import type { WorkbenchFinding, WorkbenchProjection } from "../../../src/aira/ui/types.ts";
 import { setTheme } from "../../../src/modes/interactive/theme/theme.ts";
 import {
 	fitPanelCount,
@@ -65,5 +66,75 @@ describe("Workbench terminal renderer", () => {
 		const panel = projection().panels[0]!;
 		expect(fitPanelCount([panel], 6, true)).toBe(0);
 		expect(fitPanelCount([panel], 8, true)).toBe(1);
+	});
+});
+
+describe("Current Finding panel layout", () => {
+	const finding = (path: string): WorkbenchFinding => ({
+		severity: "info",
+		source: "lsp",
+		code: "CS8019",
+		label: "Unnecessary using directive.",
+		detail: `${path}:12 · fresh`,
+		priority: 2,
+	});
+
+	function findingProjection(value: WorkbenchFinding): WorkbenchProjection {
+		return {
+			layout: "wide",
+			sidebarVisible: true,
+			panels: [findingPanel(value)!],
+			footer: [],
+			finding: value,
+			summary: "BUILD",
+		};
+	}
+
+	const longWindowsPath = "D:\\IROPO_basler_C#\\iropo\\src\\Really\\Long\\Nested\\Path\\File.cs";
+
+	for (const width of [30, 42, 60, 120]) {
+		it(`keeps heading, location and message structurally present at width ${width}`, () => {
+			const lines = renderWorkbenchProjection(findingProjection(finding(longWindowsPath)), width, 20).map(plain);
+			expect(lines.some((line) => line.includes("CURRENT FINDING"))).toBe(true);
+			expect(lines.some((line) => line.includes("D:\\IROPO_basler_C#"))).toBe(true);
+			expect(lines.some((line) => line.includes("CS8019 · Unnecessary"))).toBe(true);
+			expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
+		});
+	}
+
+	it("renders a short path verbatim beneath the heading", () => {
+		const lines = renderWorkbenchProjection(findingProjection(finding("src/x.ts")), 60, 20).map(plain);
+		expect(lines.some((line) => line.includes("CURRENT FINDING"))).toBe(true);
+		expect(lines.some((line) => line.includes("src/x.ts:12 · fresh"))).toBe(true);
+	});
+
+	it("renders a path containing '#' verbatim", () => {
+		const lines = renderWorkbenchProjection(findingProjection(finding("D:\\repo#2\\src\\file.cs")), 60, 20).map(
+			plain,
+		);
+		expect(lines.some((line) => line.includes("D:\\repo#2\\src\\file.cs:12 · fresh"))).toBe(true);
+		expect(lines.some((line) => line.includes("CURRENT FINDING"))).toBe(true);
+	});
+
+	it("respects wide-character display width for a unicode path", () => {
+		const unicodePath = "D:\\项目\\源码\\verylongfilename_without_breaks.cs";
+		for (const width of [30, 42, 60]) {
+			const lines = renderWorkbenchProjection(findingProjection(finding(unicodePath)), width, 20).map(plain);
+			expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
+			expect(lines.some((line) => line.includes("CURRENT FINDING"))).toBe(true);
+			expect(lines.some((line) => line.includes("CS8019 · Unnecessary"))).toBe(true);
+		}
+	});
+
+	it("orders heading, location and message when a long path would previously hide the heading", () => {
+		// Regression: the location used to be the panel hint on the title line, so a
+		// wide path could consume the whole row and truncate CURRENT FINDING away.
+		const lines = renderWorkbenchProjection(findingProjection(finding(longWindowsPath)), 42, 20).map(plain);
+		const headingIndex = lines.findIndex((line) => line.includes("CURRENT FINDING"));
+		const locationIndex = lines.findIndex((line) => line.includes("D:\\IROPO_basler_C#"));
+		const messageIndex = lines.findIndex((line) => line.includes("CS8019 · Unnecessary"));
+		expect(headingIndex).toBeGreaterThanOrEqual(0);
+		expect(locationIndex).toBeGreaterThan(headingIndex);
+		expect(messageIndex).toBeGreaterThan(locationIndex);
 	});
 });

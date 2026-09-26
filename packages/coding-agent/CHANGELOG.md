@@ -18,6 +18,11 @@
 
 ### Fixed
 
+- **Aira**: Workbench Current Finding now renders the location on its own row
+  beneath a dedicated `CURRENT FINDING` heading, so long Windows/Unicode paths
+  can no longer truncate the heading away. Diagnostics keep their canonical
+  severity labels (`error`/`warning`/`info`/`hint`), so an LSP `Information`
+  finding is no longer displayed as a warning.
 - **Aira**: Child and verifier run deadlines now abort the active model stream
   and tool execution instead of only abandoning the await. Timeout remains
   classified as timeout when the aborted operation later surfaces an

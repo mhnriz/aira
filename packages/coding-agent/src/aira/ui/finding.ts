@@ -129,7 +129,9 @@ export function arbitrateCurrentFinding(state: AiraSessionState | undefined): Wo
 			});
 		} else if (top && top.freshness === "fresh" && top.severity !== "error") {
 			candidates.push({
-				severity: "warning",
+				// Preserve information/hint as the neutral informational role instead
+				// of collapsing every non-error finding to "warning".
+				severity: top.severity === "warning" ? "warning" : "info",
 				source: "lsp",
 				priority: 2,
 				label: bound(top.message, 60),
