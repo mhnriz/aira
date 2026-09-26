@@ -1413,6 +1413,31 @@ export class AgentSession {
 		this._airaModelToolSurfaceUnsubscribers.length = 0;
 		this.telemetry.dispose();
 		this._eventListeners = [];
+		// Aira execution seam: clean up THIS session's managed processes
+		// (graceful → forced). Session-instance-scoped: a stale session being
+		// disposed can never kill processes a newer session over the same file
+		// launched, because each session owns its own manager (ADR-024).
+		void this._airaExecution?.dispose();
+		void this._airaBrowser?.dispose();
+		// Aira verification seam: abort any in-flight verifier run and release
+		// the per-session listener subscription.
+		void this._airaVerification?.dispose();
+		// Aira orchestration seam: abort every child run (model streams, timers)
+		// and release listeners. No orphan children after session teardown.
+		void this._airaOrchestration?.dispose();
+		// Aira goal seam: persist an active goal as paused (interrupted) and
+		// release listeners. The root session's teardown aborts owned runs.
+		void this._airaGoal?.dispose();
+		// Aira interaction seam: resolve any pending question truthfully (no
+		// orphaned dialogs; a pending tool call resolves as unavailable).
+		this._airaInteraction?.dispose();
+		// Aira permission seam: release listeners (rules are session-scoped;
+		// persistent rules stay in the Aira-owned store).
+		this._airaPermissions?.dispose();
+		// Aira task seam: release listeners and clear the session task graph.
+		this._airaTasks?.dispose();
+		// Aira intelligence seam: shut down providers (language servers, timers).
+		void this._airaIntelligence?.dispose();
 		this._airaWorkspaceOwnership?.dispose();
 		// Aira lifecycle seam: release canonical state, ownership-checked so a
 		// stale owner (replaced by a newer session over the same file) is a no-op.

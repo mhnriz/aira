@@ -393,6 +393,21 @@ catalog rows, so row 140 required no change and produced no commit.
   `Model.promptCache` in its exact-key assertion.
 - Provider data was hydrated through the generator; Aira CHANGELOGs kept.
 
+#### Aira-owned repair during slice 5
+
+`fix(coding-agent): restore Aira session disposal seams after the row 148 merge`
+(local `c818ed770e13a5bb7b33cfef40758ed8ebd8015b`, not counted in upstream totals). The row 148 cherry-pick's
+3-way merge silently replaced Aira's `dispose()` seam block (execution,
+browser, verification, orchestration, goal, interaction, permissions, tasks,
+intelligence) with upstream's shorter dispose. The Aira host-integration tests
+(`test/aira/execution/host-integration.test.ts`,
+`test/aira/orchestration/host-integration.test.ts`,
+`test/aira/verification/host-integration.test.ts`) caught it during final
+validation; the block was restored verbatim. This is the same 3-way-context
+failure class as the row-106 incident: every staged diff in slice 5 was
+inspected, but this hunk was a deletion inside a function that both sides
+changed. `008a7a77c` remains separately attributable.
+
 #### Known baseline
 
 The three `model-registry.test.ts` failures for stale
