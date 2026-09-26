@@ -423,3 +423,72 @@ The three `model-registry.test.ts` failures for stale
 in 133-165 fixes them. Row 152's new prompt-cache catalog assertion passes
 after hydration and does not change that baseline.
 
+## Slice 6 (rows 166-198)
+
+| # | Upstream SHA | Date | Subject | Disposition | Local SHA | Notes |
+|---|---|---|---|---|---|---|
+| 166 | `b73412a378` | 2026-09-20 | feat(ai,coding-agent): add Meta provider with Muse subscription OAuth (#9096) | REIMPLEMENT | `35ed2551c` | [CATALOG] new provider, OAuth loader, env key, default `muse-spark-1.3`; catalogs regenerated through Aira's generator |
+| 167 | `60740991c0` | 2026-09-20 | feat(coding-agent): cache compiled Node CLI modules | REIMPLEMENT | `8c7fbd1bc` | cli-runtime launcher with Node compile cache; merge conflict caught and preserved Aira's `client` bundle entry |
+| 168 | `d875512cc4` | 2026-09-20 | fix(coding-agent): suppress bug hints for expected failures | SKIP | `` | [ARCH] Pi bug-reporting hints absent from Aira (rows 147/165 family) |
+| 169 | `ee2df312e5` | 2026-09-20 | docs: audit post-release changelog entries | SKIP | `` | [REL] changelog-only; Aira maintains its own changelogs |
+| 170 | `6dff740fab` | 2026-09-20 | fix(coding-agent): restore OSC 52 clipboard fallback for headless sessions | REIMPLEMENT | `828030ce9` | [REL] headless OSC 52 and WSL PowerShell clipboard; Aira's pre-`clipboard-command` layer kept, `isWSL` moved to utils/wsl.ts |
+| 171 | `0e283203c7` | 2026-09-20 | fix(ai): detect z.ai prompt-too-long errors | DIRECT | `fe52941b7` | verbatim application |
+| 172 | `af7359b904` | 2026-09-20 | fix(ai): exclude Cerebras from supportsStrictMode (#9804) | REIMPLEMENT | `a3f5bc944` | [CATALOG] generator + runtime exclusion; test builds tools via `Context.tools` instead of skipped `toolsAdded`, `strict: "prefer"` for Aira's required field; catalog regenerated |
+| 173 | `199160a6a8` | 2026-09-20 | docs(coding-agent): document inherited z.ai overflow fix | SKIP | `` | [REL] changelog-only |
+| 174 | `68f98022e3` | 2026-09-20 | docs: audit Cerebras fix changelog entries | SKIP | `` | [REL] changelog-only |
+| 175 | `13cbf77df2` | 2026-09-20 | Release v0.86.1 | SKIP | `` | [ARCH] upstream release boundary; Aira versioning independent |
+| 176 | `19451accde` | 2026-09-20 | Add [Unreleased] section for next cycle | SKIP | `` | [ARCH] companion to row 175 |
+| 177 | `3390bd9363` | 2026-09-20 | fix(coding-agent): skip late cache warming refreshes | REIMPLEMENT | `6388da7cb` | idle refreshes stop when the pre-expiry margin deadline is missed |
+| 178 | `f5c946480c` | 2026-09-20 | feat(ai,coding-agent): add image input limits (closes #9631) | REIMPLEMENT | `68dbd6fb1` | [CATALOG] model image limits + prompt image normalization after model selection; upstream `systemPromptOptions` tool-loadout block omitted (Aira result type lacks it); `packages/server/src/protocol.ts` accounts for `Model.inputLimits` |
+| 179 | `63787ee6ba` | 2026-09-21 | feat(coding-agent): identify extensions in crash stacks | REIMPLEMENT | `7786f6d00` | crash-log.ts carries only `findExtensionStackMatches`; no bug-report `/bug` instructions; hint uses Aira's APP_NAME |
+| 180 | `890f920884` | 2026-09-21 | fix(ai): default unknown providers to non-strict tools (closes #9816) | REIMPLEMENT | `777b9fc0b` | runtime strict default false; generator writes explicit `supportsStrictMode` metadata; catalogs regenerated |
+| 181 | `8bfef4de88` | 2026-09-21 | fix(ai): update strict mode test expectations | REIMPLEMENT | `2d4d5c3c6` | Cerebras expectation `undefined`, Fireworks Kimi K3 strict true; skipped `supportsMidConvoSystemMessages` context not carried |
+| 182 | `47a18e37b1` | 2026-09-21 | fix: require complete GIF image signatures | DIRECT | `9eb8b5d43` | verbatim application, changelogs kept |
+| 183 | `c7cdb460aa` | 2026-09-21 | fix(coding-agent): reject bug reports offline | SKIP | `` | [ARCH] bug-reporting family absent from Aira |
+| 184 | `1e0fe20497` | 2026-09-21 | fix(coding-agent): allow offline bug report exports (#9841) | SKIP | `` | [ARCH] bug-reporting family absent from Aira |
+| 185 | `b6419322e6` | 2026-09-21 | fix(coding-agent): report invalid prompt frontmatter (#9830) | DIRECT | `23f5cbe8f` | pre-row files byte-identical to upstream; changelog kept |
+| 186 | `9ac95c7151` | 2026-09-21 | docs(coding-agent): audit unreleased changelog | SKIP | `` | [REL] changelog-only |
+| 187 | `10d1ad621f` | 2026-09-21 | feat: add transactional replicated state | SKIP | `` | [ARCH] Pi durable/chord/experimental packages absent from Aira |
+| 188 | `466db0fecd` | 2026-09-21 | feat: add canonical session context boundaries | SKIP | `` | **corrected from REIMPLEMENT**: depends on the skipped row-97 SystemMessage/TranscriptContext model (`SystemMessage`, `TranscriptContext`, `normalizeContext`, `getCurrentSystemMessage`); class `DEPENDS_ON_SKIPPED_ROW_97_SYSTEM_MESSAGE_FAMILY` |
+| 189 | `aef5fc429b` | 2026-09-21 | fix(coding-agent): keep prompt and tool state across context handlers (#9846) | SKIP | `` | **corrected from REIMPLEMENT**: test imports `TranscriptContext`/`getCurrentSystemPrompt`/`getCurrentTools` and production uses row-188 `ContextEditEntryDraft`; same dependency class |
+| 190 | `8c72793785` | 2026-09-21 | fix(tui): prevent jump-to-end label from shifting when scrollbar hides (#9842) | REIMPLEMENT | `0b803240a` | indicator centered on clip width and truncated at the scrollbar column; Aira's pre-row file lacked upstream's box/scrollbar structure, and the regression is covered through `ScrollView.setScrollbar` toggles instead of the upstream hover-driven tests |
+| 191 | `7f06f9cf16` | 2026-09-21 | docs(coding-agent): complete unreleased changelog | SKIP | `` | [REL] changelog-only |
+| 192 | `eaf72ed4d8` | 2026-09-21 | fix(coding-agent): update stale test expectations | REIMPLEMENT | `38f590f01` | updates seven OpenRouter assertions to `anthropic/claude-opus-4.1`; **the three-failure model-registry baseline is green after this row** (87/87); the companion `agent-session-concurrent` `"system"` role hunk was not applied (row-97 family) |
+| 193 | `16787ad5b2` | 2026-09-21 | Release v0.87.0 | SKIP | `` | [ARCH] upstream release boundary; Aira versioning independent |
+| 194 | `4c8eb393c7` | 2026-09-21 | Add [Unreleased] section for next cycle | SKIP | `` | [ARCH] companion to row 193 |
+| 195 | `1b6ddca87c` | 2026-09-21 | fix(ai): omit empty text parts from multimodal user messages | REIMPLEMENT | `e586e4cab` | **corrected from DIRECT**: source verbatim, test passes a plain `Context` instead of the skipped row-97 `normalizeContext` helper |
+| 196 | `1a584a7a56` | 2026-09-22 | feat(ai,coding-agent): add Grok 4.7 support | REIMPLEMENT | `6dab01c95` | [CATALOG] local override removed in favor of models.dev entry; xAI default `grok-4.7`; catalogs regenerated; `stream.test.ts` expectations are env-skipped locally |
+| 197 | `e40126f578` | 2026-09-22 | fix(coding-agent): reject invalid --mode values | DIRECT | `845106b2b` | pre-row args.test.ts byte-identical; Aira-specific help text preserved |
+| 198 | `95fbc04997` | 2026-09-22 | docs(coding-agent): update changelog with --mode validation fix (#9877) | SKIP | `` | [REL] changelog-only |
+
+Slice 6 totals (rows 166-198): DIRECT=4, REIMPLEMENT=13, SKIP=16, TOTAL=33
+
+Cumulative totals rows 1-198: DIRECT=32, REIMPLEMENT=46, SKIP=120, TOTAL=198
+
+### Slice 6 notes
+
+- Row 188 and row 189 disposition corrections REIMPLEMENT -> SKIP were
+  requested and approved before their commits: both depend on the skipped
+  row-97 SystemMessage/TranscriptContext model. Row 195 was corrected
+  DIRECT -> REIMPLEMENT (test-only adaptation) and approved.
+- Row 167 merge interaction: the 3-way conflict on
+  `scripts/build-coding-agent-bundle.mjs` would have dropped Aira's `client`
+  bundle entry; the union resolution preserves it. This was caught before
+  commit through the strengthened pre/post file comparison.
+- Row 178 merge interaction: upstream's `result.systemPromptOptions`
+  tool-loadout reconciliation was omitted because Aira's
+  `BeforeAgentStartCombinedResult` does not expose it; the image
+  normalization reorder is preserved. `packages/server/src/protocol.ts`
+  (Aira-owned) accounts for `Model.inputLimits`.
+- The deferred Anthropic family (`4e69b0c28`, `0fdec07ba`,
+  `4658534986`, `13784598d2`) is unchanged; no slice 6 row references
+  `thinking_dropped`, `supportsMidConvoEffort`, or `block_binding`.
+- The gpt-6-astra parity note remains open and untouched by slice 6.
+- Aira-owned invariants verified after the slice: `008a7a77c`
+  (`aira/context-compaction.ts` untouched), `82af7a77e` (dispose seams
+  present), `b3b53f028` (race-free compaction assertion); the compaction and
+  host-integration suites are green.
+- The root `build:offline` kerberos unexpected-external condition remains
+  unrelated: no slice 6 commit changed dependencies, and row 167's bundler
+  change does not touch the external-import validation.
+
