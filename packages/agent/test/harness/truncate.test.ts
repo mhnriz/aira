@@ -81,6 +81,29 @@ describe("truncate utilities", () => {
 		expect(tail).toMatchObject({ truncated: false, totalLines: 3, outputLines: 3 });
 	});
 
+	it("reports bytes when only a trailing newline or oversized line exceeds limits at the line cap", () => {
+		expect(truncateHead("hello\nworld\n", { maxBytes: 11, maxLines: 2 })).toMatchObject({
+			content: "hello\nworld",
+			truncated: true,
+			truncatedBy: "bytes",
+			totalLines: 2,
+			outputLines: 2,
+		});
+		expect(truncateTail("hello\nworld\n", { maxBytes: 11, maxLines: 2 })).toMatchObject({
+			content: "hello\nworld",
+			truncated: true,
+			truncatedBy: "bytes",
+			totalLines: 2,
+			outputLines: 2,
+		});
+		expect(truncateTail("x".repeat(100), { maxBytes: 10, maxLines: 1 })).toMatchObject({
+			content: "x".repeat(10),
+			truncatedBy: "bytes",
+			lastLinePartial: true,
+			outputLines: 1,
+		});
+	});
+
 	it("truncates head on UTF-8 byte limits without partial lines", () => {
 		const content = "éé\nabc";
 		const result = truncateHead(content, { maxBytes: 4, maxLines: 10 });
