@@ -1035,18 +1035,6 @@ function applyThinkingLevelMetadata(model: Model<any>): void {
 	) {
 		mergeThinkingLevelMap(model, { xhigh: "xhigh", max: "max" });
 	}
-	if (model.provider === "anthropic" && model.id === "claude-opus-5-5") {
-		// Opus 5.5 effort is always on: off/minimal are unsupported.
-		mergeThinkingLevelMap(model, {
-			off: null,
-			minimal: null,
-			low: "low",
-			medium: "medium",
-			high: "high",
-			xhigh: "xhigh",
-			max: "max",
-		});
-	}
 	if (model.id.includes("fable-5")) {
 		mergeThinkingLevelMap(model, { off: null, xhigh: "xhigh", max: "max" });
 	}
@@ -2700,6 +2688,19 @@ async function generateModels() {
 	for (const candidate of allModels) {
 		if (candidate.provider === "github-copilot" && GITHUB_COPILOT_EXTENDED_CONTEXT_MODELS.has(candidate.id)) {
 			candidate.contextWindow = 1000000;
+		}
+
+		// models.dev may list Opus 5.5 before its effort metadata is complete.
+		if (candidate.provider === "anthropic" && candidate.id === "claude-opus-5-5") {
+			mergeThinkingLevelMap(candidate, {
+				off: null,
+				minimal: null,
+				low: "low",
+				medium: "medium",
+				high: "high",
+				xhigh: "xhigh",
+				max: "max",
+			});
 		}
 
 		if (
