@@ -28,6 +28,10 @@ export interface LlamaModelsResponse {
 	object?: string;
 }
 
+export interface LlamaServerProps {
+	chat_template?: string;
+}
+
 export interface LlamaModelEvent {
 	model: string;
 	event: string;
@@ -187,6 +191,14 @@ export class LlamaClient {
 		const data = (payload as { data: unknown[] }).data;
 		if (!data.every(isModelInfo)) throw new Error("Server is not running in llama.cpp router mode");
 		return data;
+	}
+
+	async props(options: { model?: string; signal?: AbortSignal } = {}): Promise<LlamaServerProps> {
+		const query = options.model ? `?${new URLSearchParams({ model: options.model, autoload: "false" })}` : "";
+		const payload = await this.request(`/props${query}`, { signal: options.signal });
+		if (typeof payload !== "object" || payload === null) return {};
+		const { chat_template: chatTemplate } = payload as Record<string, unknown>;
+		return typeof chatTemplate === "string" ? { chat_template: chatTemplate } : {};
 	}
 
 	async load(model: string, signal?: AbortSignal): Promise<void> {
