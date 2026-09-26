@@ -9,8 +9,8 @@ import type { ScrollView } from "./components/scroll-view.ts";
 import { isKeyRelease, matchesKey } from "./keys.ts";
 import type { Terminal } from "./terminal.ts";
 import {
-	isOsc11BackgroundColorResponse,
-	parseOsc11BackgroundColor,
+	type OscColorSlot,
+	parseOscColorResponse,
 	parseTerminalColorSchemeReport,
 	type RgbColor,
 	type TerminalColorScheme,
@@ -49,7 +49,7 @@ export interface Component {
 
 export type TuiInputListenerResult = { consume?: boolean; data?: string } | undefined;
 export type TuiInputListener = (data: string) => TuiInputListenerResult;
-type PendingOsc11BackgroundQuery = {
+type PendingOscColorQuery = {
 	settled: boolean;
 	resolve: ((rgb: RgbColor | undefined) => void) | undefined;
 	timer: NodeJS.Timeout | undefined;
@@ -321,6 +321,7 @@ export interface TUI extends Component {
 	onTerminalColorSchemeChange(listener: (scheme: TerminalColorScheme) => void): () => void;
 	setTerminalColorSchemeNotifications(enabled: boolean): void;
 	queryTerminalBackgroundColor(options: { timeoutMs: number }): Promise<RgbColor | undefined>;
+	queryTerminalForegroundColor(options: { timeoutMs: number }): Promise<RgbColor | undefined>;
 	queryTerminalColorScheme(options: { timeoutMs: number }): Promise<TerminalColorScheme | undefined>;
 }
 
@@ -358,8 +359,9 @@ export abstract class TuiBase extends Container implements TUI {
 	private clearOnShrink = process.env.PI_CLEAR_ON_SHRINK === "1";
 	protected fullRedrawCount = 0;
 	protected stopped = false;
-	private pendingOsc11BackgroundReplies = 0;
-	private pendingOsc11BackgroundQueries: PendingOsc11BackgroundQuery[] = [];
+	// Replies are counted separately from queries so late replies after a timeout are still consumed.
+	private pendingOscColorReplies: Record<OscColorSlot, number> = { 10: 0, 11: 0 };
+	private pendingOscColorQueries: Record<OscColorSlot, PendingOscColorQuery[]> = { 10: [], 11: [] };
 	private terminalColorSchemeListeners = new Set<(scheme: TerminalColorScheme) => void>();
 	private terminalColorSchemeNotificationsEnabled = false;
 	protected readonly logDirectory: string;
@@ -837,7 +839,7 @@ export abstract class TuiBase extends Container implements TUI {
 	}
 
 	private handleTerminalInput(data: string): void {
-		if (this.consumeOsc11BackgroundResponse(data)) {
+		if (this.consumeOscColorResponse(data)) {
 			return;
 		}
 		if (this.consumeTerminalColorSchemeReport(data)) {
@@ -914,18 +916,15 @@ export abstract class TuiBase extends Container implements TUI {
 		}
 	}
 
-	private consumeOsc11BackgroundResponse(data: string): boolean {
-		if (this.pendingOsc11BackgroundReplies <= 0) {
+	private consumeOscColorResponse(data: string): boolean {
+		const response = parseOscColorResponse(data);
+		if (!response || this.pendingOscColorReplies[response.slot] <= 0) {
 			return false;
 		}
 
-		if (!isOsc11BackgroundColorResponse(data)) {
-			return false;
-		}
-
-		const rgb = parseOsc11BackgroundColor(data);
-		this.pendingOsc11BackgroundReplies -= 1;
-		const query = this.pendingOsc11BackgroundQueries.shift();
+		const { slot, rgb } = response;
+		this.pendingOscColorReplies[slot] -= 1;
+		const query = this.pendingOscColorQueries[slot].shift();
 		if (query && !query.settled) {
 			query.settled = true;
 			if (query.timer) {
@@ -1255,8 +1254,21 @@ export abstract class TuiBase extends Container implements TUI {
 	 * @returns Promise containing the parsed RGB color, or undefined if it times out or fails to parse.
 	 */
 	queryTerminalBackgroundColor({ timeoutMs }: { timeoutMs: number }): Promise<RgbColor | undefined> {
+		return this.queryTerminalColor(11, timeoutMs);
+	}
+
+	/**
+	 * Query the terminal's default foreground color with OSC 10 (`ESC ] 10 ; ? BEL`).
+	 * @param timeoutMs Query timeout in milliseconds.
+	 * @returns Promise containing the parsed RGB color, or undefined if it times out or fails to parse.
+	 */
+	queryTerminalForegroundColor({ timeoutMs }: { timeoutMs: number }): Promise<RgbColor | undefined> {
+		return this.queryTerminalColor(10, timeoutMs);
+	}
+
+	private queryTerminalColor(slot: OscColorSlot, timeoutMs: number): Promise<RgbColor | undefined> {
 		return new Promise((resolve) => {
-			const query: PendingOsc11BackgroundQuery = {
+			const query: PendingOscColorQuery = {
 				settled: false,
 				resolve,
 				timer: undefined,
@@ -1271,9 +1283,9 @@ export abstract class TuiBase extends Container implements TUI {
 				query.resolve?.(undefined);
 				query.resolve = undefined;
 			}, timeoutMs);
-			this.pendingOsc11BackgroundQueries.push(query);
-			this.pendingOsc11BackgroundReplies += 1;
-			this.terminal.write("\x1b]11;?\x07");
+			this.pendingOscColorQueries[slot].push(query);
+			this.pendingOscColorReplies[slot] += 1;
+			this.terminal.write(`\x1b]${slot};?\x07`);
 		});
 	}
 

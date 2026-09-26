@@ -145,6 +145,7 @@ vim ~/.pi/agent/themes/my-theme.json
 {
   "$schema": "https://raw.githubusercontent.com/earendil-works/pi/main/packages/coding-agent/src/modes/interactive/theme/theme-schema.json",
   "name": "my-theme",
+  "appearance": "dark",
   "vars": {
     "blue": "#0066cc",
     "gray": 242
@@ -159,6 +160,7 @@ vim ~/.pi/agent/themes/my-theme.json
 ```
 
 - `name` is required, must be unique, and must not contain `/`.
+- `appearance` is optional: `"dark"` or `"light"` tells Pi which background the theme is designed for. Pi detects it from the theme colors when omitted.
 - `vars` is optional. Define reusable colors here, then reference them in `colors`.
 - `colors` must define all 51 required tokens. `thinkingMax`, `scrollbarThumb`, and the two search highlight tokens are optional and use the fallbacks listed below.
 - The eight **Aira semantic roles** (`copper`, `copperBright`, `blue`, `cyan`, `green`, `yellow`, `red`, `purple`) are OPTIONAL. Every Aira Workbench surface falls back to a classic equivalent when a theme does not define them, so existing/third-party themes keep working untouched and render the Workbench acceptably.
