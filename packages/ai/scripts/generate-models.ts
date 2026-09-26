@@ -988,6 +988,18 @@ function applyThinkingLevelMetadata(model: Model<any>): void {
 	) {
 		mergeThinkingLevelMap(model, { xhigh: "xhigh", max: "max" });
 	}
+	if (model.provider === "anthropic" && model.id === "claude-opus-5-5") {
+		// Opus 5.5 effort is always on: off/minimal are unsupported.
+		mergeThinkingLevelMap(model, {
+			off: null,
+			minimal: null,
+			low: "low",
+			medium: "medium",
+			high: "high",
+			xhigh: "xhigh",
+			max: "max",
+		});
+	}
 	if (model.id.includes("fable-5")) {
 		mergeThinkingLevelMap(model, { off: null, xhigh: "xhigh", max: "max" });
 	}
@@ -2565,6 +2577,32 @@ async function generateModels() {
 			!(model.provider === "xai" && XAI_BUILTIN_EXCLUDED_MODEL_IDS.has(model.id)) &&
 			!((model.provider === "opencode" || model.provider === "opencode-go") && model.id === "gpt-5.3-codex-spark"),
 	);
+
+	// Add Claude Opus 5.5 until models.dev includes it.
+	// https://platform.claude.com/docs/en/models/opus-5-5/overview
+	if (!allModels.some((model) => model.provider === "anthropic" && model.id === "claude-opus-5-5")) {
+		allModels.push({
+			id: "claude-opus-5-5",
+			name: "Claude Opus 5.5",
+			api: "anthropic-messages",
+			provider: "anthropic",
+			baseUrl: "https://api.anthropic.com",
+			reasoning: true,
+			thinkingLevelMap: {
+				off: null,
+				minimal: null,
+				low: "low",
+				medium: "medium",
+				high: "high",
+				xhigh: "xhigh",
+				max: "max",
+			},
+			input: ["text", "image"],
+			cost: { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5 },
+			contextWindow: 1000000,
+			maxTokens: 128000,
+		});
+	}
 
 	// Temporary overrides until upstream model metadata is corrected.
 	for (const candidate of allModels) {
