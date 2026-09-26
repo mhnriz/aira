@@ -98,3 +98,53 @@ Totals for rows 1-33: DIRECT=10, REIMPLEMENT=4, SKIP=19, TOTAL=33
   commit's purpose; upstream short SHA in the subject and the full SHA in
   the "Adapted from" body line; upstream authorship preserved for
   near-faithful ports.
+
+## Slice 2 (rows 34-66)
+
+| # | Upstream SHA | Date | Subject | Disposition | Local SHA | Notes |
+|---|---|---|---|---|---|---|
+| 34 | `f3564a1d41` | 2026-09-09 | docs: validate documentation navigation and reachability (#9380) | SKIP | `` | [DOC] Pi pico navigation docs; architecture absent from Aira |
+| 35 | `73f3257ddc` | 2026-09-07 | docs(agent): preserve pico2 spike design for review | SKIP | `` | [DOC] Pi pico product docs; architecture absent from Aira |
+| 36 | `e045ed2f33` | 2026-09-09 | docs(agent): add pico design drafts | SKIP | `` | [DOC] Pi pico product docs; architecture absent from Aira |
+| 37 | `2188891bf3` | 2026-09-09 | docs(agent): resolve pico context and state ordering | SKIP | `` | [DOC] Pi pico UI docs; architecture absent from Aira |
+| 38 | `ce5ec9ca35` | 2026-09-09 | docs(agent): persist pico entry projections | SKIP | `` | [DOC] Pi pico docs; architecture absent from Aira |
+| 39 | `05c6229813` | 2026-09-09 | docs(agent): settle pico task lifecycle | SKIP | `` | [ARCH] Pi pico named-branch runtime work; absent from Aira harness |
+| 40 | `400d6905ce` | 2026-09-09 | docs(agent): make pico input attribution explicit | SKIP | `` | [ARCH] Pi pico named-branch runtime work; absent from Aira harness |
+| 41 | `46bde88a1c` | 2026-09-07 | feat(coding-agent): support per-model compaction token budgets | REIMPLEMENT | `602466cc7` | [COMPACT] per-model compaction token budgets ported to shared settings/session paths; aira/context-compaction.ts untouched; ported suite tests calibrated for Aira prompt size |
+| 42 | `e86102f18f` | 2026-09-10 | fix(ai): send Codex Off reasoning effort | DIRECT | `c411f5b29` | Codex Off reasoning effort sent verbatim; changelog kept by Aira |
+| 43 | `6b94ae2ece` | 2026-09-10 | fix(ai): preserve Fireworks thinking and native effort levels | REIMPLEMENT | `b39371ff7` | [CATALOG] generator port for Fireworks thinking/effort; data hydrated through generate-models.ts |
+| 44 | `519184eb65` | 2026-09-10 | fix(ai): accept Fireworks models in adaptive thinking metadata test | DIRECT | `862e998d9` | test-only expectation accepting Fireworks models |
+| 45 | `bbb61e34aa` | 2026-09-10 | fix(ai): send OpenRouter session affinity headers by default | REIMPLEMENT | `e7964aea7` | [AI] OpenRouter x-session-id default in shared ai api; Aira anthropic compat signature adapted; data hydrated |
+| 46 | `12f59336af` | 2026-09-10 | fix(ai): update DeepSeek Flash catalog | REIMPLEMENT | `f707f9084` | [CATALOG] DeepSeek Flash catalog rename; generator block replaced with upstream post-commit block; data hydrated |
+| 47 | `2e6fe2f988` | 2026-09-10 | fix(ai): remove retired GPT-5.4 Codex models | REIMPLEMENT | `aea230518` | [CATALOG] removes retired gpt-5.4 entries; test expectation for gpt-6-astra not ported because that model is absent from Aira openai-codex catalog (base-parity gap carried since the 0.85.1 sync) |
+| 48 | `4bd3f48df0` | 2026-09-10 | fix(ai): enable GLM-5.2 reasoning on Mistral | REIMPLEMENT | `dd3b27e55` | [AI] near-faithful GLM-5.2 reasoning fix on shared mistral api |
+| 49 | `08dc60bc52` | 2026-09-10 | docs(agent): settle pico driver and storage contracts | SKIP | `` | [ARCH] durable/pico storage docs; absent from Aira |
+| 50 | `d92eb8d4b1` | 2026-09-10 | feat(ai): enable Fireworks Messages deferred tool loading | REIMPLEMENT | `02d50248c` | [CATALOG] Fireworks deferred tool loading via supportsToolReferences; data hydrated |
+| 51 | `fcdc40e175` | 2026-09-10 | chore: approve contributors from issue #9323 | SKIP | `` | [SEC] security-sensitive CI contributor authorization; prior ledger REJECTED class |
+| 52 | `b734a75634` | 2026-09-10 | docs(agent): pico handoff for outstanding decisions | SKIP | `` | [ARCH] durable/Pico runtime; absent from Aira |
+| 53 | `1b5aa80aec` | 2026-09-10 | docs(agent): tagged-union task state and derived orphaned variant | SKIP | `` | [ARCH] durable/Pico runtime; absent from Aira |
+| 54 | `378977cd3d` | 2026-09-10 | docs(agent): simplify input results and unify queued input | SKIP | `` | [ARCH] durable/Pico runtime; absent from Aira |
+| 55 | `66f3b138fe` | 2026-09-10 | docs(agent): note foreground dependencies on background work | SKIP | `` | [ARCH] durable/Pico runtime; absent from Aira |
+| 56 | `c7eee01950` | 2026-09-10 | docs(agent): scope out permissions, migration and the wire schema | SKIP | `` | [ARCH] durable/Pico runtime; absent from Aira |
+| 57 | `2176b9dd8f` | 2026-09-10 | docs(agent): runtime schema bundle as a work item | SKIP | `` | [ARCH] durable/Pico runtime; absent from Aira |
+| 58 | `66b72dd783` | 2026-09-10 | docs(agent): turn tasks gate model-visible appends | SKIP | `` | [ARCH] durable/Pico runtime; absent from Aira |
+| 59 | `d12cd92e45` | 2026-09-10 | docs(agent): guide notes for appending entries | SKIP | `` | [ARCH] durable/Pico runtime; absent from Aira |
+| 60 | `62129190d8` | 2026-09-11 | docs(agent): status lives in task state | SKIP | `` | [ARCH] durable/Pico runtime; absent from Aira |
+| 61 | `e8413008cd` | 2026-09-11 | fix(ai): update stale DeepSeek Flash test model IDs | SKIP | `` | [REV] part of the DeepSeek test-ID revert pair with row 64 (713bdf38d5 reverts e8413008cd); net zero, neither side ported |
+| 62 | `7b4cfd6eb0` | 2026-09-11 | docs(agent): define pico system sections and mutable registries | SKIP | `` | [ARCH] durable/Pico runtime; absent from Aira |
+| 63 | `f3c672245d` | 2026-09-11 | docs(agent): require typed status payloads for pico task writes | SKIP | `` | [ARCH] durable/Pico runtime; absent from Aira |
+| 64 | `713bdf38d5` | 2026-09-11 | Revert "fix(ai): update stale DeepSeek Flash test model IDs" | SKIP | `` | [REV] revert of row 61 e8413008cd; net zero, neither side ported |
+| 65 | `b215884021` | 2026-09-11 | feat(coding-agent): add customization documentation evals (#9491) | SKIP | `` | [EVAL] Pi customization documentation evals; Aira evals package keeps only smoke/extensions evals |
+| 66 | `71dca871bc` | 2026-09-11 | fix(ci): Fix a broken test | SKIP | `` | [REV] reverted by row 80 (ceea48f5d5 reverts 71dca871bc); net zero, revert lands in the next slice |
+
+Slice 2 totals: DIRECT=2, REIMPLEMENT=7, SKIP=24, TOTAL=33
+
+Cumulative totals rows 1-66: DIRECT=12, REIMPLEMENT=11, SKIP=43, TOTAL=66
+
+### Slice 2 notes
+
+- Row 41 keeps Aira's deterministic projection compaction (`aira/context-compaction.ts`) untouched; only the shared token-budget settings layer is ported.
+- Row 47 removes retired GPT-5.4 Codex entries. The upstream test expectation for `gpt-6-astra` is not ported because that model is absent from Aira's openai-codex generator and catalog (pre-existing base-parity gap from the 0.85.1 sync).
+- Rows 61/64 are the DeepSeek test-ID revert pair (net zero) and rows 66/80 the broken-test revert pair; neither side was ported.
+- Model catalog rows were executed through `packages/ai/scripts/generate-models.ts`; provider data is gitignored and was hydrated, never hand-edited.
+- Known deterministic failure: `model-registry.test.ts` stale `anthropic/claude-opus-4` expectations (pre-existing since Phase 1; fixed by a later audited upstream row outside this slice).
