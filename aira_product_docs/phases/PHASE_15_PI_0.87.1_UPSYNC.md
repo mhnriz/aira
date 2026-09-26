@@ -396,7 +396,7 @@ catalog rows, so row 140 required no change and produced no commit.
 #### Aira-owned repair during slice 5
 
 `fix(coding-agent): restore Aira session disposal seams after the row 148 merge`
-(local `c818ed770e13a5bb7b33cfef40758ed8ebd8015b`, not counted in upstream totals). The row 148 cherry-pick's
+(local `82af7a77e`, not counted in upstream totals). The row 148 cherry-pick's
 3-way merge silently replaced Aira's `dispose()` seam block (execution,
 browser, verification, orchestration, goal, interaction, permissions, tasks,
 intelligence) with upstream's shorter dispose. The Aira host-integration tests
