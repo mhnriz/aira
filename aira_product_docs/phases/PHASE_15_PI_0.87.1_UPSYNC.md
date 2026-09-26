@@ -492,3 +492,74 @@ Cumulative totals rows 1-198: DIRECT=32, REIMPLEMENT=46, SKIP=120, TOTAL=198
   unrelated: no slice 6 commit changed dependencies, and row 167's bundler
   change does not touch the external-import validation.
 
+## Slice 7 (rows 199-231)
+
+| # | Upstream SHA | Date | Subject | Disposition | Local SHA | Notes |
+|---|---|---|---|---|---|---|
+| 199 | `8158b03213` | 2026-09-22 | feat(durable): add versioned document storage | SKIP | `` | [ARCH] Pi durable package absent from Aira |
+| 200 | `d201760ffe` | 2026-09-22 | Merge remote-tracking branch 'origin/main' | SKIP | `` | [MRG] merge commit; constituents already processed or skipped |
+| 201 | `25cc5c7bf4` | 2026-09-22 | docs(coding-agent): refresh documentation (#9898) | SKIP | `` | [DOC] wholesale Pi product docs refresh; Aira maintains its own docs |
+| 202 | `d192bd6dca` | 2026-09-22 | fix(coding-agent): avoid Fable split-turn summary refusals (#9908) | REIMPLEMENT | `5e6ef7500` | [REL] split-turn summary prompt boundary change; suite assertion adapted to Aira's non-SystemMessage shape; reconciled against 008a7a77c (prompt text only) |
+| 203 | `5901c9b9e5` | 2026-09-22 | feat: add durable SQLite storage backend | SKIP | `` | [ARCH] Pi durable package absent from Aira |
+| 204 | `2c2cd636f3` | 2026-09-22 | Merge remote-tracking branch 'origin/main' into durable-push-5901c9b9e5 | SKIP | `` | [MRG] merge commit |
+| 205 | `81274f0e18` | 2026-09-22 | fix: verify durable browser-safe exports | SKIP | `` | [ARCH] Pi durable package absent from Aira |
+| 206 | `b4588f26af` | 2026-09-22 | feat(ai,coding-agent): add Claude Opus 5.5 support | REIMPLEMENT | `6ccd6b9ad` | [CATALOG] bounded port approved: model catalog entry with adaptive thinking, 1M context, pricing, and always-on levels; deferred mid-convo regexes and assertions omitted; catalog regenerated |
+| 207 | `3a624b82dd` | 2026-09-22 | fix(ai): update reported Claude Code version | DIRECT | `abcaa8e3f` | verbatim application |
+| 208 | `db91e03319` | 2026-09-22 | feat(ai,coding-agent): add GPT-6 Sol and Luna support | REIMPLEMENT | `08c44b3da` | [CATALOG] Sol/Luna added to OpenAI and Codex catalogs with official pricing; gpt-6-astra omitted from the codex list and cost table (parity note stays open) |
+| 209 | `27c072e98f` | 2026-09-22 | feat(ai,coding-agent): add new Copilot models | REIMPLEMENT | `7e22dc9e2` | [CATALOG] Copilot Opus 5.5 and GPT-6 models; Copilot Opus 5.5 levels applied through the Aira override because models.dev already supplies the model |
+| 210 | `b7f4b05c7f` | 2026-09-22 | fix(ai): stabilize Claude Opus 5.5 effort levels | REIMPLEMENT | `7f8afaf29` | rule relocated to the upstream override loop, replacing the row-206 ad-hoc placement; image catalog regenerated (plus four live additions) |
+| 211 | `3a4c777f26` | 2026-09-22 | docs(coding-agent): complete unreleased changelog | SKIP | `` | [REL] changelog-only |
+| 212 | `f07218c4d4` | 2026-09-22 | Release v0.87.1 | SKIP | `` | [ARCH] upstream release boundary; Aira versioning independent |
+| 213 | `a8ed497713` | 2026-09-22 | Add [Unreleased] section for next cycle | SKIP | `` | [ARCH] companion to row 212 |
+| 214 | `a32782520f` | 2026-09-22 | docs: propose Pico5 live extension registries | SKIP | `` | [ARCH] Pi durable/Pico5 design docs |
+| 215 | `9672462143` | 2026-09-23 | docs: refine Pico5 JSONL publication design | SKIP | `` | [ARCH] Pi durable/Pico5 design docs |
+| 216 | `898ab80405` | 2026-09-23 | feat: add durable JSONL storage backend | SKIP | `` | [ARCH] Pi durable package absent from Aira |
+| 217 | `9a139c62bf` | 2026-09-23 | feat(chord): consolidate immutable delta tracking | SKIP | `` | [ARCH] Pi chord package absent from Aira |
+| 218 | `4bc1a2fe53` | 2026-09-23 | feat(chord): add optimized delta engine prototypes | SKIP | `` | [ARCH] Pi chord package absent from Aira |
+| 219 | `b313731b80` | 2026-09-23 | feat: add JSONL sidecar reclamation | SKIP | `` | [ARCH] Pi durable package absent from Aira |
+| 220 | `4c2dfd9362` | 2026-09-23 | chore: regenerate image models | SKIP | `` | [REL] generated-only commit; Aira regenerates its own image catalog (row 210 already picked up the live additions) |
+| 221 | `fde38ed7c2` | 2026-09-23 | fix(ai): stabilize Copilot Claude Opus 5.5 effort levels | REIMPLEMENT | `5193a10cc` | broadened loop rule to github-copilot, replacing the row-209 override entry |
+| 222 | `36af9dc48e` | 2026-09-23 | fix(tui): restore skill prefix autocomplete, closes #9944 | DIRECT | `243ea25d0` | **corrected from REIMPLEMENT**: the complete upstream commit applied faithfully (changelog-only conflict) |
+| 223 | `8d897edaa6` | 2026-09-23 | fix(coding-agent): prevent duplicate extension runtimes (closes #9863) | REIMPLEMENT | `5cd1d8fcf` | package roots, host-dependency warning, peer-safe git installs; resource-loader test uses Aira's `.aira` config dir; npmCommand wrapper preserved |
+| 224 | `002fc83852` | 2026-09-23 | feat: expose provider stream events to extensions (#9901) | REIMPLEMENT | `b85fa46c4` | provider stream hook across providers, AgentSession event, docs; tests use plain Context instead of the skipped normalizeContext; agent keeps `onContextPayload` |
+| 225 | `667fc3dd36` | 2026-09-23 | fix(ai): price Vercel AI Gateway 1-hour cache writes correctly | REIMPLEMENT | `7dcb8350c` | stream cache_creation parsing; Aira's SDK 0.91.1 thinking-token cast preserved |
+| 226 | `a328aa89ad` | 2026-09-23 | feat(ai,coding-agent): unify image and classifier model infrastructure (#9948) | SKIP | `` | [ARCH] wholesale migration to unified language/image/classifier model-kind architecture (154 classifier references, new typesafe-system-one provider); Aira keeps its pre-unification image pipeline; no behavioral fix lost |
+| 227 | `7fd564cbb7` | 2026-09-23 | feat: share model catalog protocol with pi.dev (#9763) | SKIP | `` | [ARCH] pi.dev catalog publishing protocol and script surface absent from Aira |
+| 228 | `b45597504e` | 2026-09-23 | feat(durable): export scoped storage conformance suite (#9977) | SKIP | `` | [ARCH] Pi durable package absent from Aira |
+| 229 | `8676a0dcd8` | 2026-09-24 | fix(coding-agent): require advertised X11 clipboard images | REIMPLEMENT | `5fde8358c` | only read advertised MIME types; adapted to Aira's synchronous runCommand and spawnSync test mock |
+| 230 | `7c696c00f3` | 2026-09-24 | docs: revise Pico5 immutable revision design | SKIP | `` | [ARCH] Pi durable/Pico5 design docs |
+| 231 | `a7d17e39aa` | 2026-09-24 | feat(ai): serve Jev classifier through OpenRouter and Cloudflare Workers AI | SKIP | `` | [ARCH] Jev classifier infrastructure and pi.dev deployment surface absent from Aira; depends on skipped row 226 |
+
+Slice 7 totals (rows 199-231): DIRECT=2, REIMPLEMENT=10, SKIP=21, TOTAL=33
+
+Cumulative totals rows 1-231: DIRECT=34, REIMPLEMENT=56, SKIP=141, TOTAL=231
+
+### Slice 7 notes
+
+- Row 222 disposition correction REIMPLEMENT -> DIRECT was applied under
+  the row-195 provenance rule: the complete upstream commit applied
+  faithfully and only the changelog conflicted.
+- Row 206 was executed as a bounded Aira-native REIMPLEMENT after a
+  disposition review: the model catalog entry is delivered without the
+  deferred `supportsAnthropicMidConvoEffort`/`SystemMessages` regexes or
+  assertions. Row 221 then replaced the row-209 Copilot override with the
+  upstream provider-agnostic rule.
+- Row 208 directly touches `gpt-6-astra`: Aira's `openai` provider receives
+  it from models.dev, but the `openai-codex` catalog still has no astra
+  entry. The parity question remains open and was not resolved by this
+  slice; the omission is recorded in the row-208 commit.
+- Row 224 references the skipped row-97 family only in test setup
+  (`normalizeContext`) and in an unrelated import context; the behavioral
+  feature is provider-event delivery and was ported with plain `Context`
+  tests. No row-97 implementation was imported.
+- Row 226 and row 231 SKIP rationales were refined against current Aira:
+  the pre-unification image pipeline exists, but the unified
+  image/classifier model-kind migration and the Jev classifier deployment
+  surface do not; neither row carries a behavioral fix Aira needs.
+- The deferred Anthropic family remains untouched: no slice 7 row references
+  `thinking_dropped` or `block_binding`.
+- Aira-owned invariants verified after the slice: `008a7a77c`
+  (`aira/context-compaction.ts` untouched), `82af7a77e` (dispose seams
+  present), `b3b53f028` (race-free compaction assertion); the compaction and
+  host-integration suites are green.
+
