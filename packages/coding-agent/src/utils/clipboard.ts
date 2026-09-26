@@ -1,7 +1,11 @@
 import { type ExecFileSyncOptionsWithStringEncoding, execFileSync, execSync, spawn } from "child_process";
-import { platform } from "os";
+import { randomUUID } from "crypto";
+import { unlinkSync, writeFileSync } from "fs";
+import { platform, tmpdir } from "os";
+import { join } from "path";
 import { isWaylandSession } from "./clipboard-image.ts";
 import { clipboard } from "./clipboard-native.ts";
+import { isWSL } from "./wsl.ts";
 
 type NativeClipboardExecOptions = {
 	input: string;
@@ -30,6 +34,32 @@ function emitOsc52(text: string): boolean {
 	}
 	process.stdout.write(`\x1b]52;c;${encoded}\x07`);
 	return true;
+}
+
+/**
+ * WSL without WSLg has no Linux display, so the Windows clipboard is written
+ * through interop. PowerShell reads the text from a file because `clip.exe` and
+ * PowerShell stdin decode piped bytes with the console code page, which mangles
+ * non-ASCII UTF-8.
+ */
+async function copyViaWindowsClipboard(text: string): Promise<boolean> {
+	const tmpFile = join(tmpdir(), `aira-wsl-clip-${randomUUID()}.txt`);
+	try {
+		writeFileSync(tmpFile, text, { encoding: "utf8", mode: 0o600 });
+		const winPath = execFileSync("wslpath", ["-w", tmpFile], { encoding: "utf8", timeout: 1000 }).trim();
+		if (!winPath) return false;
+		const script = `Set-Clipboard -Value ([System.IO.File]::ReadAllText('${winPath.replaceAll("'", "''")}', [System.Text.Encoding]::UTF8))`;
+		execFileSync("powershell.exe", ["-NoProfile", "-Command", script], { timeout: 5000, stdio: "ignore" });
+		return true;
+	} catch {
+		return false;
+	} finally {
+		try {
+			unlinkSync(tmpFile);
+		} catch {
+			// The file may not have been created.
+		}
+	}
 }
 
 type ClipboardReadResult = { ok: true; text: string | null } | { ok: false };
@@ -164,14 +194,31 @@ export async function copyToClipboard(text: string): Promise<void> {
 		}
 	}
 
-	// OSC 52 writes cannot be verified. Only remote sessions rely on them as a
-	// transfer channel; for local sessions an unverified write must not be
-	// reported as a successful copy (#9618).
-	if (remote) {
-		copied = emitOsc52(text) || copied;
+	// WSL without WSLg has no Linux display, so write the Windows clipboard
+	// through interop, preferring OSC 52 in Windows Terminal where it works.
+	let osc52Emitted = false;
+	if (!copied && p === "linux" && isWSL()) {
+		if (process.env.WT_SESSION) osc52Emitted = emitOsc52(text);
+		copied = osc52Emitted || (await copyViaWindowsClipboard(text));
+	}
+
+	// OSC 52 writes cannot be verified. Only remote sessions and display-less
+	// sessions rely on them as a transfer channel; for local sessions with a
+	// display an unverified write must not be reported as a successful copy
+	// (#9618). Without a display the terminal is the only clipboard route
+	// (containers, WSL without WSLg), so emit it there too (#9688).
+	const headless =
+		p === "linux" && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY && !process.env.TERMUX_VERSION;
+	let oversized = false;
+	if (!osc52Emitted && (remote || (!copied && headless))) {
+		if (emitOsc52(text)) copied = true;
+		else oversized = true;
 	}
 
 	if (!copied) {
+		if (oversized) {
+			throw new Error("Clipboard unavailable: text exceeds the OSC 52 size limit");
+		}
 		if (p === "linux") {
 			if (process.env.TERMUX_VERSION) {
 				throw new Error("Clipboard unavailable: install the Termux:API app and `termux-api` package");
