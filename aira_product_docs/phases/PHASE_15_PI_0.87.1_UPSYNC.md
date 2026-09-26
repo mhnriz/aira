@@ -200,3 +200,37 @@ Cumulative totals rows 1-99: DIRECT=15, REIMPLEMENT=17, SKIP=67, TOTAL=99
 - Row 99 dropped the mid-conversation effort machinery that upstream carries in the same generator region, aligned with the row 97 skip.
 - gpt-6-astra parity note: no row in 67-99 modifies that model; the open note from Phase 2 stands.
 - Known deterministic failure unchanged: `model-registry.test.ts` stale `anthropic/claude-opus-4` expectations (a later audited upstream row fixes them outside row 99).
+
+## Slice 4 (rows 100-132, in progress)
+
+Rows 100-116 below; rows 117-132 follow in the next update.
+
+| # | Upstream SHA | Date | Subject | Disposition | Local SHA | Notes |
+|---|---|---|---|---|---|---|
+| 100 | `01528e2094` | 2026-09-16 | Merge remote-tracking branch 'origin/main' into pico | SKIP | `` | [MRG] merge commit; constituents accounted for in earlier slices |
+| 101 | `bdee230f1e` | 2026-09-16 | feat(ai): refresh generated image model catalog | SKIP | `` | [GEN] generated image catalog only; Aira hydrates through scripts/generate-image-models.ts |
+| 102 | `fde6d778f8` | 2026-09-16 | fix(coding-agent): toggle summary entries on click | SKIP | `` | [UI] approved execution-time correction (DIRECT -> SKIP): Pi component-level MouseRegion/TuiMouseEvent hit-testing (base commit 71026970a) was not carried into Aira TUI; low-level mouse parsing exists but no reusable hit-region ab |
+| 103 | `509ee2bd0b` | 2026-09-16 | fix(coding-agent): fail closed on user bash hook errors (#9662) | REIMPLEMENT | `b038b49c1` | [EXT] user_bash hook failures are validated and fail closed; runner/types/interactive-mode ported with Aira runner conflict resolved |
+| 104 | `e4c75a7322` | 2026-09-16 | fix(coding-agent): replace the system prompt when a handler forces it | SKIP | `` | [ARCH] Phase 0B: follow-up of the skipped mid-conversation SystemMessage/TranscriptContext model (44 references) |
+| 105 | `16235fd935` | 2026-09-17 | fix(ai): avoid unsupported Gemini thinking levels | REIMPLEMENT | `8f2272462` | [AI] Gemini thinking levels resolve through each model supported levels; test adapted to Aira plain context (no Pi transcript normalization) |
+| 106 | `1283afd0d0` | 2026-09-17 | fix(ai): preserve thinking replay through renamed Anthropic models | REIMPLEMENT | `9cade3b0d` | [AI] responseModel recorded for renamed/fallback Anthropic models so signed thinking replays; 3-way contamination from the skipped row 97 removed and hunks applied manually; no input_transformations import |
+| 107 | `e5d18382a2` | 2026-09-17 | fix(ai): retry Cloudflare 520 responses | DIRECT | `5c7219ae8` | Cloudflare 520 retry; verbatim port |
+| 108 | `7140838fdd` | 2026-09-17 | chore: approve contributors from issue #9645 | SKIP | `` | [SEC] security-sensitive CI contributor authorization; prior ledger REJECTED class |
+| 109 | `2b04ce27fb` | 2026-09-17 | docs(agent): refine Pico5 plugin state API | SKIP | `` | [ARCH] Pi pico docs; architecture absent from Aira |
+| 110 | `e98f287ee4` | 2026-09-17 | fix(ai): retry Azure peak-load capacity errors | DIRECT | `0d59b2972` | Azure peak-load retry; verbatim port |
+| 111 | `42cd371ba4` | 2026-09-17 | feat(coding-agent): add TUI context footer eval (#9705) | SKIP | `` | [ARCH] Pi pico/durable runtime; absent from Aira |
+| 112 | `729d5cb74d` | 2026-09-17 | docs(agent): finalize Pico5 specification set | SKIP | `` | [ARCH] Pi pico/durable runtime; absent from Aira |
+| 113 | `5a3a03a7f5` | 2026-09-17 | fix(coding-agent): validate eval prompts from transcripts (#9706) | SKIP | `` | [EVAL] Pi documentation evals; Aira evals keep smoke/extensions only |
+| 114 | `0e19ac1161` | 2026-09-17 | Merge remote-tracking branch 'origin/main' into pico | SKIP | `` | [ARCH] Pi pico/durable runtime; absent from Aira |
+| 115 | `7e19507681` | 2026-09-17 | feat(coding-agent): add experimental micro agent | SKIP | `` | [ARCH] Pi pico/durable runtime; absent from Aira |
+| 116 | `2c995acf44` | 2026-09-17 | feat(chord): replace delta tracker with operation log | SKIP | `` | [ARCH] Pi pico/durable runtime; absent from Aira |
+
+Slice 4a totals (rows 100-116): DIRECT=2, REIMPLEMENT=3, SKIP=12, TOTAL=17
+
+Pending: rows 117-132. Proposed corrections (awaiting approval):
+
+- Row 117 `4658534986` REIMPLEMENT -> SKIP: rewrites the Anthropic thinking-drop notice, which exists in the Pi 0.85.1 base but was not carried into Aira's interactive mode; no `Anthropic dropped` code or diagnostics test exists in Aira history.
+- Row 126 `13784598d2` REIMPLEMENT -> SKIP: same absent notice family (`maybeShowAssistantDiagnostics` / thinking_drop notices).
+
+Aira-owned (non-upstream) branch commit on this slice: `008a7a77c` `fix(aira): preserve visible messages across context compaction`. It is not counted in upstream DIRECT/REIMPLEMENT totals.
+
