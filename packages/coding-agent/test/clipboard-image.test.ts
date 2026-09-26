@@ -181,4 +181,37 @@ describe("readClipboardImage", () => {
 		expect(result?.mimeType).toBe("image/png");
 		expect(Array.from(result?.bytes ?? [])).toEqual([8, 9]);
 	});
+
+	test("X11 does not probe image types when TARGETS fails", async () => {
+		// Regression test for #9786.
+		mocks.clipboard.hasImage.mockReturnValue(false);
+		mocks.spawnSync.mockImplementation((command, args) => {
+			if (command === "xclip" && args.includes("TARGETS")) {
+				return spawnError(new Error("xclip TARGETS failed"));
+			}
+			return spawnOk(Buffer.from("hello"));
+		});
+
+		const { readClipboardImage } = await import("../src/utils/clipboard-image.ts");
+		expect(await readClipboardImage({ platform: "linux", env: { DISPLAY: ":0" } })).toBeNull();
+		expect(mocks.spawnSync.mock.calls.map(([name]) => name)).toEqual(["xclip"]);
+		expect(mocks.spawnSync.mock.calls[0]?.[1]).toEqual(["-selection", "clipboard", "-t", "TARGETS", "-o"]);
+	});
+
+	test("X11 does not probe unadvertised image types", async () => {
+		mocks.clipboard.hasImage.mockReturnValue(false);
+		mocks.spawnSync.mockImplementation((command, args) => {
+			if (command === "xclip" && args.includes("TARGETS")) {
+				return spawnOk(Buffer.from("image/png\n"));
+			}
+			if (command === "xclip" && args.includes("image/png")) {
+				return spawnError(new Error("xclip read failed"));
+			}
+			return spawnOk(Buffer.from("hello"));
+		});
+
+		const { readClipboardImage } = await import("../src/utils/clipboard-image.ts");
+		expect(await readClipboardImage({ platform: "linux", env: { DISPLAY: ":0" } })).toBeNull();
+		expect(mocks.spawnSync.mock.calls.map(([, args]) => args[3])).toEqual(["TARGETS", "image/png"]);
+	});
 });
