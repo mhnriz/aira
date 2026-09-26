@@ -485,10 +485,10 @@ describe("AgentSession compaction characterization", () => {
 			expect(order.slice(0, 2)).toEqual(["compaction", "provider"]);
 			expect(observedSettings[0]).toEqual({ enabled: true, reserveTokens: 400, keepRecentTokens: 1750 });
 			expect(harness.eventsOfType("agent_start")).toHaveLength(agentStartsBefore + 1);
-			expect(harness.eventsOfType("compaction_start").at(-1)).toEqual({
-				type: "compaction_start",
-				reason: "threshold",
-			});
+			// Aira can follow the threshold compaction with a silent-overflow
+			// compaction once the resumed request exceeds the faux model window,
+			// so assert the threshold event itself rather than the last event.
+			expect(harness.eventsOfType("compaction_start").some((event) => event.reason === "threshold")).toBe(true);
 			expect(resumedRequest).toContain("compacted history");
 			expect(resumedRequest).toContain("large-tool-result");
 			expect(harness.session.getLastAssistantText()).toBe("finished after compaction");
