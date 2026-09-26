@@ -617,7 +617,7 @@ export interface OpenAICompletionsCompat {
 	supportsThinkingTokenBudget?: boolean;
 	/** Whether the provider supports OpenAI custom tools with Lark/regex grammar formats. When false, grammar-constrained tools fall back to normal function tools. Default: false; the generated model catalog enables it for capable models. */
 	supportsOpenAIGrammarTools?: boolean;
-	/** Whether the provider supports the `strict` field in tool definitions. Default: true. */
+	/** Whether the provider supports the `strict` field in tool definitions. Default: false; generated capable models enable it explicitly. */
 	supportsStrictMode?: boolean;
 	/** Cache control convention for prompt caching. "anthropic" applies Anthropic-style `cache_control` markers to the system prompt, last tool definition, and last user, assistant, or tool-result text content. */
 	cacheControlFormat?: "anthropic";
