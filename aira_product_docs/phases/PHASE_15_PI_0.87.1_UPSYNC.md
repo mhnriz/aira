@@ -563,3 +563,108 @@ Cumulative totals rows 1-231: DIRECT=34, REIMPLEMENT=56, SKIP=141, TOTAL=231
   present), `b3b53f028` (race-free compaction assertion); the compaction and
   host-integration suites are green.
 
+## Slice 8 (rows 232-260, final upstream execution slice)
+
+| # | Upstream SHA | Date | Subject | Disposition | Local SHA | Notes |
+|---|---|---|---|---|---|---|
+| 232 | `601437d5a7` | 2026-09-24 | fix(durable): test execution environment and fix output truncation metadata | REIMPLEMENT | `e39dcb98f` | **corrected from SKIP**: durable test-env/OutputCapture/spill changes are [ARCH], but the `truncatedBy` classification fix applies to Aira's agent and coding-agent truncate copies and was ported with edge-case tests |
+| 233 | `481c7232f1` | 2026-09-24 | docs(durable): align Pico5 with canonical immutable tracker | SKIP | `` | [ARCH] Pi durable/Pico5 design docs |
+| 234 | `cbe7cf00be` | 2026-09-24 | docs(durable): move Pico5 strict-JSON checks to roots and Chord placements | SKIP | `` | [ARCH] Pi durable/Pico5 design docs |
+| 235 | `3f0573877e` | 2026-09-24 | feat(durable): export storage benchmark workloads | SKIP | `` | [ARCH] Pi durable package absent from Aira |
+| 236 | `5674690966` | 2026-09-24 | feat(tui,coding-agent): add color values and theme styling (#8398) | REIMPLEMENT | `7b1de339e` | tui `colors.ts`, OSC 10/11 color queries and TERM `-direct` applied; theme.ts rebuilt on the tui Color model with Aira's inline schema, Aira roles, `aira-zhr` default and `rebindTui` seam kept; `appearance` added to the inline schema and published `theme-schema.json`; classifier-model test adjustments skipped (no classifier models in Aira) |
+| 237 | `d5cba1d97c` | 2026-09-24 | feat(chord): make immutable delta tracker canonical | SKIP | `` | [ARCH] Pi chord package and `agent/src/harness/pico3` absent from Aira |
+| 238 | `d5629e2048` | 2026-09-24 | fix(tui): autocomplete paths after opening wrappers like ( and backticks | REIMPLEMENT | `8f174a3a9` | wrapper-aware token start and stripping ported to Aira's autocomplete and editor; new tests added; Aira CHANGELOG kept |
+| 239 | `6966636dbe` | 2026-09-24 | fix(chord): allow promise probes on settled drafts | SKIP | `` | [ARCH] Pi chord package absent from Aira |
+| 240 | `7cf037c218` | 2026-09-24 | fix(tui): choose Kitty image dimensions by aspect distortion (#9957) | DIRECT | `8c51a91c5` | verbatim application; terminal-image files identical to upstream parent |
+| 241 | `19a0361be8` | 2026-09-24 | feat(durable): add transactional sessions and documents | SKIP | `` | [ARCH] Pi durable package absent from Aira |
+| 242 | `5d4de953ce` | 2026-09-24 | feat(durable): add checkpoints and document migrations | SKIP | `` | [ARCH] Pi durable package absent from Aira |
+| 243 | `b2bd111f2d` | 2026-09-24 | feat(coding-agent): add hidden-message toggle to HTML exports (#10020) | DIRECT | `9396c29c6` | verbatim application; template.js applied with a 5-line offset for Aira's absent `context_edit` tree labels |
+| 244 | `9e70c3d505` | 2026-09-25 | feat(chord): optimize immutable batch application | SKIP | `` | [ARCH] Pi chord package absent from Aira |
+| 245 | `5fd446ca18` | 2026-09-25 | feat(durable): optimize document replay | SKIP | `` | [ARCH] Pi durable package absent from Aira |
+| 246 | `f444ea5eaf` | 2026-09-25 | fix(coding-agent): use per-ref cache folders for pinned temporary git extensions | DIRECT | `a9fb720c6` | verbatim application; new regression test inserted at Aira's anchor (`.aira` path context) |
+| 247 | `92e8d4f02a` | 2026-09-25 | fix(coding-agent): stop RpcClient skipping listeners on unsubscribe | DIRECT | `7a1b3050f` | verbatim application |
+| 248 | `49681e1b71` | 2026-09-25 | fix(coding-agent): hide line range for full-file read calls with null offset/limit | REIMPLEMENT | `b1fe344c9` | null check ported into Aira's unsplit `core/tools/read.ts` renderer; regression test adapted to Aira's padded tool header |
+| 249 | `ca7460d16b` | 2026-09-25 | feat: build with TypeScript 7 and run sources with plain node | SKIP | `` | [DEFERRED] Phase 0B tooling deferral; Aira keeps tsgo/tsx; the row's only standalone runtime fix lives in Aira-absent `experimental/process.ts` |
+| 250 | `b3487650f6` | 2026-09-25 | fix(tui): keep cursor visible when overlays close after stop | DIRECT | `35e5b6f27` | verbatim application |
+| 251 | `e473b5cd8b` | 2026-09-25 | feat(coding-agent): report prompt disposition in RPC responses | REIMPLEMENT | `80bd99278` | prompt/steer/followUp dispositions ported into Aira's AgentSession prompt preflight with the intelligence/browser/runtime-envelope/recovery seams kept; RPC layer and Aira's consolidated `rpc.md` updated; 7150 regression added |
+| 252 | `ddba596187` | 2026-09-25 | fix(coding-agent): honor truecolor in custom themes (fixes #9973) (#10039) | DIRECT | `f75d8b175` | verbatim application; message corrected to the exact upstream single line after an amend transcription error (local SHA changed) |
+| 253 | `c01f687e5b` | 2026-09-25 | fix(ai): apply model samplingParams in direct stream()/complete() calls | DIRECT | `c54ae5de8` | verbatim application |
+| 254 | `8930b9ec0b` | 2026-09-25 | fix(ai): ignore empty Mistral content deltas | REIMPLEMENT | `3e986634f` | production fix applied; test adapted to a plain Context because Aira has no `normalizeContext` |
+| 255 | `507d7649e9` | 2026-09-25 | feat(durable): add conversation document forks | SKIP | `` | [ARCH] Pi durable package absent from Aira |
+| 256 | `ff72faba28` | 2026-09-25 | fix(coding-agent): save new session file at the first user message | DIRECT | `50ba3af9d` | verbatim application; session-manager suite green |
+| 257 | `ab30693d64` | 2026-09-25 | fix(ai): upgrade openai SDK to 7.19.0 (#10044) | REIMPLEMENT | `6b73a8c6a` | openai pinned to 7.19.0 with lockfile and coding-agent shrinkwrap/install-lock regenerated; local `prompt_cache_options` type removed; Cloudflare compat test applied |
+| 258 | `a6ca861024` | 2026-09-25 | fix(ai): price OpenAI Fast mode service tier like priority | REIMPLEMENT | `1ac394a23` | `fast` tier mapped to the priority multiplier; test adapted to a plain Context (`gpt-6-luna` from Aira's provider data) |
+| 259 | `04b5bad666` | 2026-09-25 | feat(durable): add typed IDs and explicit ownership | SKIP | `` | [ARCH] Pi durable package absent from Aira |
+| 260 | `d6af72e185` | 2026-09-25 | docs(durable): clarify scratch examples | SKIP | `` | [ARCH] Pi durable package absent from Aira; final row of the executed range |
+
+Slice 8 totals (rows 232-260): DIRECT=8, REIMPLEMENT=8, SKIP=13, TOTAL=29
+
+Cumulative totals rows 1-260: DIRECT=42, REIMPLEMENT=64, SKIP=154, TOTAL=260
+
+### Slice 8 notes
+
+- Row 232 was the only disposition correction in this slice: reviewed
+  against current Aira, the approved SKIP [ARCH] could not stand because the
+  `truncatedBy` classification fix is a behavioral dependency of code Aira
+  carries in `packages/agent/src/harness/utils/truncate.ts` and
+  `packages/coding-agent/src/core/tools/truncate.ts`. The port keeps the
+  durable test-environment, OutputCapture, adaptive-publishing, spill and
+  Pico default changes skipped; only the shared utility behavior was carried.
+- Row 252 needed a hash/message transcription correction. The original Aira
+  commit carried an extra `fixes #9973` body line; since DIRECT requires the
+  upstream message verbatim, the commit message was amended to the exact
+  single-line upstream subject. The `git commit --amend` first touched HEAD
+  (row 258) by mistake and a scripted `git rebase -i` was used to correct
+  the intended commit. The final tree is byte-identical to the pre-rebase
+  tree (`dd9af8947` tree hash preserved); only message metadata changed and
+  the row-252/253/254/256/257/258 local SHAs were regenerated.
+- Row 236 is the largest REIMPLEMENT of the slice. Aira keeps the inline
+  theme schema in `theme.ts` (the Phase 14 DESIGN_ONLY `theme-json.ts` split
+  remains absent), so the upstream schema change was applied there and to the
+  published `theme-schema.json`. `appearance`, `theme.style()`,
+  `theme.colors`, terminal default colors and the tui Color model are all
+  present; Aira semantic roles, the `aira-zhr` dark default and the
+  theme-controller `rebindTui` seam are preserved. The upstream
+  classifier-model test adjustments were not applicable (row 226 stays
+  skipped).
+- Row 251's REIMPLEMENT preserves the upstream disposition semantics exactly
+  (`handled`/`queued`/`started`, no preflight callback on error) while
+  keeping Aira's prompt-preflight seams: Aira intelligence prompt context,
+  browser prompt context, runtime control envelope and recovery hint all
+  remain inside the de-`try`'d preflight. The 7150 regression verifies that a
+  compaction-rejected prompt leaves the preflight callback uncalled.
+- Row 257 regenerated `package-lock.json`,
+  `packages/coding-agent/npm-shrinkwrap.json` and
+  `packages/coding-agent/install-lock/package-lock.json` through the
+  repository scripts; no manual lockfile edits. The `openai` package has no
+  lifecycle scripts and the shrinkwrap allowlist needed no change.
+- No catalog regeneration was performed in this slice, and no incidental
+  live catalog drift was observed. Rows 253, 254 and 258 are behavioral
+  provider fixes; row 258 reads the existing `gpt-6-luna` entry from Aira's
+  provider data. The `gpt-6-astra` asymmetry (OpenAI via models.dev, absent
+  from the Codex catalog) was not touched and remains a Phase 9 parity item.
+- Row-97 family: no `normalizeContext`, `TranscriptContext` or
+  `SystemMessage` machinery was imported. Row 251's tests use Aira's plain
+  Context-based RPC fixtures and rows 254/258 build plain `Context` objects.
+- Anthropic deferred family: no slice 8 row references the deferred
+  `4e69b0c28`/`0fdec07ba`/`4658534986`/`13784598d2` machinery; rows 253/254/
+  258 are OpenAI/Mistral service-tier and streaming behavior only.
+- Aira-owned invariants verified after the slice: `008a7a77c`
+  (`aira/context-compaction.ts` and its session compaction wiring untouched),
+  `82af7a77e` (dispose/host-integration seams present), `b3b53f028`
+  (race-free compaction assertion); compaction, host-integration, session and
+  extension suites are green.
+- No Aira-owned interstitial repairs were needed outside the row work:
+  every Phase 8 change is attributable to a row above. The `truncate.ts`
+  port is row 232 work with Aira-adapted tests, not a separate repair.
+- End-of-slice validation: `npm run check` PASS. The first `./test.sh` run
+  failed 7 coding-agent subprocess tests because `packages/tui/dist` lagged
+  the row 236 color exports (`backgroundAnsi` missing). After rebuilding the
+  affected `packages/tui` dist (`tsgo -p tsconfig.build.json`), all six
+  affected test files passed and the rerun of `./test.sh` exited 0 with zero
+  failures. The one `footer-data-provider` reftable-watcher timeout in the
+  first run passed on rerun (timing-sensitive under full-suite load, not
+  reproducible). The known root `build:offline` kerberos external-import
+  condition remains unrelated; no Phase 8 row changed dependency or
+  external-validation behavior apart from the pinned openai SDK upgrade,
+  which passed all lock, shrinkwrap and install-lock gates.
