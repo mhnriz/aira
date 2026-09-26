@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-09-26
+
 ### Added
 
 - **Aira**: Structured verifier failure categories (`timeout`, `cancelled`,
@@ -15,6 +17,19 @@
   the child runner and verifier. The verifier verdict parser now reuses the
   child runner's balanced-object JSON extraction, and verifier unknown-tool
   results match the runner's `Error:` convention.
+- **Aira**: Repository indexing now batches changed files into one relationship
+  rebuild and skips files whose fingerprint is unchanged, so refreshing a large
+  repository no longer re-reads or re-indexes every file.
+- **Aira**: The Workbench rail no longer invalidates on every streaming update.
+  A projection tick now only repaints when its panels, focus, or geometry
+  actually change, so long responses stop re-rendering the rail.
+- The transcript renderer reuses the rendered state for messages that did not
+  change and only re-renders the trailing region. In a 1,000-message session
+  with a 12,000-character streamed response, a render/update pass dropped from
+  about 15.9ms to about 4.6ms with byte-identical terminal output.
+- Model-catalog generation tracks models.dev renames (Z.AI `glm-5.3`, Kimi
+  `kimi-code-plan-global`, OpenRouter `mistral-large`), so those provider
+  catalogs are no longer silently dropped when the catalog is regenerated.
 
 ### Fixed
 
@@ -28,6 +43,21 @@
   classified as timeout when the aborted operation later surfaces an
   AbortError, cancellation stays distinguishable, and completed runs clear
   their deadline timers/listeners.
+- **Aira**: Compaction now preserves active context. Oversized tool results no
+  longer crowd the recent-byte window out of the retention budget, and the
+  newest successful read of a file the model is actively editing is protected
+  from being compacted away.
+- **Aira**: Diagnostics freshness is version-aware. A finding published for an
+  older version of a file is no longer reported as fresh once the synced
+  version has moved on.
+- **Aira**: Deleting a file now invalidates its diagnostics. A confirmed
+  deletion drops the path's findings, tombstones its language-server document
+  lifecycle so a late publication cannot resurrect them, and unblocks any
+  diagnostics query waiting on that file. A file deleted and recreated within
+  one tool call is instead re-evaluated against its new mtime and marked stale.
+- **Aira**: LSP `file://` URIs are decoded into filesystem paths, so findings
+  map to the correct file with percent-encoded characters and Windows drive
+  letters.
 
 ## [0.1.8] - 2026-09-17
 
