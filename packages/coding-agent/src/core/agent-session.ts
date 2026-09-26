@@ -119,6 +119,7 @@ import { sleep } from "../utils/sleep.ts";
 import { normalizeToolResultImages } from "../utils/tool-result-images.ts";
 import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "./auth-guidance.ts";
 import { type BashResult, executeBashWithOperations } from "./bash-executor.ts";
+import type { CacheWarmer, CacheWarmingStatus } from "./cache-warmer.ts";
 import {
 	type CompactionPreparation,
 	type CompactionResult,
@@ -172,7 +173,7 @@ import { exportSessionToJsonl } from "./session-export.ts";
 import type { BranchSummaryEntry, CompactionEntry, SessionEntry, SessionManager } from "./session-manager.ts";
 import { getLatestCompactionEntry } from "./session-manager.ts";
 import { SessionTelemetry, type SessionTelemetryOptions, type SessionTelemetrySnapshot } from "./session-telemetry.ts";
-import type { SettingsManager } from "./settings-manager.ts";
+import type { CacheWarmingMode, SettingsManager } from "./settings-manager.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
 import { type BuildSystemPromptOptions, buildSystemPrompt } from "./system-prompt.ts";
@@ -278,6 +279,8 @@ export interface AgentSessionConfig {
 	customTools?: ToolDefinition[];
 	/** Canonical model/auth runtime used by coding-agent internals. */
 	modelRuntime: ModelRuntime;
+	/** Keeps the prompt cache entry of the last session request warm. */
+	cacheWarmer?: Pick<CacheWarmer, "cancel" | "status" | "onAgentSettled" | "onModeChanged" | "onWarmed">;
 	/** Initial active built-in tool names. Default: [read, bash, edit, write] */
 	initialActiveToolNames?: string[];
 	/** Optional allowlist of tool names. When provided, only these tool names are exposed. */
@@ -494,6 +497,7 @@ export class AgentSession {
 	private _extensionErrorUnsubscriber?: () => void;
 
 	private _modelRuntime: ModelRuntime;
+	private _cacheWarmer?: Pick<CacheWarmer, "cancel" | "status" | "onAgentSettled" | "onModeChanged" | "onWarmed">;
 
 	// Tool registry for extension getTools/setTools
 	private _toolRegistry: Map<string, AgentTool> = new Map();
@@ -525,6 +529,10 @@ export class AgentSession {
 		this._customTools = config.customTools ?? [];
 		this._cwd = config.cwd;
 		this._modelRuntime = config.modelRuntime;
+		this._cacheWarmer = config.cacheWarmer;
+		if (this._cacheWarmer) {
+			this._cacheWarmer.onWarmed = (entry) => this._emit({ type: "entry_appended", entry });
+		}
 		this._extensionRunnerRef = config.extensionRunnerRef;
 		this._initialActiveToolNames = config.initialActiveToolNames;
 		this._allowedToolNames = config.allowedToolNames ? new Set(config.allowedToolNames) : undefined;
@@ -1127,6 +1135,7 @@ export class AgentSession {
 	}
 
 	private async _emitAgentSettled(): Promise<void> {
+		this._cacheWarmer?.onAgentSettled();
 		this._isAgentRunActive = false;
 		try {
 			await this._extensionRunner.emit({ type: "agent_settled" });
@@ -1404,35 +1413,14 @@ export class AgentSession {
 		this._airaModelToolSurfaceUnsubscribers.length = 0;
 		this.telemetry.dispose();
 		this._eventListeners = [];
-		// Aira execution seam: clean up THIS session's managed processes
-		// (graceful → forced). Session-instance-scoped: a stale session being
-		// disposed can never kill processes a newer session over the same file
-		// launched, because each session owns its own manager (ADR-024).
-		void this._airaExecution?.dispose();
-		void this._airaBrowser?.dispose();
-		// Aira verification seam: abort any in-flight verifier run and release
-		// the per-session listener subscription.
-		void this._airaVerification?.dispose();
-		// Aira orchestration seam: abort every child run (model streams, timers)
-		// and release listeners. No orphan children after session teardown.
-		void this._airaOrchestration?.dispose();
-		// Aira goal seam: persist an active goal as paused (interrupted) and
-		// release listeners. The root session's teardown aborts owned runs.
-		void this._airaGoal?.dispose();
-		// Aira interaction seam: resolve any pending question truthfully (no
-		// orphaned dialogs; a pending tool call resolves as unavailable).
-		this._airaInteraction?.dispose();
-		// Aira permission seam: release listeners (rules are session-scoped;
-		// persistent rules stay in the Aira-owned store).
-		this._airaPermissions?.dispose();
-		// Aira task seam: release listeners and clear the session task graph.
-		this._airaTasks?.dispose();
-		// Aira intelligence seam: shut down providers (language servers, timers).
-		void this._airaIntelligence?.dispose();
 		this._airaWorkspaceOwnership?.dispose();
 		// Aira lifecycle seam: release canonical state, ownership-checked so a
 		// stale owner (replaced by a newer session over the same file) is a no-op.
 		onAiraSessionDisposed(this.sessionId, this._airaSessionState);
+		if (this._cacheWarmer) {
+			this._cacheWarmer.onWarmed = undefined;
+			this._cacheWarmer.cancel();
+		}
 		cleanupSessionResources(this.sessionId);
 	}
 
@@ -1443,6 +1431,17 @@ export class AgentSession {
 	/** Full agent state */
 	get state(): AgentState {
 		return this.agent.state;
+	}
+
+	/** Current cache-warming state and the policy inputs that produced it. */
+	get cacheWarmingStatus(): CacheWarmingStatus | undefined {
+		return this._cacheWarmer?.status;
+	}
+
+	/** Persist the cache-warming mode and immediately reconcile active warming. */
+	setCacheWarmingMode(mode: CacheWarmingMode): void {
+		this.settingsManager.setCacheWarmingMode(mode);
+		this._cacheWarmer?.onModeChanged();
 	}
 
 	/** Current model (may be undefined if not yet selected) */
@@ -4299,7 +4298,9 @@ export class AgentSession {
 		const usageTotals = createUsageTotals();
 
 		for (const entry of this.sessionManager.getEntries()) {
-			if ((entry.type === "branch_summary" || entry.type === "compaction") && entry.usage) {
+			if (entry.type === "usage") {
+				addUsageToTotals(usageTotals, entry.usage);
+			} else if ((entry.type === "branch_summary" || entry.type === "compaction") && entry.usage) {
 				addUsageToTotals(usageTotals, entry.usage);
 			}
 			if (entry.type !== "message") continue;

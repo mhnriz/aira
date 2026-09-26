@@ -163,7 +163,9 @@ export class FooterComponent implements Component {
 		const usageTotals = createUsageTotals();
 		let latestCacheHitRate: number | undefined;
 		for (const entry of this.session.sessionManager.getEntries()) {
-			if (entry.type === "message" && entry.message.role === "assistant") {
+			if (entry.type === "usage") {
+				addUsageToTotals(usageTotals, entry.usage);
+			} else if (entry.type === "message" && entry.message.role === "assistant") {
 				addUsageToTotals(usageTotals, entry.message.usage);
 				const latestPromptTokens =
 					entry.message.usage.input + entry.message.usage.cacheRead + entry.message.usage.cacheWrite;
