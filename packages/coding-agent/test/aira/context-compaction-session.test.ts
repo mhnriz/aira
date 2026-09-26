@@ -380,10 +380,10 @@ describe("progressive context compaction — long-running active turn (Step 4.1)
 		expect(snapshot.context.compaction.firstTriggerRequestIndex).toBe(0);
 	});
 
-	it("compacts a single-user-message history through the installed seam alone", async () => {
+	it("bounds a single-user-message history through the installed seam alone", async () => {
 		const harness = await makeHarness();
-		// Exactly one user message, no follow-up prompt: this is the regression
-		// shape. The installed transform must reduce it on its own.
+		// Exactly one user message, no follow-up prompt: the installed
+		// transform must bound the turn's tool output on its own.
 		harness.session.agent.state.messages = seedSingleTurnHistory(20);
 		const transform = harness.session.agent.transformContext;
 		const canonical = harness.session.messages;
@@ -394,13 +394,25 @@ describe("progressive context compaction — long-running active turn (Step 4.1)
 		const active = projected.filter((m) => m.role === "user");
 		expect(active).toHaveLength(1);
 		expect(JSON.stringify(active[0])).toBe(JSON.stringify(canonical[0]));
-		// Old same-turn assistant work was reduced.
-		const compactedAssistant = projected.find(
-			(m) =>
-				m.role === "assistant" &&
-				m.content.some((b) => b.type === "text" && b.text === AIRA_CONTEXT_COMPACTION_MARKERS.assistantProse),
+
+		// Assistant output inside the active turn is never compacted: a
+		// truncated view of its own response lets the model continue from the
+		// placeholder and persist a degraded report.
+		// `session.messages` rebuilds message objects, so compare content.
+		const canonicalAssistants = canonical.filter((m) => m.role === "assistant");
+		const projectedAssistants = projected.filter((m) => m.role === "assistant");
+		expect(projectedAssistants).toHaveLength(canonicalAssistants.length);
+		for (let i = 0; i < canonicalAssistants.length; i++) {
+			expect(JSON.stringify(projectedAssistants[i])).toBe(JSON.stringify(canonicalAssistants[i]));
+		}
+
+		// Older tool output is still compacted, so the projection shrinks.
+		const compactedToolResult = projected.find(
+			(m) => m.role === "toolResult" && m.content.some((b) => b.type === "text" && b.text.startsWith("[earlier ")),
 		);
-		expect(compactedAssistant).toBeDefined();
+		expect(compactedToolResult).toBeDefined();
+		expect(JSON.stringify(projected).length).toBeLessThan(before.length);
+
 		// Canonical history is untouched.
 		expect(JSON.stringify(canonical)).toBe(before);
 	});

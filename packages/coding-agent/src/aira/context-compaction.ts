@@ -32,10 +32,14 @@
  * Structure, not deletion:
  *
  * - recent history stays verbatim (byte budget, not message count);
- * - the latest user message always stays verbatim (the active request);
- * - the execution history produced after that request is NOT permanently
- *   protected: its newest bytes stay verbatim, older bytes become eligible,
- *   so a single long-running user turn can still compact;
+ * - the latest user message and every assistant message produced inside the
+ *   active turn stay verbatim (the active request and its response);
+ * - the most recently completed assistant response (the last assistant
+ *   message before the active user message) is also kept verbatim, so a new
+ *   user message cannot immediately destroy the response the user is reading;
+ * - older execution history stays verbatim only while it fits the recent
+ *   byte budget; the rest becomes eligible for compaction, including tool
+ *   results produced inside the active turn;
  * - a tool call/result pair straddling the recent-byte boundary is pulled into
  *   the verbatim window instead of being split;
  * - old assistant prose is reduced to a bounded head plus a truthful marker;
@@ -529,8 +533,7 @@ export function compactAiraModelContext(
 		return { messages: messages.slice(), report: baseReport };
 	}
 
-	// The active request is the newest user message. It is protected on its
-	// own; the execution history produced after it is not.
+	// The active request is the newest user message.
 	let activeUserIndex = -1;
 	for (let i = messages.length - 1; i >= 0; i--) {
 		if (messages[i].role === "user") {
@@ -538,6 +541,28 @@ export function compactAiraModelContext(
 			break;
 		}
 	}
+
+	// Assistant output produced inside the active turn is never compacted:
+	// compacting the response the model is still writing (or has just written
+	// in this turn) makes the model continue from a truncated view and can
+	// persist that truncated output as canonical history.
+	const inActiveTurn = (index: number): boolean => activeUserIndex >= 0 && index > activeUserIndex;
+	const isActiveTurnAssistant = (index: number): boolean =>
+		inActiveTurn(index) && messages[index].role === "assistant";
+
+	// The response immediately before the active request stays verbatim too.
+	// A new user message must not immediately make the answer the user just
+	// read eligible for compaction.
+	let latestCompletedAssistantIndex = -1;
+	for (let i = activeUserIndex - 1; i >= 0; i--) {
+		if (messages[i].role === "assistant") {
+			latestCompletedAssistantIndex = i;
+			break;
+		}
+	}
+
+	const isHardProtected = (index: number): boolean =>
+		index === activeUserIndex || isActiveTurnAssistant(index) || index === latestCompletedAssistantIndex;
 
 	// The recent window is a byte budget measured from the newest message
 	// backwards. The active user request never consumes budget: it is kept
@@ -549,7 +574,7 @@ export function compactAiraModelContext(
 	const recentMessageCap =
 		settings.maxRecentMessageBytes > 0 ? settings.maxRecentMessageBytes : Number.POSITIVE_INFINITY;
 	for (let i = messages.length - 1; i >= 0; i--) {
-		if (i === activeUserIndex) continue;
+		if (isHardProtected(i)) continue;
 		const bytes = projectionBytes(messages[i]);
 		if (bytes > recentMessageCap) oversizedResultCapApplied++;
 		// Charge at most `recentMessageCap` so one oversized message cannot
@@ -572,8 +597,9 @@ export function compactAiraModelContext(
 
 	let protectedByRecentWindow = 0;
 	let protectedByRecentWindowBytes = 0;
-	for (let i = verbatimStart; i < messages.length; i++) {
+	for (let i = 0; i < messages.length; i++) {
 		if (i === activeUserIndex) continue;
+		if (i < verbatimStart && !isHardProtected(i)) continue;
 		protectedByRecentWindow++;
 		protectedByRecentWindowBytes += projectionBytes(messages[i]);
 	}
@@ -590,10 +616,11 @@ export function compactAiraModelContext(
 	const compactedToolResultsByTool: Record<string, number> = {};
 
 	for (let i = 0; i < verbatimStart; i++) {
-		// The active user request is never compacted, whatever the byte
-		// budget says. Role dispatch already fails open for user content;
-		// this is the explicit invariant.
-		if (i === activeUserIndex) continue;
+		// The active request, the assistant output of the active turn and the
+		// most recently completed response are never compacted, whatever the
+		// byte budget says. Role dispatch already fails open for user
+		// content; this is the explicit invariant.
+		if (isHardProtected(i)) continue;
 		const source = messages[i];
 		const before = projectionBytes(source);
 		const outcome = compactMessage(source, settings);

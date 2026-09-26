@@ -312,7 +312,6 @@ describe("compactAiraModelContext — long-running active turn", () => {
 		// 1. compaction triggers without a second user message
 		expect(result.report.triggered).toBe(true);
 		expect(result.report.savedBytes).toBeGreaterThan(0);
-		expect(result.report.messagesCompacted).toBeGreaterThan(0);
 		expect(result.report.toolResultsCompacted).toBeGreaterThan(0);
 
 		// 2. the active request is byte-identical
@@ -321,15 +320,28 @@ describe("compactAiraModelContext — long-running active turn", () => {
 		if (request.role !== "user") throw new Error("unreachable");
 		expect(request.content).toBe("substantial active engineering request");
 
-		// 3. old same-turn work is compacted
-		expect(result.report.firstCompactedIndex).toBe(1);
-		const firstAssistant = result.messages[1];
-		if (firstAssistant.role !== "assistant") throw new Error("unreachable");
-		expect(firstAssistant.content.find((b) => b.type === "text")).toEqual(
-			fauxText(AIRA_CONTEXT_COMPACTION_MARKERS.assistantProse),
-		);
+		// 3. every assistant message produced in the active turn stays verbatim:
+		// the model must never continue from a compacted view of its own turn
+		for (let i = 1; i < messages.length; i++) {
+			if (messages[i].role !== "assistant") continue;
+			expect(result.messages[i]).toBe(messages[i]);
+		}
 
-		// 4. the newest execution bytes stay verbatim by reference
+		// 4. old same-turn tool output is still compacted
+		let compactedToolResults = 0;
+		for (let i = 0; i < messages.length; i++) {
+			if (messages[i].role !== "toolResult") continue;
+			if (result.messages[i] !== messages[i]) compactedToolResults++;
+		}
+		expect(compactedToolResults).toBeGreaterThan(0);
+		expect(
+			result.messages.some(
+				(m) =>
+					m.role === "toolResult" && m.content.some((b) => b.type === "text" && b.text.startsWith("[earlier ")),
+			),
+		).toBe(true);
+
+		// 5. the newest execution bytes stay verbatim by reference
 		const newestAssistant = messages[messages.length - 2];
 		const newestResult = messages[messages.length - 1];
 		expect(result.messages).toContain(newestAssistant);
@@ -452,23 +464,40 @@ describe("compactAiraModelContext — long-running active turn", () => {
 		}
 	});
 
-	it("keeps thinking blocks on the existing assistant-compaction rules", () => {
-		const messages: AgentMessage[] = [user("one long autonomous request", 1)];
+	it("compacts old-turn thinking but keeps active-turn reasoning verbatim", () => {
+		const messages: AgentMessage[] = [];
+		// Old turn with reasoning that is eligible for compaction.
+		messages.push(user("older request", 1));
 		messages.push(
-			fauxAssistantMessage([fauxThinking(longProse("old thinking")), fauxText("step")], { timestamp: 2 }),
+			fauxAssistantMessage([fauxThinking(longProse("old thinking")), fauxText("old step")], { timestamp: 2 }),
 		);
-		for (let i = 0; i < 20; i++) {
-			messages.push(assistantWithToolCall(longProse(`execution step ${i}`), `same-turn-${i}`, i + 3));
-			messages.push(toolResult(`same-turn-${i}`, `file body ${i} `.repeat(500), { timestamp: i + 3 }));
+		for (let i = 0; i < 12; i++) {
+			messages.push(assistantWithToolCall(longProse(`old execution step ${i}`), `old-turn-${i}`, i + 3));
+			messages.push(toolResult(`old-turn-${i}`, `file body ${i} `.repeat(500), { timestamp: i + 3 }));
 		}
+		// Active turn with reasoning that must stay verbatim.
+		messages.push(user("active request", 100));
+		messages.push(
+			fauxAssistantMessage([fauxThinking(longProse("active thinking")), fauxText("active step")], {
+				timestamp: 101,
+			}),
+		);
+		messages.push(assistantWithToolCall(longProse("active execution"), "active-turn-0", 102));
+		messages.push(toolResult("active-turn-0", "active body ".repeat(500), { timestamp: 102 }));
 
 		const result = compactAiraModelContext(messages, settings({ recentBytes: 8_000 }));
+
+		// Old-turn reasoning is compacted on the existing rules.
 		const oldAssistant = result.messages[1];
 		if (oldAssistant.role !== "assistant") throw new Error("unreachable");
 		const thinking = oldAssistant.content.find((b) => b.type === "thinking");
 		expect(thinking?.type === "thinking" ? thinking.thinking : undefined).toBe(
 			AIRA_CONTEXT_COMPACTION_MARKERS.assistantThinking,
 		);
+
+		// Active-turn reasoning stays verbatim by reference.
+		const activeAssistantIndex = messages.length - 3;
+		expect(result.messages[activeAssistantIndex]).toBe(messages[activeAssistantIndex]);
 	});
 
 	it("stays deterministic, idempotent, and non-mutating on a single turn", () => {
@@ -510,6 +539,91 @@ describe("compactAiraModelContext — long-running active turn", () => {
 	});
 });
 
+describe("compactAiraModelContext — visible response protection", () => {
+	/** Old history over the trigger, then a completed report, then a new user request. */
+	function reportThenFollowUpHistory(): { messages: AgentMessage[]; reportIndex: number; activeIndex: number } {
+		const messages: AgentMessage[] = [user("first request", 1)];
+		messages.push(
+			fauxAssistantMessage([fauxThinking(longProse("first reasoning")), fauxText("first step")], { timestamp: 2 }),
+		);
+		for (let i = 0; i < 12; i++) {
+			messages.push(assistantWithToolCall(longProse(`first turn step ${i}`), `first-turn-${i}`, i + 3));
+			messages.push(toolResult(`first-turn-${i}`, `first body ${i} `.repeat(500), { timestamp: i + 3 }));
+		}
+		messages.push(
+			fauxAssistantMessage(
+				[
+					fauxThinking(longProse("report reasoning")),
+					fauxText(
+						`BEGIN_REPORT ${longProse("report body", 20_000)} MIDDLE_REPORT ${longProse("report tail", 20_000)} END_REPORT`,
+					),
+				],
+				{ timestamp: 100 },
+			),
+		);
+		const reportIndex = messages.length - 1;
+		const activeIndex = messages.length;
+		messages.push(user("follow-up request about the report", 101));
+		messages.push(fauxAssistantMessage([fauxText("working")], { timestamp: 102 }));
+		return { messages, reportIndex, activeIndex };
+	}
+
+	it("keeps the latest completed assistant report verbatim when a new user message arrives", () => {
+		const { messages, reportIndex } = reportThenFollowUpHistory();
+		const before = measureAiraConversationBytes(messages);
+		const result = compactAiraModelContext(messages);
+
+		// The report is untouched by reference and still contains its full text.
+		expect(result.messages[reportIndex]).toBe(messages[reportIndex]);
+		const text = assistantTextOf(result.messages[reportIndex]);
+		expect(text).toContain("BEGIN_REPORT");
+		expect(text).toContain("MIDDLE_REPORT");
+		expect(text).toContain("END_REPORT");
+		expect(text).not.toContain(AIRA_CONTEXT_COMPACTION_MARKERS.assistantConclusion);
+
+		// Older history still compacts and the projection shrinks.
+		expect(result.report.triggered).toBe(true);
+		expect(result.report.savedBytes).toBeGreaterThan(0);
+		expect(result.messages.some((m) => m.role === "assistant" && hasCompactedAssistantBlock(m))).toBe(true);
+		expect(measureAiraConversationBytes(result.messages)).toBeLessThan(before);
+	});
+
+	it("never compacts assistant output produced inside the active turn", () => {
+		const { messages, activeIndex } = reportThenFollowUpHistory();
+		// A large streamed response plus tool work inside the active turn.
+		messages.push(
+			fauxAssistantMessage([fauxText(`ACTIVE_BEGIN ${longProse("active body", 40_000)} ACTIVE_END`)], {
+				timestamp: 103,
+			}),
+		);
+		const growthIndex = messages.length - 1;
+		messages.push(assistantWithToolCall(longProse("active tool step"), "active-tool", 104));
+		messages.push(toolResult("active-tool", "active result ".repeat(500), { timestamp: 104 }));
+
+		const result = compactAiraModelContext(messages);
+
+		// Every assistant message after the active user request stays verbatim.
+		for (let i = activeIndex + 1; i < messages.length; i++) {
+			if (messages[i].role !== "assistant") continue;
+			expect(result.messages[i]).toBe(messages[i]);
+		}
+		const activeText = assistantTextOf(result.messages[growthIndex]);
+		expect(activeText).toContain("ACTIVE_BEGIN");
+		expect(activeText).toContain("ACTIVE_END");
+		expect(activeText).not.toContain(AIRA_CONTEXT_COMPACTION_MARKERS.assistantConclusion);
+
+		// The turn still shrinks by compacting older history and tool output.
+		expect(result.report.triggered).toBe(true);
+		expect(result.report.savedBytes).toBeGreaterThan(0);
+		let compactedToolResults = 0;
+		for (let i = 0; i < messages.length; i++) {
+			if (messages[i].role !== "toolResult") continue;
+			if (result.messages[i] !== messages[i]) compactedToolResults++;
+		}
+		expect(compactedToolResults).toBeGreaterThan(0);
+	});
+});
+
 function pathToolCall(toolName: string, path: string, id: string, prose = "working", timestamp = 1): AgentMessage {
 	return fauxAssistantMessage([fauxText(prose), fauxToolCall(toolName, { path }, { id })], { timestamp });
 }
@@ -534,6 +648,25 @@ function textOf(message: AgentMessage | undefined): string {
 	if (message?.role !== "toolResult") return "";
 	const block = message.content[0];
 	return block?.type === "text" ? block.text : "";
+}
+
+function assistantTextOf(message: AgentMessage | undefined): string {
+	if (message?.role !== "assistant") return "";
+	return message.content
+		.filter((block) => block.type === "text")
+		.map((block) => (block.type === "text" ? block.text : ""))
+		.join("\n");
+}
+
+function hasCompactedAssistantBlock(message: AgentMessage): boolean {
+	if (message.role !== "assistant") return false;
+	return message.content.some(
+		(block) =>
+			block.type === "text" &&
+			(block.text === AIRA_CONTEXT_COMPACTION_MARKERS.assistantProse ||
+				block.text === AIRA_CONTEXT_COMPACTION_MARKERS.assistantThinking ||
+				block.text.endsWith(AIRA_CONTEXT_COMPACTION_MARKERS.assistantConclusion)),
+	);
 }
 
 const PROTECTION_SETTINGS = { triggerBytes: 100, recentBytes: 800, maxRecentMessageBytes: 2_000 };
